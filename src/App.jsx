@@ -132,8 +132,9 @@ const LiminalHour = () => {
         const radius = 10 * pulse
 
         const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius * 2)
-        gradient.addColorStop(0, color.replace(')', `, ${pulse})`).replace('rgb', 'rgba'))
-        gradient.addColorStop(1, color.replace(')', `, 0)`).replace('rgb', 'rgba'))
+        const baseColor = color.replace(/rgba?\((\d+),\s*(\d+),\s*(\d+).*/, 'rgb($1, $2, $3)')
+        gradient.addColorStop(0, baseColor.replace(')', `, ${pulse})`).replace('rgb', 'rgba'))
+        gradient.addColorStop(1, baseColor.replace(')', ', 0)').replace('rgb', 'rgba'))
 
         ctx.beginPath()
         ctx.arc(x, y, radius, 0, Math.PI * 2)
