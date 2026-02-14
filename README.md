@@ -29,6 +29,10 @@ limnifai/
 
 **https://limnifAI.com**
 
+## CI/CD
+
+Automatic deploys via GitHub Actions → Firebase Hosting on every push to main.
+
 ## Ka-tet
 
 - **Patron:** Irvins
