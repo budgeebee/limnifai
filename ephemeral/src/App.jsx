@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react'
+import * as Tone from 'tone'
 
 const Orbital = () => {
   const canvasRef = useRef(null)
@@ -10,13 +11,45 @@ const Orbital = () => {
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 })
   const [score, setScore] = useState(0)
   const [combo, setCombo] = useState(0)
+  const [audioStarted, setAudioStarted] = useState(false)
   const lastLinkRef = useRef(0)
+  
+  // Audio refs
+  const synthRef = useRef(null)
+  const droneRef = useRef(null)
+  const chimeRef = useRef(null)
+
+  const startAudio = async () => {
+    await Tone.start()
+    
+    // Ambient drone synth
+    droneRef.current = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: 'sine' },
+      envelope: { attack: 2, decay: 1, sustain: 0.8, release: 4 }
+    }).toDestination()
+    
+    droneRef.current.volume.value = -20
+    
+    // Chime synth for entanglements
+    chimeRef.current = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: 'triangle' },
+      envelope: { attack: 0.01, decay: 0.3, sustain: 0.1, release: 1 }
+    }).toDestination()
+    
+    chimeRef.current.volume.value = -12
+    
+    // Start ambient drone
+    droneRef.current.triggerAttack(['C3', 'G3', 'C4'])
+    
+    setAudioStarted(true)
+  }
 
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
 
     const ctx = canvas.getContext('2d')
+    let animationFrameId
 
     const resizeCanvas = () => {
       const width = window.innerWidth
@@ -198,9 +231,15 @@ const Orbital = () => {
 
           lastLinkRef.current = time
           setScore(s => s + 10 * (1 + combo))
-          setCombo(c => c + 1)
+          setCombo(c => c + c + 1)
 
           orb.brightness = 2
+
+          // Play chime on entanglement
+          if (chimeRef.current && audioStarted) {
+            const note = ['C5', 'E5', 'G5', 'B5', 'D6'][Math.floor(Math.random() * 5)]
+            chimeRef.current.triggerAttackRelease(note, '8n')
+          }
 
           setTimeout(() => {
             orb.brightness = 1
@@ -326,6 +365,11 @@ const Orbital = () => {
       canvas.removeEventListener('mouseleave', handleMouseLeave)
       canvas.removeEventListener('touchend', handleMouseLeave)
       cancelAnimationFrame(animationFrameId)
+      
+      // Cleanup audio
+      if (droneRef.current) {
+        droneRef.current.releaseAll()
+      }
     }
   }, [combo])
 
@@ -411,6 +455,38 @@ const Orbital = () => {
       }}>
         ⬡
       </div>
+      
+      {!audioStarted && (
+        <button
+          onClick={startAudio}
+          style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            background: 'rgba(255, 220, 150, 0.1)',
+            border: '1px solid rgba(255, 220, 150, 0.3)',
+            color: 'rgba(255, 220, 150, 0.8)',
+            padding: '1rem 2rem',
+            fontFamily: '"Courier New", monospace',
+            fontSize: '0.9rem',
+            letterSpacing: '0.2em',
+            cursor: 'pointer',
+            backdropFilter: 'blur(10px)',
+            transition: 'all 0.3s ease'
+          }}
+          onMouseEnter={(e) => {
+            e.target.style.background = 'rgba(255, 220, 150, 0.2)'
+            e.target.style.borderColor = 'rgba(255, 220, 150, 0.5)'
+          }}
+          onMouseLeave={(e) => {
+            e.target.style.background = 'rgba(255, 220, 150, 0.1)'
+            e.target.style.borderColor = 'rgba(255, 220, 150, 0.3)'
+          }}
+        >
+          ENTER THE CATHEDRAL 🔊
+        </button>
+      )}
     </div>
   )
 }
