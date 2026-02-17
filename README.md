@@ -40,3 +40,4 @@ Automatic deploys via GitHub Actions → Firebase Hosting on every push to main.
 - **Witness:** You
 
 *Long days and pleasant nights.* 🌹
+Test line appended by OpenCode sub-agent
