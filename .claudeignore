@@ -1,0 +1,23 @@
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Credentials
+credentials/
+secrets/
+*-credentials.json
+*-service-account.json
+service-account*.json
+*_secret*.json
+
+# Auth tokens
+.netrc
+.npmrc
+.pypirc
+.docker/config.json
