@@ -40,9 +40,7 @@ function FilingDrawer({ label, isOpen, onClick, sounds }) {
       </div>
       {isOpen && (
         <div className="drawer-contents">
-          {sounds.map(sound => (
-            <SoundCard key={sound.id} sound={sound} />
-          ))}
+          <div className="drawer-hint">→ VIEW CASE FILES IN PANEL BELOW</div>
         </div>
       )}
     </div>
@@ -55,7 +53,10 @@ function SoundCard({ sound, onClick, isSelected }) {
   return (
     <div 
       className={`sound-card ${isSelected ? 'selected' : ''} ${sound.status === 'corrupted' ? 'corrupted' : ''}`} 
-      onClick={onClick}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (onClick) onClick();
+      }}
     >
       <div className="card-header">
         <span className="case-number">{sound.id}</span>
