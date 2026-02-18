@@ -1,628 +1,350 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { sounds, getSoundsByDrawer, searchSounds } from './sounds';
-import * as Tone from 'tone';
-import './App.css';
+import { useEffect, useRef } from 'react'
+import './App.css'
 
-// Header Component with fluorescent light effect
-function Header() {
-  const [date] = useState(() => {
-    const d = new Date();
-    return d.toLocaleDateString('en-US', { 
-      year: 'numeric', 
-      month: '2-digit', 
-      day: '2-digit' 
-    }).replace(/\//g, '.');
-  });
-
-  return (
-    <header className="bureau-header">
-      <div className="metal-sign">
-        <h1>THE BUREAU OF LOST AND FOUND SOUNDS</h1>
-        <span className="established">EST. 1971</span>
-      </div>
-      <div className="header-right">
-        <span className="date-stamp">{date}</span>
-        <div className="fluorescent-indicator">
-          <span className="indicator-light"></span>
-          <span className="indicator-text">SYSTEM ONLINE</span>
-        </div>
-      </div>
-    </header>
-  );
-}
-
-// Filing Cabinet Drawer Component
-function FilingDrawer({ label, isOpen, onClick, sounds }) {
-  return (
-    <div className={`filing-drawer ${isOpen ? 'open' : ''}`} onClick={onClick}>
-      <div className="drawer-handle">
-        <span className="drawer-label">{label}</span>
-      </div>
-      {isOpen && (
-        <div className="drawer-contents">
-          <div className="drawer-hint">→ VIEW CASE FILES IN PANEL BELOW</div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Sound Card Component
-function SoundCard({ sound, onClick, isSelected }) {
-  const statusClass = `status-${sound.status}`;
-  return (
-    <div 
-      className={`sound-card ${isSelected ? 'selected' : ''} ${sound.status === 'corrupted' ? 'corrupted' : ''}`} 
-      onClick={(e) => {
-        e.stopPropagation();
-        if (onClick) onClick();
-      }}
-    >
-      <div className="card-header">
-        <span className="case-number">{sound.id}</span>
-        <span className={`status-badge ${statusClass}`}>
-          {sound.status.replace('_', ' ').toUpperCase()}
-        </span>
-      </div>
-      <p className="description">{sound.description}</p>
-      <div className="card-footer">
-        <span className="year">{sound.year}</span>
-        <span className="category">{sound.category}</span>
-      </div>
-      {sound.status === 'corrupted' && <div className="glitch-overlay"></div>}
-    </div>
-  );
-}
-
-// CRT Monitor Component
-function CRTMonitor({ selectedSound, onPlay, isPlaying, audioEnabled }) {
-  const [bootPhase, setBootPhase] = useState(0);
-  const [showCursor, setShowCursor] = useState(true);
-
-  useEffect(() => {
-    if (!audioEnabled) return;
-    const phases = [1, 2, 3, 4];
-    let current = 0;
-    const interval = setInterval(() => {
-      if (current < phases.length) {
-        setBootPhase(phases[current]);
-        current++;
-      } else {
-        clearInterval(interval);
-      }
-    }, 400);
-    return () => clearInterval(interval);
-  }, [audioEnabled]);
-
-  useEffect(() => {
-    const cursorInterval = setInterval(() => {
-      setShowCursor(prev => !prev);
-    }, 530);
-    return () => clearInterval(cursorInterval);
-  }, []);
-
-  if (!audioEnabled) {
-    return (
-      <div className="crt-monitor">
-        <div className="crt-screen off">
-          <div className="click-to-begin">
-            <span className="blink">CLICK TO BEGIN</span>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="crt-monitor">
-      <div className="crt-frame">
-        <div className="crt-screen">
-          <div className="scanlines"></div>
-          <div className="crt-glow"></div>
-          <div className="screen-content">
-            {bootPhase < 4 ? (
-              <BootSequence phase={bootPhase} />
-            ) : selectedSound ? (
-              <SoundDetail 
-                sound={selectedSound} 
-                onPlay={onPlay} 
-                isPlaying={isPlaying}
-                showCursor={showCursor}
-              />
-            ) : (
-              <MainMenu showCursor={showCursor} />
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Boot Sequence Component
-function BootSequence({ phase }) {
-  const messages = [
-    "INITIALIZING...",
-    "LOADING SOUND DATABASE...",
-    "CALIBRATING AUDIO INTERFACE...",
-    "WELCOME TO THE BUREAU"
-  ];
-  return (
-    <div className="boot-sequence">
-      {messages.slice(0, phase).map((msg, i) => (
-        <div key={i} className="boot-line">{msg}</div>
-      ))}
-      <div className="boot-cursor">_</div>
-    </div>
-  );
-}
-
-// Main Menu
-function MainMenu({ showCursor }) {
-  return (
-    <div className="main-menu">
-      <pre className="ascii-logo">
-{`  ___  ___ ___ ___ _____ 
- | _ )/ _ \_ _/ __|_   _|
- | _ \ (_) | |\__ \ | |  
- |___/\___/___|___/ |_|  `}
-      </pre>
-      <p className="menu-text">SELECT A FILING DRAWER TO BEGIN</p>
-      <p className="menu-hint">{showCursor ? '_' : ' '}</p>
-    </div>
-  );
-}
-
-// Sound Detail View
-function SoundDetail({ sound, onPlay, isPlaying, showCursor }) {
-  const isCorrupted = sound.status === 'corrupted';
-  
-  return (
-    <div className={`sound-detail ${isCorrupted ? 'corrupted-view' : ''}`}>
-      {isCorrupted && <div className="static-overlay"></div>}
-      <div className="detail-header">
-        <span className="detail-label">CASE FILE:</span>
-        <span className="detail-id">{sound.id}</span>
-      </div>
-      <div className="detail-content">
-        <p className="detail-description">{sound.description}</p>
-        <div className="detail-meta">
-          <span>YEAR: {sound.year}</span>
-          <span>CAT: {sound.category.toUpperCase()}</span>
-          <span>STATUS: {sound.status.toUpperCase()}</span>
-        </div>
-      </div>
-      {!isCorrupted ? (
-        <button 
-          className={`play-button ${isPlaying ? 'playing' : ''}`} 
-          onClick={onPlay}
-          disabled={isPlaying}
-        >
-          {isPlaying ? 'PLAYING...' : '▶ PLAY AUDIO'}
-        </button>
-      ) : (
-        <div className="corrupted-message">
-          FILE CORRUPTED - RECOVERY IMPOSSIBLE
-          <span className="corrupted-sub">DATA UNRECOVERABLE</span>
-        </div>
-      )}
-      <div className="detail-cursor">{showCursor ? '_' : ' '}</div>
-    </div>
-  );
-}
-
-// Search Component
-function SearchPanel({ onSearch, results, query, setQuery }) {
-  const [isSearching, setIsSearching] = useState(false);
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (!query.trim()) return;
-    setIsSearching(true);
-    setTimeout(() => {
-      onSearch(query);
-      setIsSearching(false);
-    }, 1500);
-  };
-
-  return (
-    <div className="search-panel">
-      <form onSubmit={handleSubmit}>
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="SEARCH ARCHIVE..."
-          className="search-input"
-          maxLength={50}
-        />
-        <button type="submit" className="search-button" disabled={isSearching}>
-          {isSearching ? 'SEARCHING...' : 'SEARCH'}
-        </button>
-      </form>
-      {results && (
-        <div className="search-results">
-          {results.length === 0 ? (
-            <p className="no-results">NO RESULTS FOUND</p>
-          ) : (
-            <>
-              <p className="suggested-header">NO EXACT MATCHES - SUGGESTED RESULTS:</p>
-              {results.map(sound => (
-                <div key={sound.id} className="search-result-item">
-                  <span>{sound.id}</span>
-                  <span>{sound.description.substring(0, 40)}...</span>
-                </div>
-              ))}
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Checkout Form Component
-function CheckoutForm({ selectedSound, onSubmit }) {
-  const [formData, setFormData] = useState({
-    name: '',
-    department: '',
-    extension: '',
-    reason: '',
-    accept: false
-  });
-  const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState(null);
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (!formData.name || !formData.department || !formData.extension || !formData.reason || !formData.accept) {
-      return;
-    }
-    setSubmitting(true);
-    setTimeout(() => {
-      const approved = Math.random() > 0.5;
-      setResult(approved 
-        ? "REQUEST APPROVED - PICKUP IN 6-8 WEEKS"
-        : "REQUEST DENIED - INSUFFICIENT CLEARANCE"
-      );
-      setSubmitting(false);
-    }, 3000);
-  };
-
-  if (result) {
-    return (
-      <div className="checkout-result">
-        <p>{result}</p>
-        <button onClick={() => { setResult(null); onSubmit(); }}>CLOSE</button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="checkout-form">
-      <h3>REQUISITION FORM #{selectedSound?.id || 'N/A'}</h3>
-      <form onSubmit={handleSubmit}>
-        <div className="form-field">
-          <label>NAME:</label>
-          <input 
-            type="text" 
-            value={formData.name}
-            onChange={(e) => setFormData({...formData, name: e.target.value})}
-          />
-        </div>
-        <div className="form-field">
-          <label>DEPARTMENT:</label>
-          <input 
-            type="text" 
-            value={formData.department}
-            onChange={(e) => setFormData({...formData, department: e.target.value})}
-          />
-        </div>
-        <div className="form-field">
-          <label>EXTENSION:</label>
-          <input 
-            type="text" 
-            value={formData.extension}
-            onChange={(e) => setFormData({...formData, extension: e.target.value})}
-            maxLength={4}
-          />
-        </div>
-        <div className="form-field">
-          <label>REASON FOR REQUEST:</label>
-          <textarea 
-            value={formData.reason}
-            onChange={(e) => setFormData({...formData, reason: e.target.value})}
-            rows={3}
-          />
-        </div>
-        <div className="form-checkbox">
-          <input 
-            type="checkbox" 
-            id="accept"
-            checked={formData.accept}
-            onChange={(e) => setFormData({...formData, accept: e.target.checked})}
-          />
-          <label htmlFor="accept">I ACCEPT RESPONSIBILITY FOR THIS AUDIO</label>
-        </div>
-        <button type="submit" disabled={submitting}>
-          {submitting ? 'PROCESSING...' : 'PROCESS REQUEST'}
-        </button>
-      </form>
-    </div>
-  );
-}
-
-// Record Button Component
-function RecordButton({ onRecordComplete }) {
-  const [isRecording, setIsRecording] = useState(false);
-  const [duration, setDuration] = useState(0);
-  const [lost, setLost] = useState(false);
-  const mediaRecorder = useRef(null);
-  const timerRef = useRef(null);
-
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorder.current = new MediaRecorder(stream);
-      mediaRecorder.current.start();
-      setIsRecording(true);
-      setDuration(0);
-      
-      timerRef.current = setInterval(() => {
-        setDuration(d => {
-          if (d >= 5) {
-            stopRecording();
-            return d;
-          }
-          return d + 1;
-        });
-      }, 1000);
-    } catch (err) {
-      alert('MICROPHONE ACCESS DENIED');
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
-      mediaRecorder.current.stop();
-    }
-    clearInterval(timerRef.current);
-    setIsRecording(false);
-    setLost(true);
-    setTimeout(() => {
-      setLost(false);
-      setDuration(0);
-      onRecordComplete();
-    }, 3000);
-  };
-
-  return (
-    <div className="record-section">
-      <button 
-        className={`record-button ${isRecording ? 'recording' : ''}`}
-        onClick={isRecording ? stopRecording : startRecording}
-      >
-        {isRecording ? `REC ${duration}s` : '● REC'}
-      </button>
-      {lost && (
-        <div className="lost-message">
-          ERROR - FILE HAS ALREADY BEEN LOST
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Coffee Stain Overlay
-function CoffeeStain() {
-  return (
-    <div className="coffee-stain" style={{
-      position: 'absolute',
-      top: `${20 + Math.random() * 40}%`,
-      left: `${10 + Math.random() * 60}%`,
-      width: '150px',
-      height: '150px',
-      borderRadius: '50%',
-      background: 'radial-gradient(ellipse at center, rgba(139, 90, 43, 0.12) 0%, rgba(139, 90, 43, 0.08) 40%, rgba(139, 90, 43, 0.03) 70%, transparent 100%)',
-      pointerEvents: 'none',
-      zIndex: 10,
-      transform: `rotate(${Math.random() * 360}deg)`
-    }}></div>
-  );
-}
-
-// Main App Component
 function App() {
-  const [activeDrawer, setActiveDrawer] = useState(null);
-  const [selectedSound, setSelectedSound] = useState(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [audioEnabled, setAudioEnabled] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState(null);
-  const [showCheckout, setShowCheckout] = useState(false);
-  const [recentAcquisitions, setRecentAcquisitions] = useState([]);
-  const synthRef = useRef(null);
-  const noiseRef = useRef(null);
+  const canvasRef = useRef(null)
+  const mouseRef = useRef({ x: 0, y: 0, active: false })
+  const animationRef = useRef(null)
 
-  // Initialize Tone.js
   useEffect(() => {
-    synthRef.current = new Tone.PolySynth(Tone.Synth).toDestination();
-    noiseRef.current = new Tone.Noise("pink").toDestination();
-    noiseRef.current.volume.value = -10;
-  }, []);
+    const canvas = canvasRef.current
+    if (!canvas) return
 
-  const enableAudio = async () => {
-    await Tone.start();
-    setAudioEnabled(true);
-  };
-
-  const playSound = useCallback(async () => {
-    if (!selectedSound || isPlaying) return;
-    setIsPlaying(true);
-
-    const noise = noiseRef.current;
-    const synth = synthRef.current;
+    const ctx = canvas.getContext('2d')
     
-    // Fade in noise
-    noise.start();
-    noise.volume.rampTo(-5, 3);
-    
-    // At ~3 seconds, add almost-recognizable tones
-    setTimeout(() => {
-      // Play some filtered noise patterns that "almost" sound like something
-      const filter = new Tone.Filter(800, "bandpass").toDestination();
-      const filteredNoise = new Tone.Noise("brown").connect(filter);
-      filteredNoise.volume.value = -15;
-      filteredNoise.start();
-      
-      // Add some random notes that almost resolve
-      const notes = ["C4", "E4", "G4", "B4"];
-      notes.forEach((note, i) => {
-        setTimeout(() => {
-          synth.triggerAttackRelease(note, "8n", undefined, 0.1);
-        }, i * 200);
-      });
-      
-      setTimeout(() => {
-        filteredNoise.stop();
-      }, 2000);
-    }, 3000);
+    // Set canvas size
+    const resizeCanvas = () => {
+      canvas.width = window.innerWidth
+      canvas.height = window.innerHeight
+    }
+    resizeCanvas()
+    window.addEventListener('resize', resizeCanvas)
 
-    // Fade back to noise then stop
-    setTimeout(() => {
-      noise.volume.rampTo(-20, 2);
-    }, 5000);
+    // Mouse tracking
+    const handleMouseMove = (e) => {
+      mouseRef.current = { x: e.clientX, y: e.clientY, active: true }
+    }
+    const handleMouseLeave = () => {
+      mouseRef.current.active = false
+    }
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseleave', handleMouseLeave)
 
-    setTimeout(() => {
-      noise.stop();
-      setIsPlaying(false);
-    }, 8000);
-  }, [selectedSound, isPlaying]);
+    // Neural pattern node
+    class NeuralNode {
+      constructor(x, y) {
+        this.x = x
+        this.y = y
+        this.baseX = x
+        this.baseY = y
+        this.size = Math.random() * 2 + 0.5
+        this.pulsePhase = Math.random() * Math.PI * 2
+        this.pulseSpeed = 0.02 + Math.random() * 0.03
+        this.opacity = 0
+        this.targetOpacity = Math.random() * 0.6 + 0.1
+        this.flickerSpeed = 0.01 + Math.random() * 0.02
+        this.connections = []
+      }
 
-  const handleDrawerClick = (drawer) => {
-    setActiveDrawer(activeDrawer === drawer ? null : drawer);
-    setSelectedSound(null);
-    setSearchResults(null);
-  };
+      update(time, mouse) {
+        // Pulsing effect
+        this.pulsePhase += this.pulseSpeed
+        const pulse = Math.sin(this.pulsePhase) * 0.5 + 0.5
+        
+        // Flickering opacity
+        const flicker = Math.sin(time * this.flickerSpeed + this.pulsePhase) * 0.3 + 0.7
+        this.opacity = this.targetOpacity * pulse * flicker
 
-  const handleSoundSelect = (sound) => {
-    setSelectedSound(sound);
-  };
+        // Mouse disturbance
+        if (mouse.active) {
+          const dx = mouse.x - this.x
+          const dy = mouse.y - this.y
+          const dist = Math.sqrt(dx * dx + dy * dy)
+          const maxDist = 150
+          
+          if (dist < maxDist) {
+            const force = (1 - dist / maxDist) * 30
+            const angle = Math.atan2(dy, dx)
+            this.x -= Math.cos(angle) * force * 0.1
+            this.y -= Math.sin(angle) * force * 0.1
+          }
+        }
 
-  const handleSearch = (query) => {
-    const results = searchSounds(query);
-    setSearchResults(results);
-  };
+        // Return to base position
+        this.x += (this.baseX - this.x) * 0.05
+        this.y += (this.baseY - this.y) * 0.05
+      }
 
-  const handleRecordComplete = () => {
-    const newId = `BLS-${new Date().getFullYear()}-${String(recentAcquisitions.length + 51).padStart(3, '0')}`;
-    const newAcquisition = {
-      id: newId,
-      description: `Unidentified Audio, ${new Date().toLocaleString()}`,
-      year: new Date().getFullYear(),
-      status: "corrupted",
-      category: "Recent"
-    };
-    setRecentAcquisitions([...recentAcquisitions, newAcquisition]);
-  };
+      draw(ctx) {
+        ctx.beginPath()
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2)
+        ctx.fillStyle = `rgba(180, 200, 255, ${this.opacity})`
+        ctx.fill()
+      }
+    }
 
-  const drawers = ['A-D', 'E-H', 'I-P', 'Q-Z'];
+    // Particle representing a thought forming
+    class ThoughtParticle {
+      constructor() {
+        this.reset()
+      }
+
+      reset() {
+        this.x = Math.random() * canvas.width
+        this.y = Math.random() * canvas.height
+        this.vx = (Math.random() - 0.5) * 0.5
+        this.vy = (Math.random() - 0.5) * 0.5
+        this.size = Math.random() * 1.5 + 0.5
+        this.opacity = 0
+        this.life = 0
+        this.maxLife = 200 + Math.random() * 300
+        this.birthRate = 0.01 + Math.random() * 0.02
+        this.color = this.generateColor()
+      }
+
+      generateColor() {
+        const colors = [
+          { r: 150, g: 180, b: 255 }, // Soft blue
+          { r: 180, g: 150, b: 255 }, // Soft purple
+          { r: 200, g: 200, b: 255 }, // Soft white-blue
+          { r: 100, g: 200, b: 220 }, // Cyan
+        ]
+        return colors[Math.floor(Math.random() * colors.length)]
+      }
+
+      update(time, mouse) {
+        this.life++
+
+        // Birth and death cycle
+        if (this.life < 50) {
+          this.opacity += this.birthRate
+        } else if (this.life > this.maxLife - 50) {
+          this.opacity -= this.birthRate
+        }
+        this.opacity = Math.max(0, Math.min(0.8, this.opacity))
+
+        // Movement
+        this.x += this.vx
+        this.y += this.vy
+
+        // Gentle drift toward center void
+        const centerX = canvas.width / 2
+        const centerY = canvas.height / 2
+        const dx = centerX - this.x
+        const dy = centerY - this.y
+        const dist = Math.sqrt(dx * dx + dy * dy)
+        
+        if (dist > 100) {
+          this.vx += dx * 0.00005
+          this.vy += dy * 0.00005
+        }
+
+        // Mouse disturbance
+        if (mouse.active) {
+          const mdx = mouse.x - this.x
+          const mdy = mouse.y - this.y
+          const mdist = Math.sqrt(mdx * mdx + mdy * mdy)
+          if (mdist < 100) {
+            const force = (1 - mdist / 100) * 2
+            const angle = Math.atan2(mdy, mdx)
+            this.vx -= Math.cos(angle) * force
+            this.vy -= Math.sin(angle) * force
+          }
+        }
+
+        // Damping
+        this.vx *= 0.99
+        this.vy *= 0.99
+
+        // Reset if dead
+        if (this.life > this.maxLife && this.opacity <= 0) {
+          this.reset()
+        }
+      }
+
+      draw(ctx) {
+        if (this.opacity <= 0) return
+        ctx.beginPath()
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2)
+        ctx.fillStyle = `rgba(${this.color.r}, ${this.color.g}, ${this.color.b}, ${this.opacity})`
+        ctx.fill()
+      }
+    }
+
+    // Ripple from the void
+    class Ripple {
+      constructor() {
+        this.reset()
+      }
+
+      reset() {
+        this.x = canvas.width / 2
+        this.y = canvas.height / 2
+        this.radius = 0
+        this.maxRadius = Math.max(canvas.width, canvas.height) * 0.8
+        this.opacity = 0
+        this.active = false
+        this.speed = 3 + Math.random() * 2
+      }
+
+      trigger() {
+        this.active = true
+        this.radius = 10
+        this.opacity = 0.6
+      }
+
+      update() {
+        if (!this.active) return
+
+        this.radius += this.speed
+        this.opacity -= 0.003
+
+        if (this.opacity <= 0 || this.radius > this.maxRadius) {
+          this.active = false
+          this.reset()
+        }
+      }
+
+      draw(ctx) {
+        if (!this.active) return
+        ctx.beginPath()
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2)
+        ctx.strokeStyle = `rgba(150, 180, 255, ${this.opacity})`
+        ctx.lineWidth = 2
+        ctx.stroke()
+      }
+    }
+
+    // Create entities
+    const neuralNodes = []
+    const nodeCount = 80
+    for (let i = 0; i < nodeCount; i++) {
+      const angle = Math.random() * Math.PI * 2
+      const radius = 100 + Math.random() * (Math.min(canvas.width, canvas.height) / 2 - 100)
+      const x = canvas.width / 2 + Math.cos(angle) * radius
+      const y = canvas.height / 2 + Math.sin(angle) * radius
+      neuralNodes.push(new NeuralNode(x, y))
+    }
+
+    const thoughtParticles = []
+    const particleCount = 60
+    for (let i = 0; i < particleCount; i++) {
+      thoughtParticles.push(new ThoughtParticle())
+    }
+
+    const ripples = [new Ripple(), new Ripple(), new Ripple()]
+    let lastRippleTime = 0
+    let rippleInterval = 3000 + Math.random() * 4000
+
+    // Animation loop
+    let time = 0
+    const animate = () => {
+      time++
+
+      // Clear with dark void background
+      const gradient = ctx.createRadialGradient(
+        canvas.width / 2, canvas.height / 2, 0,
+        canvas.width / 2, canvas.height / 2, Math.max(canvas.width, canvas.height)
+      )
+      gradient.addColorStop(0, '#0a0a12')
+      gradient.addColorStop(0.5, '#050508')
+      gradient.addColorStop(1, '#020203')
+      ctx.fillStyle = gradient
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+      // Draw central void glow
+      const voidGradient = ctx.createRadialGradient(
+        canvas.width / 2, canvas.height / 2, 0,
+        canvas.width / 2, canvas.height / 2, 150
+      )
+      voidGradient.addColorStop(0, 'rgba(100, 120, 200, 0.15)')
+      voidGradient.addColorStop(0.5, 'rgba(80, 100, 180, 0.05)')
+      voidGradient.addColorStop(1, 'rgba(0, 0, 0, 0)')
+      ctx.fillStyle = voidGradient
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+      // Update and draw neural connections
+      ctx.strokeStyle = 'rgba(150, 180, 255, 0.08)'
+      ctx.lineWidth = 0.5
+      for (let i = 0; i < neuralNodes.length; i++) {
+        const node = neuralNodes[i]
+        node.update(time, mouseRef.current)
+        
+        // Draw connections to nearby nodes
+        for (let j = i + 1; j < neuralNodes.length; j++) {
+          const other = neuralNodes[j]
+          const dx = node.x - other.x
+          const dy = node.y - other.y
+          const dist = Math.sqrt(dx * dx + dy * dy)
+          
+          if (dist < 120) {
+            const opacity = (1 - dist / 120) * 0.08 * node.opacity
+            ctx.strokeStyle = `rgba(150, 180, 255, ${opacity})`
+            ctx.beginPath()
+            ctx.moveTo(node.x, node.y)
+            ctx.lineTo(other.x, other.y)
+            ctx.stroke()
+          }
+        }
+      }
+
+      // Draw neural nodes
+      neuralNodes.forEach(node => node.draw(ctx))
+
+      // Update and draw thought particles
+      thoughtParticles.forEach(particle => {
+        particle.update(time, mouseRef.current)
+        particle.draw(ctx)
+      })
+
+      // Trigger ripples occasionally
+      const now = Date.now()
+      if (now - lastRippleTime > rippleInterval) {
+        const inactiveRipple = ripples.find(r => !r.active)
+        if (inactiveRipple) {
+          inactiveRipple.trigger()
+          lastRippleTime = now
+          rippleInterval = 2000 + Math.random() * 5000
+        }
+      }
+
+      // Update and draw ripples
+      ripples.forEach(ripple => {
+        ripple.update()
+        ripple.draw(ctx)
+      })
+
+      // Draw void center
+      ctx.beginPath()
+      ctx.arc(canvas.width / 2, canvas.height / 2, 20, 0, Math.PI * 2)
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.8)'
+      ctx.fill()
+      ctx.strokeStyle = 'rgba(150, 180, 255, 0.3)'
+      ctx.lineWidth = 1
+      ctx.stroke()
+
+      animationRef.current = requestAnimationFrame(animate)
+    }
+
+    animate()
+
+    return () => {
+      window.removeEventListener('resize', resizeCanvas)
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseleave', handleMouseLeave)
+      cancelAnimationFrame(animationRef.current)
+    }
+  }, [])
 
   return (
-    <div className="bureau-container" onClick={!audioEnabled ? enableAudio : undefined}>
-      <CoffeeStain />
-      <Header />
-      
-      <main className="bureau-main">
-        <aside className="filing-cabinet">
-          <h2>ARCHIVE CABINET</h2>
-          {drawers.map(drawer => (
-            <div key={drawer} className="drawer-wrapper">
-              <FilingDrawer
-                label={drawer}
-                isOpen={activeDrawer === drawer}
-                onClick={() => handleDrawerClick(drawer)}
-                sounds={getSoundsByDrawer(drawer)}
-              />
-              {activeDrawer === drawer && (
-                <div className="sounds-list">
-                  {getSoundsByDrawer(drawer).map(sound => (
-                    <SoundCard
-                      key={sound.id}
-                      sound={sound}
-                      onClick={() => handleSoundSelect(sound)}
-                      isSelected={selectedSound?.id === sound.id}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-          
-          {recentAcquisitions.length > 0 && (
-            <div className="recent-acquisitions">
-              <h3>RECENT ACQUISITIONS</h3>
-              {recentAcquisitions.map(sound => (
-                <SoundCard
-                  key={sound.id}
-                  sound={sound}
-                  onClick={() => handleSoundSelect(sound)}
-                  isSelected={selectedSound?.id === sound.id}
-                />
-              ))}
-            </div>
-          )}
-        </aside>
-
-        <section className="main-workspace">
-          <CRTMonitor 
-            selectedSound={selectedSound}
-            onPlay={playSound}
-            isPlaying={isPlaying}
-            audioEnabled={audioEnabled}
-          />
-          
-          {audioEnabled && (
-            <>
-              <SearchPanel 
-                onSearch={handleSearch}
-                results={searchResults}
-                query={searchQuery}
-                setQuery={setSearchQuery}
-              />
-              
-              {selectedSound && selectedSound.status === 'available' && (
-                <div className="checkout-section">
-                  <button 
-                    className="checkout-toggle"
-                    onClick={() => setShowCheckout(!showCheckout)}
-                  >
-                    {showCheckout ? 'CANCEL REQUEST' : 'REQUEST CHECKOUT'}
-                  </button>
-                  {showCheckout && (
-                    <CheckoutForm 
-                      selectedSound={selectedSound}
-                      onSubmit={() => setShowCheckout(false)}
-                    />
-                  )}
-                </div>
-              )}
-              
-              <RecordButton onRecordComplete={handleRecordComplete} />
-            </>
-          )}
-        </section>
-      </main>
-
-      <footer className="bureau-footer">
-        <div className="fluorescent-bar"></div>
-        <div className="clerk-status">
-          <span>CLERK ON DUTY: M. HOLLOWAY</span>
-          <span>EXT. 4472</span>
-        </div>
-      </footer>
+    <div className="app">
+      <canvas ref={canvasRef} className="canvas" />
+      <div className="overlay">
+        <h1 className="title">The Space Between Thoughts</h1>
+        <p className="subtitle">Move your cursor to disturb the patterns</p>
+      </div>
     </div>
-  );
+  )
 }
 
-export default App;
+export default App
