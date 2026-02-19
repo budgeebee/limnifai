@@ -1,430 +1,66 @@
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-:root {
-  --bg: #0a0a0f;
-  --bg-card: #12121a;
-  --bg-hover: #1a1a25;
-  --border: #2a2a3a;
-  --text: #e2e8f0;
-  --text-muted: #64748b;
-  --accent: #4a9eff;
-  --success: #22c55e;
-  --warning: #f59e0b;
-  --danger: #ef4444;
-}
-
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  line-height: 1.5;
-}
-
-.app {
-  display: flex;
-  min-height: 100vh;
-}
-
-/* Sidebar */
-.sidebar {
-  width: 220px;
-  background: var(--bg-card);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  position: fixed;
+.continuum {
+  width: 100vw;
   height: 100vh;
+  position: relative;
+  background: linear-gradient(135deg, #0a0a0f 0%, #1a0a2e 50%, #0f0a1a 100%);
+  overflow: hidden;
 }
 
-.logo {
-  padding: 1.5rem;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  border-bottom: 1px solid var(--border);
+.continuum-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
 }
 
-.logo span {
-  font-size: 1.5rem;
+.continuum-overlay {
+  position: absolute;
+  bottom: 60px;
+  left: 40px;
+  pointer-events: none;
+  z-index: 10;
 }
 
-.logo h1 {
-  font-size: 1rem;
-  font-weight: 600;
-  background: linear-gradient(90deg, var(--accent), #a78bfa);
+.continuum-title {
+  font-size: 3rem;
+  font-weight: 200;
+  letter-spacing: 0.3em;
+  color: transparent;
+  background: linear-gradient(90deg, #00ffc8, #b464ff, #ffc850);
+  background-size: 200% 100%;
   -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-.nav-links {
-  flex: 1;
-  padding: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.nav-links button {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem 1rem;
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: all 0.15s;
-}
-
-.nav-links button:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
-.nav-links button.active {
-  background: var(--accent);
-  color: white;
-}
-
-.nav-footer {
-  padding: 1rem;
-  border-top: 1px solid var(--border);
-  text-align: center;
-}
-
-.time {
-  font-family: monospace;
-  color: var(--text-muted);
-  font-size: 0.85rem;
-}
-
-/* Main Content */
-.content {
-  flex: 1;
-  margin-left: 220px;
-  padding: 2rem;
-}
-
-/* Dashboard */
-.dashboard h2 {
-  font-size: 1.5rem;
-  margin-bottom: 1.5rem;
-  font-weight: 600;
-}
-
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 1rem;
-  margin-bottom: 2rem;
-}
-
-.stat-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.25rem;
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-
-.stat-icon {
-  font-size: 1.75rem;
-  width: 48px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-hover);
-  border-radius: 10px;
-}
-
-.stat-number {
-  display: block;
-  font-size: 1.5rem;
-  font-weight: 700;
-}
-
-.stat-label {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-}
-
-.dashboard-sections {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 1.5rem;
-}
-
-.section-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.25rem;
-}
-
-.section-card h3 {
-  font-size: 0.9rem;
-  color: var(--text-muted);
-  margin-bottom: 1rem;
-  font-weight: 500;
-}
-
-.task-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.task-item {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem;
-  background: var(--bg-hover);
-  border-radius: 8px;
-  font-size: 0.9rem;
-}
-
-.task-item.done {
-  opacity: 0.5;
-}
-
-.task-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.task-title {
-  flex: 1;
-}
-
-.task-assignee {
-  font-size: 1rem;
-}
-
-.quick-add {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.quick-add input {
-  flex: 1;
-  padding: 0.75rem;
-  background: var(--bg-hover);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text);
-  font-size: 0.9rem;
-}
-
-.quick-add input::placeholder {
-  color: var(--text-muted);
-}
-
-.quick-add button {
-  padding: 0.75rem 1.25rem;
-  background: var(--accent);
-  border: none;
-  border-radius: 8px;
-  color: white;
-  cursor: pointer;
-  font-weight: 500;
-}
-
-/* Tasks Board */
-.tasks-board h2 {
-  font-size: 1.5rem;
-  margin-bottom: 1rem;
-}
-
-.board-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.5rem;
-  gap: 1rem;
-}
-
-.add-task-row {
-  display: flex;
-  gap: 0.5rem;
-  flex: 1;
-  max-width: 400px;
-}
-
-.add-task-row input {
-  flex: 1;
-  padding: 0.75rem 1rem;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text);
-}
-
-.add-task-row button {
-  padding: 0.75rem 1.25rem;
-  background: var(--accent);
-  border: none;
-  border-radius: 8px;
-  color: white;
-  cursor: pointer;
-  font-weight: 500;
-}
-
-.kanban {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1rem;
-}
-
-.kanban-column {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1rem;
-  min-height: 400px;
-}
-
-.column-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1rem;
-  padding-bottom: 0.75rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.column-header h3 {
-  font-size: 0.85rem;
+  background-clip: text;
+  animation: gradientShift 8s ease infinite;
+  margin: 0;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-muted);
 }
 
-.count {
-  background: var(--bg-hover);
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
-
-.column-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.task-card {
-  background: var(--bg-hover);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1rem;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.5rem;
-}
-
-.priority-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-.delete-btn {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 1.25rem;
-  line-height: 1;
-}
-
-.delete-btn:hover {
-  color: var(--danger);
-}
-
-.card-title {
+.continuum-subtitle {
   font-size: 0.9rem;
-  margin-bottom: 0.75rem;
-  line-height: 1.4;
+  color: rgba(200, 200, 220, 0.6);
+  letter-spacing: 0.2em;
+  margin-top: 0.5rem;
+  font-weight: 300;
 }
 
-.card-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.assignee {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-}
-
-.card-footer select {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 0.35rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  cursor: pointer;
-}
-
-/* Responsive */
-@media (max-width: 1024px) {
-  .stats-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-  
-  .kanban {
-    grid-template-columns: 1fr;
-  }
-  
-  .dashboard-sections {
-    grid-template-columns: 1fr;
-  }
+@keyframes gradientShift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
 }
 
 @media (max-width: 768px) {
-  .sidebar {
-    width: 100%;
-    position: relative;
-    height: auto;
+  .continuum-overlay {
+    bottom: 40px;
+    left: 20px;
   }
   
-  .content {
-    margin-left: 0;
+  .continuum-title {
+    font-size: 2rem;
+    letter-spacing: 0.2em;
   }
   
-  .app {
-    flex-direction: column;
-  }
-  
-  .stats-grid {
-    grid-template-columns: 1fr;
-  }
-  
-  .board-header {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  
-  .add-task-row {
-    max-width: none;
+  .continuum-subtitle {
+    font-size: 0.75rem;
   }
 }
