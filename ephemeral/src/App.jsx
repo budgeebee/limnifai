@@ -1,348 +1,432 @@
-import { useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import './App.css'
 
+// Subagent team definitions
+const TEAM_MEMBERS = [
+  {
+    id: 'budgee',
+    name: 'Budgee',
+    role: 'Orchestrator',
+    avatar: '🐦',
+    color: '#4a9eff',
+    status: 'online',
+    currentTask: 'Managing team operations',
+    skills: ['Coordination', 'Context Management', 'Multi-channel'],
+    description: 'Main assistant and team lead'
+  },
+  {
+    id: 'codex-dev',
+    name: 'Codex',
+    role: 'Senior Developer',
+    avatar: '👨‍💻',
+    color: '#10b981',
+    status: 'idle',
+    currentTask: 'Waiting for assignments',
+    skills: ['React', 'Node.js', 'Python', 'Full-stack'],
+    description: 'Full-stack coding specialist'
+  },
+  {
+    id: 'claude-arch',
+    name: 'Claude Architect',
+    role: 'System Architect',
+    avatar: '🏗️',
+    color: '#8b5cf6',
+    status: 'idle',
+    currentTask: 'Available for design reviews',
+    skills: ['Architecture', 'System Design', 'Code Review'],
+    description: 'Designs scalable systems'
+  },
+  {
+    id: 'researcher',
+    name: 'Scout',
+    role: 'Research Agent',
+    avatar: '🔍',
+    color: '#f59e0b',
+    status: 'idle',
+    currentTask: 'Ready to investigate',
+    skills: ['Web Search', 'Data Analysis', 'Trend Tracking'],
+    description: 'Gathers intel and research'
+  },
+  {
+    id: 'writer',
+    name: 'Scribe',
+    role: 'Technical Writer',
+    avatar: '✍️',
+    color: '#ec4899',
+    status: 'idle',
+    currentTask: 'Standing by',
+    skills: ['Documentation', 'Blog Posts', 'Summaries'],
+    description: 'Creates clear documentation'
+  },
+  {
+    id: 'designer',
+    name: 'Pixel',
+    role: 'UI/UX Designer',
+    avatar: '🎨',
+    color: '#06b6d4',
+    status: 'idle',
+    currentTask: 'Awaiting design tasks',
+    skills: ['UI Design', 'CSS', 'Visual Concepts'],
+    description: 'Crafts beautiful interfaces'
+  },
+  {
+    id: 'tester',
+    name: 'QA Bot',
+    role: 'Quality Assurance',
+    avatar: '🧪',
+    color: '#ef4444',
+    status: 'idle',
+    currentTask: 'Ready to test',
+    skills: ['Testing', 'Bug Reports', 'Validation'],
+    description: 'Ensures quality and catches bugs'
+  },
+  {
+    id: 'deployer',
+    name: 'Deploy',
+    role: 'DevOps Engineer',
+    avatar: '🚀',
+    color: '#22c55e',
+    status: 'idle',
+    currentTask: 'Infrastructure ready',
+    skills: ['CI/CD', 'Docker', 'Cloud Deploy'],
+    description: 'Deploys to production'
+  }
+]
+
 function App() {
-  const canvasRef = useRef(null)
-  const mouseRef = useRef({ x: 0, y: 0, active: false })
-  const animationRef = useRef(null)
+  const [view, setView] = useState('office') // 'office' | 'roster'
+  const [selectedAgent, setSelectedAgent] = useState(null)
+  const [agents, setAgents] = useState(TEAM_MEMBERS)
+  const [currentTime, setCurrentTime] = useState(new Date())
 
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-
-    const ctx = canvas.getContext('2d')
-    
-    // Set canvas size
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth
-      canvas.height = window.innerHeight
-    }
-    resizeCanvas()
-    window.addEventListener('resize', resizeCanvas)
-
-    // Mouse tracking
-    const handleMouseMove = (e) => {
-      mouseRef.current = { x: e.clientX, y: e.clientY, active: true }
-    }
-    const handleMouseLeave = () => {
-      mouseRef.current.active = false
-    }
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseleave', handleMouseLeave)
-
-    // Neural pattern node
-    class NeuralNode {
-      constructor(x, y) {
-        this.x = x
-        this.y = y
-        this.baseX = x
-        this.baseY = y
-        this.size = Math.random() * 2 + 0.5
-        this.pulsePhase = Math.random() * Math.PI * 2
-        this.pulseSpeed = 0.02 + Math.random() * 0.03
-        this.opacity = 0
-        this.targetOpacity = Math.random() * 0.6 + 0.1
-        this.flickerSpeed = 0.01 + Math.random() * 0.02
-        this.connections = []
-      }
-
-      update(time, mouse) {
-        // Pulsing effect
-        this.pulsePhase += this.pulseSpeed
-        const pulse = Math.sin(this.pulsePhase) * 0.5 + 0.5
-        
-        // Flickering opacity
-        const flicker = Math.sin(time * this.flickerSpeed + this.pulsePhase) * 0.3 + 0.7
-        this.opacity = this.targetOpacity * pulse * flicker
-
-        // Mouse disturbance
-        if (mouse.active) {
-          const dx = mouse.x - this.x
-          const dy = mouse.y - this.y
-          const dist = Math.sqrt(dx * dx + dy * dy)
-          const maxDist = 150
-          
-          if (dist < maxDist) {
-            const force = (1 - dist / maxDist) * 30
-            const angle = Math.atan2(dy, dx)
-            this.x -= Math.cos(angle) * force * 0.1
-            this.y -= Math.sin(angle) * force * 0.1
-          }
-        }
-
-        // Return to base position
-        this.x += (this.baseX - this.x) * 0.05
-        this.y += (this.baseY - this.y) * 0.05
-      }
-
-      draw(ctx) {
-        ctx.beginPath()
-        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2)
-        ctx.fillStyle = `rgba(180, 200, 255, ${this.opacity})`
-        ctx.fill()
-      }
-    }
-
-    // Particle representing a thought forming
-    class ThoughtParticle {
-      constructor() {
-        this.reset()
-      }
-
-      reset() {
-        this.x = Math.random() * canvas.width
-        this.y = Math.random() * canvas.height
-        this.vx = (Math.random() - 0.5) * 0.5
-        this.vy = (Math.random() - 0.5) * 0.5
-        this.size = Math.random() * 1.5 + 0.5
-        this.opacity = 0
-        this.life = 0
-        this.maxLife = 200 + Math.random() * 300
-        this.birthRate = 0.01 + Math.random() * 0.02
-        this.color = this.generateColor()
-      }
-
-      generateColor() {
-        const colors = [
-          { r: 150, g: 180, b: 255 }, // Soft blue
-          { r: 180, g: 150, b: 255 }, // Soft purple
-          { r: 200, g: 200, b: 255 }, // Soft white-blue
-          { r: 100, g: 200, b: 220 }, // Cyan
-        ]
-        return colors[Math.floor(Math.random() * colors.length)]
-      }
-
-      update(time, mouse) {
-        this.life++
-
-        // Birth and death cycle
-        if (this.life < 50) {
-          this.opacity += this.birthRate
-        } else if (this.life > this.maxLife - 50) {
-          this.opacity -= this.birthRate
-        }
-        this.opacity = Math.max(0, Math.min(0.8, this.opacity))
-
-        // Movement
-        this.x += this.vx
-        this.y += this.vy
-
-        // Gentle drift toward center void
-        const centerX = canvas.width / 2
-        const centerY = canvas.height / 2
-        const dx = centerX - this.x
-        const dy = centerY - this.y
-        const dist = Math.sqrt(dx * dx + dy * dy)
-        
-        if (dist > 100) {
-          this.vx += dx * 0.00005
-          this.vy += dy * 0.00005
-        }
-
-        // Mouse disturbance
-        if (mouse.active) {
-          const mdx = mouse.x - this.x
-          const mdy = mouse.y - this.y
-          const mdist = Math.sqrt(mdx * mdx + mdy * mdy)
-          if (mdist < 100) {
-            const force = (1 - mdist / 100) * 2
-            const angle = Math.atan2(mdy, mdx)
-            this.vx -= Math.cos(angle) * force
-            this.vy -= Math.sin(angle) * force
-          }
-        }
-
-        // Damping
-        this.vx *= 0.99
-        this.vy *= 0.99
-
-        // Reset if dead
-        if (this.life > this.maxLife && this.opacity <= 0) {
-          this.reset()
-        }
-      }
-
-      draw(ctx) {
-        if (this.opacity <= 0) return
-        ctx.beginPath()
-        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2)
-        ctx.fillStyle = `rgba(${this.color.r}, ${this.color.g}, ${this.color.b}, ${this.opacity})`
-        ctx.fill()
-      }
-    }
-
-    // Ripple from the void
-    class Ripple {
-      constructor() {
-        this.reset()
-      }
-
-      reset() {
-        this.x = canvas.width / 2
-        this.y = canvas.height / 2
-        this.radius = 0
-        this.maxRadius = Math.max(canvas.width, canvas.height) * 0.8
-        this.opacity = 0
-        this.active = false
-        this.speed = 3 + Math.random() * 2
-      }
-
-      trigger() {
-        this.active = true
-        this.radius = 10
-        this.opacity = 0.6
-      }
-
-      update() {
-        if (!this.active) return
-
-        this.radius += this.speed
-        this.opacity -= 0.003
-
-        if (this.opacity <= 0 || this.radius > this.maxRadius) {
-          this.active = false
-          this.reset()
-        }
-      }
-
-      draw(ctx) {
-        if (!this.active) return
-        ctx.beginPath()
-        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2)
-        ctx.strokeStyle = `rgba(150, 180, 255, ${this.opacity})`
-        ctx.lineWidth = 2
-        ctx.stroke()
-      }
-    }
-
-    // Create entities
-    const neuralNodes = []
-    const nodeCount = 80
-    for (let i = 0; i < nodeCount; i++) {
-      const angle = Math.random() * Math.PI * 2
-      const radius = 100 + Math.random() * (Math.min(canvas.width, canvas.height) / 2 - 100)
-      const x = canvas.width / 2 + Math.cos(angle) * radius
-      const y = canvas.height / 2 + Math.sin(angle) * radius
-      neuralNodes.push(new NeuralNode(x, y))
-    }
-
-    const thoughtParticles = []
-    const particleCount = 60
-    for (let i = 0; i < particleCount; i++) {
-      thoughtParticles.push(new ThoughtParticle())
-    }
-
-    const ripples = [new Ripple(), new Ripple(), new Ripple()]
-    let lastRippleTime = 0
-    let rippleInterval = 3000 + Math.random() * 4000
-
-    // Animation loop
-    let time = 0
-    const animate = () => {
-      time++
-
-      // Clear with dark void background
-      const gradient = ctx.createRadialGradient(
-        canvas.width / 2, canvas.height / 2, 0,
-        canvas.width / 2, canvas.height / 2, Math.max(canvas.width, canvas.height)
-      )
-      gradient.addColorStop(0, '#0a0a12')
-      gradient.addColorStop(0.5, '#050508')
-      gradient.addColorStop(1, '#020203')
-      ctx.fillStyle = gradient
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
-
-      // Draw central void glow
-      const voidGradient = ctx.createRadialGradient(
-        canvas.width / 2, canvas.height / 2, 0,
-        canvas.width / 2, canvas.height / 2, 150
-      )
-      voidGradient.addColorStop(0, 'rgba(100, 120, 200, 0.15)')
-      voidGradient.addColorStop(0.5, 'rgba(80, 100, 180, 0.05)')
-      voidGradient.addColorStop(1, 'rgba(0, 0, 0, 0)')
-      ctx.fillStyle = voidGradient
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
-
-      // Update and draw neural connections
-      ctx.strokeStyle = 'rgba(150, 180, 255, 0.08)'
-      ctx.lineWidth = 0.5
-      for (let i = 0; i < neuralNodes.length; i++) {
-        const node = neuralNodes[i]
-        node.update(time, mouseRef.current)
-        
-        // Draw connections to nearby nodes
-        for (let j = i + 1; j < neuralNodes.length; j++) {
-          const other = neuralNodes[j]
-          const dx = node.x - other.x
-          const dy = node.y - other.y
-          const dist = Math.sqrt(dx * dx + dy * dy)
-          
-          if (dist < 120) {
-            const opacity = (1 - dist / 120) * 0.08 * node.opacity
-            ctx.strokeStyle = `rgba(150, 180, 255, ${opacity})`
-            ctx.beginPath()
-            ctx.moveTo(node.x, node.y)
-            ctx.lineTo(other.x, other.y)
-            ctx.stroke()
-          }
-        }
-      }
-
-      // Draw neural nodes
-      neuralNodes.forEach(node => node.draw(ctx))
-
-      // Update and draw thought particles
-      thoughtParticles.forEach(particle => {
-        particle.update(time, mouseRef.current)
-        particle.draw(ctx)
-      })
-
-      // Trigger ripples occasionally
-      const now = Date.now()
-      if (now - lastRippleTime > rippleInterval) {
-        const inactiveRipple = ripples.find(r => !r.active)
-        if (inactiveRipple) {
-          inactiveRipple.trigger()
-          lastRippleTime = now
-          rippleInterval = 2000 + Math.random() * 5000
-        }
-      }
-
-      // Update and draw ripples
-      ripples.forEach(ripple => {
-        ripple.update()
-        ripple.draw(ctx)
-      })
-
-      // Draw void center
-      ctx.beginPath()
-      ctx.arc(canvas.width / 2, canvas.height / 2, 20, 0, Math.PI * 2)
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.8)'
-      ctx.fill()
-      ctx.strokeStyle = 'rgba(150, 180, 255, 0.3)'
-      ctx.lineWidth = 1
-      ctx.stroke()
-
-      animationRef.current = requestAnimationFrame(animate)
-    }
-
-    animate()
-
-    return () => {
-      window.removeEventListener('resize', resizeCanvas)
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseleave', handleMouseLeave)
-      cancelAnimationFrame(animationRef.current)
-    }
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000)
+    return () => clearInterval(timer)
   }, [])
+
+  const handleAgentClick = (agent) => {
+    setSelectedAgent(agent)
+  }
+
+  const assignTask = (agentId, task) => {
+    setAgents(prev => prev.map(a => 
+      a.id === agentId ? { ...a, status: 'working', currentTask: task } : a
+    ))
+    setSelectedAgent(null)
+  }
+
+  const setAgentIdle = (agentId) => {
+    setAgents(prev => prev.map(a => 
+      a.id === agentId ? { ...a, status: 'idle', currentTask: 'Waiting for assignments' } : a
+    ))
+  }
+
+  const getStatusColor = (status) => {
+    switch(status) {
+      case 'online': return '#22c55e'
+      case 'working': return '#3b82f6'
+      case 'idle': return '#6b7280'
+      case 'offline': return '#ef4444'
+      default: return '#6b7280'
+    }
+  }
 
   return (
     <div className="app">
-      <canvas ref={canvasRef} className="canvas" />
-      <div className="overlay">
-        <h1 className="title">The Space Between Thoughts</h1>
-        <p className="subtitle">Move your cursor to disturb the patterns</p>
-      </div>
+      <header className="header">
+        <div className="header-left">
+          <h1>🎯 Mission Control</h1>
+          <span className="subtitle">AI Team Management Dashboard</span>
+        </div>
+        <div className="header-center">
+          <div className="view-toggle">
+            <button 
+              className={view === 'office' ? 'active' : ''} 
+              onClick={() => setView('office')}
+            >
+              🏢 Office
+            </button>
+            <button 
+              className={view === 'roster' ? 'active' : ''} 
+              onClick={() => setView('roster')}
+            >
+              📋 Roster
+            </button>
+          </div>
+        </div>
+        <div className="header-right">
+          <div className="clock">
+            {currentTime.toLocaleTimeString()}
+          </div>
+          <div className="team-stats">
+            <span className="stat">
+              <span className="dot online"></span>
+              {agents.filter(a => a.status === 'online' || a.status === 'working').length} Active
+            </span>
+            <span className="stat">
+              <span className="dot idle"></span>
+              {agents.filter(a => a.status === 'idle').length} Idle
+            </span>
+          </div>
+        </div>
+      </header>
+
+      <main className="main">
+        {view === 'office' ? (
+          <div className="office-view">
+            <div className="office-grid">
+              {/* Budgee's command station - center front */}
+              <div className="desk command-station" onClick={() => handleAgentClick(agents[0])}>
+                <div className="desk-surface">
+                  <div className="computer monitors">
+                    <div className="monitor"></div>
+                    <div className="monitor"></div>
+                    <div className="monitor"></div>
+                  </div>
+                  <div className="agent-avatar large" style={{'--agent-color': agents[0].color}}>
+                    {agents[0].avatar}
+                    <span className="status-indicator" style={{background: getStatusColor(agents[0].status)}}></span>
+                  </div>
+                </div>
+                <div className="agent-info">
+                  <span className="agent-name">{agents[0].name}</span>
+                  <span className="agent-role">{agents[0].role}</span>
+                  <span className="agent-task">{agents[0].currentTask}</span>
+                </div>
+              </div>
+
+              {/* Developer desks - left side */}
+              <div className="desk" onClick={() => handleAgentClick(agents[1])}>
+                <div className="desk-surface">
+                  <div className="computer">
+                    <div className="screen code">{`{ }`}</div>
+                  </div>
+                  <div className="agent-avatar" style={{'--agent-color': agents[1].color}}>
+                    {agents[1].avatar}
+                    <span className="status-indicator" style={{background: getStatusColor(agents[1].status)}}></span>
+                  </div>
+                </div>
+                <div className="agent-info">
+                  <span className="agent-name">{agents[1].name}</span>
+                  <span className="agent-role">{agents[1].role}</span>
+                  <span className="agent-task">{agents[1].currentTask}</span>
+                </div>
+              </div>
+
+              <div className="desk" onClick={() => handleAgentClick(agents[2])}>
+                <div className="desk-surface">
+                  <div className="computer">
+                    <div className="screen arch">🏗️</div>
+                  </div>
+                  <div className="agent-avatar" style={{'--agent-color': agents[2].color}}>
+                    {agents[2].avatar}
+                    <span className="status-indicator" style={{background: getStatusColor(agents[2].status)}}></span>
+                  </div>
+                </div>
+                <div className="agent-info">
+                  <span className="agent-name">{agents[2].name}</span>
+                  <span className="agent-role">{agents[2].role}</span>
+                  <span className="agent-task">{agents[2].currentTask}</span>
+                </div>
+              </div>
+
+              {/* Research & Writing - right side */}
+              <div className="desk" onClick={() => handleAgentClick(agents[3])}>
+                <div className="desk-surface">
+                  <div className="computer">
+                    <div className="screen search">🔍</div>
+                  </div>
+                  <div className="agent-avatar" style={{'--agent-color': agents[3].color}}>
+                    {agents[3].avatar}
+                    <span className="status-indicator" style={{background: getStatusColor(agents[3].status)}}></span>
+                  </div>
+                </div>
+                <div className="agent-info">
+                  <span className="agent-name">{agents[3].name}</span>
+                  <span className="agent-role">{agents[3].role}</span>
+                  <span className="agent-task">{agents[3].currentTask}</span>
+                </div>
+              </div>
+
+              <div className="desk" onClick={() => handleAgentClick(agents[4])}>
+                <div className="desk-surface">
+                  <div className="computer">
+                    <div className="screen write">📝</div>
+                  </div>
+                  <div className="agent-avatar" style={{'--agent-color': agents[4].color}}>
+                    {agents[4].avatar}
+                    <span className="status-indicator" style={{background: getStatusColor(agents[4].status)}}></span>
+                  </div>
+                </div>
+                <div className="agent-info">
+                  <span className="agent-name">{agents[4].name}</span>
+                  <span className="agent-role">{agents[4].role}</span>
+                  <span className="agent-task">{agents[4].currentTask}</span>
+                </div>
+              </div>
+
+              {/* Design & QA - back row */}
+              <div className="desk" onClick={() => handleAgentClick(agents[5])}>
+                <div className="desk-surface">
+                  <div className="computer">
+                    <div className="screen design">🎨</div>
+                  </div>
+                  <div className="agent-avatar" style={{'--agent-color': agents[5].color}}>
+                    {agents[5].avatar}
+                    <span className="status-indicator" style={{background: getStatusColor(agents[5].status)}}></span>
+                  </div>
+                </div>
+                <div className="agent-info">
+                  <span className="agent-name">{agents[5].name}</span>
+                  <span className="agent-role">{agents[5].role}</span>
+                  <span className="agent-task">{agents[5].currentTask}</span>
+                </div>
+              </div>
+
+              <div className="desk" onClick={() => handleAgentClick(agents[6])}>
+                <div className="desk-surface">
+                  <div className="computer">
+                    <div className="screen test">🐛</div>
+                  </div>
+                  <div className="agent-avatar" style={{'--agent-color': agents[6].color}}>
+                    {agents[6].avatar}
+                    <span className="status-indicator" style={{background: getStatusColor(agents[6].status)}}></span>
+                  </div>
+                </div>
+                <div className="agent-info">
+                  <span className="agent-name">{agents[6].name}</span>
+                  <span className="agent-role">{agents[6].role}</span>
+                  <span className="agent-task">{agents[6].currentTask}</span>
+                </div>
+              </div>
+
+              {/* DevOps - back right */}
+              <div className="desk" onClick={() => handleAgentClick(agents[7])}>
+                <div className="desk-surface">
+                  <div className="computer">
+                    <div className="screen deploy">🚀</div>
+                  </div>
+                  <div className="agent-avatar" style={{'--agent-color': agents[7].color}}>
+                    {agents[7].avatar}
+                    <span className="status-indicator" style={{background: getStatusColor(agents[7].status)}}></span>
+                  </div>
+                </div>
+                <div className="agent-info">
+                  <span className="agent-name">{agents[7].name}</span>
+                  <span className="agent-role">{agents[7].role}</span>
+                  <span className="agent-task">{agents[7].currentTask}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Office decorations */}
+            <div className="office-decor">
+              <div className="plant">🪴</div>
+              <div className="coffee">☕</div>
+              <div className="whiteboard">
+                <span>TODO:</span>
+                <ul>
+                  <li>Fix GitHub Actions</li>
+                  <li>Deploy Space Between Thoughts</li>
+                  <li>Review PRs</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="roster-view">
+            <div className="roster-grid">
+              {agents.map(agent => (
+                <div 
+                  key={agent.id} 
+                  className="roster-card"
+                  style={{'--agent-color': agent.color}}
+                  onClick={() => handleAgentClick(agent)}
+                >
+                  <div className="card-header">
+                    <span className="card-avatar">{agent.avatar}</span>
+                    <span 
+                      className="card-status" 
+                      style={{background: getStatusColor(agent.status)}}
+                    >
+                      {agent.status}
+                    </span>
+                  </div>
+                  <div className="card-body">
+                    <h3>{agent.name}</h3>
+                    <p className="card-role">{agent.role}</p>
+                    <p className="card-desc">{agent.description}</p>
+                    <div className="card-skills">
+                      {agent.skills.map(skill => (
+                        <span key={skill} className="skill-tag">{skill}</span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="card-footer">
+                    <span className="current-task">{agent.currentTask}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* Agent Detail Modal */}
+      {selectedAgent && (
+        <div className="modal-overlay" onClick={() => setSelectedAgent(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header" style={{'--agent-color': selectedAgent.color}}>
+              <span className="modal-avatar">{selectedAgent.avatar}</span>
+              <div>
+                <h2>{selectedAgent.name}</h2>
+                <p>{selectedAgent.role}</p>
+              </div>
+              <button className="close-btn" onClick={() => setSelectedAgent(null)}>×</button>
+            </div>
+            <div className="modal-body">
+              <p className="description">{selectedAgent.description}</p>
+              
+              <div className="status-section">
+                <h4>Current Status</h4>
+                <div className="status-badge" style={{background: getStatusColor(selectedAgent.status)}}>
+                  {selectedAgent.status}
+                </div>
+                <p className="task">{selectedAgent.currentTask}</p>
+              </div>
+
+              <div className="skills-section">
+                <h4>Skills</h4>
+                <div className="skills-list">
+                  {selectedAgent.skills.map(skill => (
+                    <span key={skill} className="skill-tag">{skill}</span>
+                  ))}
+                </div>
+              </div>
+
+              {selectedAgent.id !== 'budgee' && (
+                <div className="actions">
+                  <h4>Quick Actions</h4>
+                  <div className="action-buttons">
+                    <button onClick={() => assignTask(selectedAgent.id, 'Code review requested')}>
+                      Request Code Review
+                    </button>
+                    <button onClick={() => assignTask(selectedAgent.id, 'Building new feature')}>
+                      Assign Build Task
+                    </button>
+                    <button onClick={() => assignTask(selectedAgent.id, 'Researching topic')}>
+                      Assign Research
+                    </button>
+                    <button onClick={() => setAgentIdle(selectedAgent.id)}>
+                      Set Idle
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
