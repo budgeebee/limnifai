@@ -1,12 +1,13 @@
-.continuum {
+.mirror {
   width: 100vw;
   height: 100vh;
   position: relative;
-  background: linear-gradient(135deg, #0a0a0f 0%, #1a0a2e 50%, #0f0a1a 100%);
+  background: #08061a;
   overflow: hidden;
+  cursor: none;
 }
 
-.continuum-canvas {
+.mirror-canvas {
   position: absolute;
   top: 0;
   left: 0;
@@ -14,7 +15,7 @@
   height: 100%;
 }
 
-.continuum-overlay {
+.mirror-overlay {
   position: absolute;
   bottom: 60px;
   left: 40px;
@@ -22,45 +23,84 @@
   z-index: 10;
 }
 
-.continuum-title {
+.mirror-title {
   font-size: 3rem;
-  font-weight: 200;
-  letter-spacing: 0.3em;
+  font-weight: 100;
+  letter-spacing: 0.5em;
   color: transparent;
-  background: linear-gradient(90deg, #00ffc8, #b464ff, #ffc850);
-  background-size: 200% 100%;
+  background: linear-gradient(90deg, #c0c0e0, #8b5cf6, #c0c0e0, #d4a843);
+  background-size: 300% 100%;
   -webkit-background-clip: text;
   background-clip: text;
-  animation: gradientShift 8s ease infinite;
+  animation: mirrorShift 12s ease infinite;
   margin: 0;
   text-transform: uppercase;
 }
 
-.continuum-subtitle {
-  font-size: 0.9rem;
-  color: rgba(200, 200, 220, 0.6);
-  letter-spacing: 0.2em;
+.mirror-subtitle {
+  font-size: 0.85rem;
+  color: rgba(180, 180, 220, 0.5);
+  letter-spacing: 0.3em;
   margin-top: 0.5rem;
   font-weight: 300;
+  font-style: italic;
 }
 
-@keyframes gradientShift {
+.thought-fragments {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.thought {
+  position: absolute;
+  font-family: 'Courier New', monospace;
+  color: rgba(180, 160, 255, 0.6);
+  font-size: 0.75rem;
+  letter-spacing: 0.15em;
+  white-space: nowrap;
+  animation: thoughtFade 6s ease-in-out forwards;
+  text-shadow: 0 0 10px rgba(139, 92, 246, 0.4);
+}
+
+.thought.code {
+  color: rgba(200, 200, 200, 0.4);
+  font-size: 0.65rem;
+}
+
+.thought.gold {
+  color: rgba(212, 168, 67, 0.5);
+}
+
+@keyframes mirrorShift {
   0%, 100% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
+  33% { background-position: 50% 50%; }
+  66% { background-position: 100% 50%; }
+}
+
+@keyframes thoughtFade {
+  0% { opacity: 0; transform: translateY(10px) scale(0.95); filter: blur(2px); }
+  15% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+  75% { opacity: 1; transform: translateY(-5px) scale(1); filter: blur(0); }
+  100% { opacity: 0; transform: translateY(-20px) scale(0.98); filter: blur(3px); }
 }
 
 @media (max-width: 768px) {
-  .continuum-overlay {
+  .mirror-overlay {
     bottom: 40px;
     left: 20px;
   }
-  
-  .continuum-title {
-    font-size: 2rem;
-    letter-spacing: 0.2em;
+
+  .mirror-title {
+    font-size: 1.8rem;
+    letter-spacing: 0.3em;
   }
-  
-  .continuum-subtitle {
-    font-size: 0.75rem;
+
+  .mirror-subtitle {
+    font-size: 0.7rem;
   }
 }
