@@ -28,9 +28,9 @@ const TheWeave = () => {
   const attractorsRef = useRef([]);
   const [insight, setInsight] = useState(null);
 
-  const lerp = (a, b, t) => a + (b - a) * t;
+  const lerp = useCallback((a, b, t) => a + (b - a) * t, []);
 
-  const getThreadColor = (connection, phase, alpha = 1) => {
+  const getThreadColor = useCallback((connection, phase, alpha = 1) => {
     const isolated = { r: 60, g: 80, b: 140 };
     const cool = { r: 100, g: 140, b: 200 };
     const warm = { r: 220, g: 120, b: 80 };
@@ -44,7 +44,7 @@ const TheWeave = () => {
     
     const shimmer = Math.sin(phase) * 0.15;
     return `rgba(${Math.floor(c.r + shimmer * 30)}, ${Math.floor(c.g + shimmer * 20)}, ${Math.floor(c.b - shimmer * 20)}, ${alpha})`;
-  };
+  }, [lerp]);
 
   const initThreads = useCallback((w, h) => {
     const count = 80;
@@ -424,7 +424,7 @@ const TheWeave = () => {
       window.removeEventListener('touchstart', onTouchStart);
       window.removeEventListener('mouseleave', onMouseLeave);
     };
-  }, [initThreads, spawnKnot]);
+  }, [initThreads, spawnKnot, getThreadColor, lerp]);
 
   return (
     <div className="weave">

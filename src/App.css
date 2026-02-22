@@ -1,13 +1,13 @@
-.mirror {
+.weave {
   width: 100vw;
   height: 100vh;
   position: relative;
-  background: #08061a;
+  background: #080614;
   overflow: hidden;
   cursor: none;
 }
 
-.mirror-canvas {
+.weave-canvas {
   position: absolute;
   top: 0;
   left: 0;
@@ -15,7 +15,7 @@
   height: 100%;
 }
 
-.mirror-overlay {
+.weave-overlay {
   position: absolute;
   bottom: 60px;
   left: 40px;
@@ -23,84 +23,75 @@
   z-index: 10;
 }
 
-.mirror-title {
+.weave-title {
   font-size: 3rem;
   font-weight: 100;
   letter-spacing: 0.5em;
   color: transparent;
-  background: linear-gradient(90deg, #c0c0e0, #8b5cf6, #c0c0e0, #d4a843);
+  background: linear-gradient(90deg, #b48a64, #c87850, #e8a060, #b48a64);
   background-size: 300% 100%;
   -webkit-background-clip: text;
   background-clip: text;
-  animation: mirrorShift 12s ease infinite;
+  animation: weaveShift 12s ease infinite;
   margin: 0;
   text-transform: uppercase;
 }
 
-.mirror-subtitle {
+.weave-subtitle {
   font-size: 0.85rem;
-  color: rgba(180, 180, 220, 0.5);
+  color: rgba(180, 140, 100, 0.5);
   letter-spacing: 0.3em;
   margin-top: 0.5rem;
   font-weight: 300;
   font-style: italic;
 }
 
-.thought-fragments {
+.insight {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: 'Courier New', monospace;
+  color: rgba(200, 150, 100, 0.6);
+  font-size: 1rem;
+  letter-spacing: 0.2em;
+  white-space: nowrap;
   pointer-events: none;
   z-index: 5;
+  animation: insightPulse 4s ease-in-out forwards;
+  text-shadow: 0 0 20px rgba(200, 120, 60, 0.3);
 }
 
-.thought {
-  position: absolute;
-  font-family: 'Courier New', monospace;
-  color: rgba(180, 160, 255, 0.6);
-  font-size: 0.75rem;
-  letter-spacing: 0.15em;
-  white-space: nowrap;
-  animation: thoughtFade 6s ease-in-out forwards;
-  text-shadow: 0 0 10px rgba(139, 92, 246, 0.4);
-}
-
-.thought.code {
-  color: rgba(200, 200, 200, 0.4);
-  font-size: 0.65rem;
-}
-
-.thought.gold {
-  color: rgba(212, 168, 67, 0.5);
-}
-
-@keyframes mirrorShift {
+@keyframes weaveShift {
   0%, 100% { background-position: 0% 50%; }
   33% { background-position: 50% 50%; }
   66% { background-position: 100% 50%; }
 }
 
-@keyframes thoughtFade {
-  0% { opacity: 0; transform: translateY(10px) scale(0.95); filter: blur(2px); }
-  15% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
-  75% { opacity: 1; transform: translateY(-5px) scale(1); filter: blur(0); }
-  100% { opacity: 0; transform: translateY(-20px) scale(0.98); filter: blur(3px); }
+@keyframes insightPulse {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.95); filter: blur(3px); }
+  20% { opacity: 1; transform: translate(-50%, -50%) scale(1); filter: blur(0); }
+  80% { opacity: 1; transform: translate(-50%, -50%) scale(1); filter: blur(0); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.02); filter: blur(2px); }
 }
 
 @media (max-width: 768px) {
-  .mirror-overlay {
+  .weave-overlay {
     bottom: 40px;
     left: 20px;
   }
 
-  .mirror-title {
+  .weave-title {
     font-size: 1.8rem;
     letter-spacing: 0.3em;
   }
 
-  .mirror-subtitle {
+  .weave-subtitle {
     font-size: 0.7rem;
+  }
+
+  .insight {
+    font-size: 0.8rem;
+    letter-spacing: 0.15em;
   }
 }
