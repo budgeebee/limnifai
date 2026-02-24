@@ -1,7 +1,7 @@
-import Emergence from './Emergence';
+import Convergence from './Convergence';
 
 const App = () => {
-  return <Emergence />;
+  return <Convergence />;
 };
 
 export default App;

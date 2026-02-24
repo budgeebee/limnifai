@@ -95,3 +95,44 @@
     letter-spacing: 0.15em;
   }
 }
+
+.convergence-overlay {
+  position: absolute;
+  bottom: 60px;
+  left: 40px;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.convergence-overlay .weave-title {
+  background: linear-gradient(90deg, #3b82f6, #8b5cf6, #f59e0b, #10b981, #3b82f6);
+  background-size: 400% 100%;
+}
+
+.convergence-overlay .weave-subtitle {
+  color: rgba(180, 180, 200, 0.5);
+}
+
+.topic-legend {
+  display: flex;
+  gap: 1.5rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+.topic-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.7rem;
+  color: rgba(180, 180, 200, 0.5);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.topic-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  box-shadow: 0 0 8px currentColor;
+}
