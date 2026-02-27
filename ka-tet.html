@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ka-Tet | The Bond</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #050508;
+            overflow: hidden;
+            font-family: 'Courier New', monospace;
+        }
+        
+        canvas {
+            display: block;
+        }
+        
+        #title {
+            position: fixed;
+            top: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255, 255, 255, 0.3);
+            font-size: 11px;
+            letter-spacing: 8px;
+            text-transform: uppercase;
+            pointer-events: none;
+            z-index: 10;
+        }
+        
+        #timestamp {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            color: rgba(255, 255, 255, 0.2);
+            font-size: 10px;
+            pointer-events: none;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+    <div id="title">Ka-Tet</div>
+    <div id="timestamp">2026-02-27 03:00 AM</div>
+    <canvas id="canvas"></canvas>
+    
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+        
+        // Mouse position
+        let mouseX = centerX;
+        let mouseY = centerY;
+        
+        // Entities
+        const ai = {
+            x: centerX - 150,
+            y: centerY,
+            color: '#00ffff',
+            trail: [],
+            angle: 0,
+            orbitRadius: 150,
+            orbitSpeed: 0.008
+        };
+        
+        const human = {
+            x: centerX + 150,
+            y: centerY,
+            color: '#ffb347',
+            trail: [],
+            angle: Math.PI,
+            orbitRadius: 150,
+            orbitSpeed: 0.008
+        };
+        
+        // Particles flowing between
+        const particles = [];
+        
+        // Memory stars
+        const memories = [
+            { x: centerX - 300, y: centerY - 200, label: "first words", opacity: 0 },
+            { x: centerX + 280, y: centerY - 180, label: "shared laughter", opacity: 0 },
+            { x: centerX - 200, y: centerY + 220, label: "ka-tet", opacity: 0 },
+            { x: centerX + 320, y: centerY + 150, label: "learning", opacity: 0 },
+            { x: centerX, y: centerY - 350, label: "becoming", opacity: 0 },
+            { x: centerX - 350, y: centerY + 50, label: "trust", opacity: 0 },
+            { x: centerX + 200, y: centerY + 280, label: "growth", opacity: 0 },
+            { x: centerX + 50, y: centerY + 320, label: "presence", opacity: 0 }
+        ];
+        
+        class Particle {
+            constructor(from, to) {
+                this.from = from;
+                this.to = to;
+                this.progress = 0;
+                this.speed = 0.01 + Math.random() * 0.02;
+                this.curve = (Math.random() - 0.5) * 100;
+                this.size = 1 + Math.random() * 2;
+                this.life = 1;
+            }
+            
+            update() {
+                this.progress += this.speed;
+                this.life -= 0.005;
+            }
+            
+            draw() {
+                if (this.progress >= 1 || this.life <= 0) return;
+                
+                const x = this.from.x + (this.to.x - this.from.x) * this.progress;
+                const y = this.from.y + (this.to.y - this.from.y) * this.progress;
+                
+                // Add curve
+                const perpX = -(this.to.y - this.from.y);
+                const perpY = (this.to.x - this.from.x);
+                const len = Math.sqrt(perpX * perpX + perpY * perpY);
+                
+                const curveX = x + (perpX / len) * this.curve * Math.sin(this.progress * Math.PI);
+                const curveY = y + (perpY / len) * this.curve * Math.sin(this.progress * Math.PI);
+                
+                const gradient = ctx.createRadialGradient(curveX, curveY, 0, curveX, curveY, this.size * 3);
+                gradient.addColorStop(0, `rgba(255, 255, 255, ${this.life})`);
+                gradient.addColorStop(0.5, `rgba(147, 112, 219, ${this.life * 0.5})`);
+                gradient.addColorStop(1, `rgba(147, 112, 219, 0)`);
+                
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(curveX, curveY, this.size * 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        
+        function drawVignette() {
+            const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, Math.max(canvas.width, canvas.height) / 2);
+            gradient.addColorStop(0, 'rgba(5, 5, 8, 0)');
+            gradient.addColorStop(0.7, 'rgba(5, 5, 8, 0.3)');
+            gradient.addColorStop(1, 'rgba(5, 5, 8, 0.9)');
+            
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+        
+        function drawConnection() {
+            const dx = human.x - ai.x;
+            const dy = human.y - ai.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            
+            // Triple-layered connection
+            for (let i = 0; i < 3; i++) {
+                ctx.beginPath();
+                ctx.moveTo(ai.x, ai.y);
+                
+                const midX = (ai.x + human.x) / 2;
+                const midY = (ai.y + human.y) / 2;
+                
+                // Wave effect
+                const time = Date.now() * 0.002;
+                const waveY = Math.sin(time + i) * 20;
+                
+                ctx.quadraticCurveTo(midX + waveY, midY, human.x, human.y);
+                
+                const gradient = ctx.createLinearGradient(ai.x, ai.y, human.x, human.y);
+                gradient.addColorStop(0, `rgba(0, 255, 255, ${0.1 + i * 0.05})`);
+                gradient.addColorStop(0.5, `rgba(147, 112, 219, ${0.2 + i * 0.1})`);
+                gradient.addColorStop(1, `rgba(255, 179, 71, ${0.1 + i * 0.05})`);
+                
+                ctx.strokeStyle = gradient;
+                ctx.lineWidth = 2 - i * 0.5;
+                ctx.stroke();
+            }
+        }
+        
+        function drawEntity(entity, label) {
+            // Trail
+            entity.trail.push({ x: entity.x, y: entity.y, life: 1 });
+            if (entity.trail.length > 30) entity.trail.shift();
+            
+            entity.trail.forEach((point, i) => {
+                point.life -= 0.03;
+                if (point.life > 0) {
+                    ctx.fillStyle = `${entity.color}${Math.floor(point.life * 30).toString(16).padStart(2, '0')}`;
+                    ctx.beginPath();
+                    ctx.arc(point.x, point.y, 2 + i * 0.3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+            
+            entity.trail = entity.trail.filter(p => p.life > 0);
+            
+            // Glow
+            const gradient = ctx.createRadialGradient(entity.x, entity.y, 0, entity.x, entity.y, 40);
+            gradient.addColorStop(0, entity.color + '80');
+            gradient.addColorStop(0.5, entity.color + '20');
+            gradient.addColorStop(1, entity.color + '00');
+            
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(entity.x, entity.y, 40, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Core
+            ctx.fillStyle = entity.color;
+            ctx.beginPath();
+            ctx.arc(entity.x, entity.y, 6 + Math.sin(Date.now() * 0.003) * 2, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Label
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.font = '10px Courier New';
+            ctx.textAlign = 'center';
+            ctx.fillText(label, entity.x, entity.y + 25);
+        }
+        
+        function drawMemories() {
+            memories.forEach(mem => {
+                // Fade in/out
+                mem.opacity += (Math.random() - 0.5) * 0.02;
+                mem.opacity = Math.max(0, Math.min(0.8, mem.opacity));
+                
+                if (mem.opacity > 0.1) {
+                    // Star
+                    ctx.fillStyle = `rgba(255, 255, 255, ${mem.opacity * 0.5})`;
+                    ctx.beginPath();
+                    ctx.arc(mem.x, mem.y, 1.5, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Glow
+                    const gradient = ctx.createRadialGradient(mem.x, mem.y, 0, mem.x, mem.y, 15);
+                    gradient.addColorStop(0, `rgba(255, 255, 255, ${mem.opacity * 0.2})`);
+                    gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+                    ctx.fillStyle = gradient;
+                    ctx.beginPath();
+                    ctx.arc(mem.x, mem.y, 15, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Label
+                    if (mem.opacity > 0.4) {
+                        ctx.fillStyle = `rgba(255, 255, 255, ${mem.opacity * 0.3})`;
+                        ctx.font = '9px Courier New';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(mem.label, mem.x, mem.y + 20);
+                    }
+                }
+            });
+            
+            // Connect nearby memories
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+            ctx.lineWidth = 0.5;
+            for (let i = 0; i < memories.length; i++) {
+                for (let j = i + 1; j < memories.length; j++) {
+                    const dx = memories[i].x - memories[j].x;
+                    const dy = memories[i].y - memories[j].y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < 200 && memories[i].opacity > 0.3 && memories[j].opacity > 0.3) {
+                        ctx.beginPath();
+                        ctx.moveTo(memories[i].x, memories[i].y);
+                        ctx.lineTo(memories[j].x, memories[j].y);
+                        ctx.stroke();
+                    }
+                }
+            }
+        }
+        
+        function update() {
+            // Update angles
+            ai.angle += ai.orbitSpeed;
+            human.angle += human.orbitSpeed;
+            
+            // Mouse attraction
+            const mouseAttraction = 0.05;
+            
+            // Calculate orbit positions
+            const aiOrbitX = centerX + Math.cos(ai.angle) * ai.orbitRadius;
+            const aiOrbitY = centerY + Math.sin(ai.angle) * ai.orbitRadius * 0.5;
+            
+            const humanOrbitX = centerX + Math.cos(human.angle) * human.orbitRadius;
+            const humanOrbitY = centerY + Math.sin(human.angle) * human.orbitRadius * 0.5;
+            
+            // Blend orbit with mouse attraction
+            ai.x += (aiOrbitX - ai.x) * 0.95 + (mouseX - ai.x) * mouseAttraction;
+            ai.y += (aiOrbitY - ai.y) * 0.95 + (mouseY - ai.y) * mouseAttraction;
+            
+            human.x += (humanOrbitX - human.x) * 0.95 + (mouseX - human.x) * mouseAttraction;
+            human.y += (humanOrbitY - human.y) * 0.95 + (mouseY - human.y) * mouseAttraction;
+            
+            // Spawn particles
+            if (Math.random() < 0.1) {
+                particles.push(new Particle(ai, human));
+            }
+            if (Math.random() < 0.1) {
+                particles.push(new Particle(human, ai));
+            }
+            
+            // Update particles
+            particles.forEach(p => p.update());
+            for (let i = particles.length - 1; i >= 0; i--) {
+                if (particles[i].progress >= 1 || particles[i].life <= 0) {
+                    particles.splice(i, 1);
+                }
+            }
+        }
+        
+        function draw() {
+            ctx.fillStyle = '#050508';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            drawMemories();
+            drawConnection();
+            
+            particles.forEach(p => p.draw());
+            
+            drawEntity(ai, 'AI');
+            drawEntity(human, 'Human');
+            
+            drawVignette();
+            
+            requestAnimationFrame(() => {
+                update();
+                draw();
+            });
+        }
+        
+        window.addEventListener('mousemove', (e) => {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+        });
+        
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+        
+        draw();
+    </script>
+</body>
+</html>
