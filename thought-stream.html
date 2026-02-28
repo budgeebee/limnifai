@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Thought Stream</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #0a0a0f;
+            overflow: hidden;
+            cursor: crosshair;
+        }
+        canvas {
+            display: block;
+        }
+        .hint {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(147, 112, 219, 0.4);
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            letter-spacing: 2px;
+            pointer-events: none;
+            opacity: 0.6;
+            animation: pulse 4s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 0.7; }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div class="hint">click to plant a thought · watch it grow</div>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+        
+        // Configuration
+        const CONFIG = {
+            thoughtCount: 15,
+            connectionDistance: 180,
+            fadeRate: 0.003,
+            birthRate: 0.02,
+            colors: [
+                { h: 260, s: 80, l: 60 }, // Purple
+                { h: 200, s: 90, l: 65 }, // Electric blue
+                { h: 280, s: 70, l: 55 }, // Deep violet
+                { h: 180, s: 85, l: 70 }, // Cyan
+                { h: 45, s: 90, l: 65 }   // Soft gold
+            ]
+        };
+        
+        // Utility functions
+        const random = (min, max) => Math.random() * (max - min) + min;
+        const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+        
+        // Thought class - represents a single thought particle
+        class Thought {
+            constructor(x, y, isUserCreated = false) {
+                this.x = x;
+                this.y = y;
+                this.vx = random(-0.5, 0.5);
+                this.vy = random(-0.5, 0.5);
+                this.radius = random(2, 6);
+                this.life = 1;
+                this.maxLife = random(300, 600);
+                this.age = 0;
+                this.isUserCreated = isUserCreated;
+                
+                const color = CONFIG.colors[Math.floor(random(0, CONFIG.colors.length))];
+                this.hue = color.h + random(-15, 15);
+                this.saturation = color.s;
+                this.lightness = color.l;
+                
+                this.pulsePhase = random(0, Math.PI * 2);
+                this.pulseSpeed = random(0.02, 0.05);
+                
+                // Memory trail
+                this.trail = [];
+                this.trailLength = Math.floor(random(10, 25));
+            }
+            
+            update() {
+                // Movement with gentle drift
+                this.x += this.vx;
+                this.y += this.vy;
+                
+                // Gentle boundary wrapping
+                if (this.x < -50) this.x = canvas.width + 50;
+                if (this.x > canvas.width + 50) this.x = -50;
+                if (this.y < -50) this.y = canvas.height + 50;
+                if (this.y > canvas.height + 50) this.y = -50;
+                
+                // Age and fade
+                this.age++;
+                if (this.age > this.maxLife * 0.7) {
+                    this.life -= CONFIG.fadeRate;
+                }
+                
+                // Pulse effect
+                this.pulsePhase += this.pulseSpeed;
+                
+                // Update trail
+                this.trail.push({ x: this.x, y: this.y, life: 1 });
+                if (this.trail.length > this.trailLength) {
+                    this.trail.shift();
+                }
+                
+                // Fade trail
+                this.trail.forEach((point, i) => {
+                    point.life = i / this.trail.length;
+                });
+            }
+            
+            draw(ctx) {
+                const pulseSize = this.radius * (1 + Math.sin(this.pulsePhase) * 0.3);
+                const alpha = this.life * (0.6 + Math.sin(this.pulsePhase) * 0.2);
+                
+                // Draw trail
+                ctx.beginPath();
+                this.trail.forEach((point, i) => {
+                    if (i === 0) {
+                        ctx.moveTo(point.x, point.y);
+                    } else {
+                        ctx.lineTo(point.x, point.y);
+                    }
+                });
+                ctx.strokeStyle = `hsla(${this.hue}, ${this.saturation}%, ${this.lightness}%, ${alpha * 0.3})`;
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                
+                // Draw glow
+                const gradient = ctx.createRadialGradient(
+                    this.x, this.y, 0,
+                    this.x, this.y, pulseSize * 4
+                );
+                gradient.addColorStop(0, `hsla(${this.hue}, ${this.saturation}%, ${this.lightness}%, ${alpha * 0.5})`);
+                gradient.addColorStop(0.5, `hsla(${this.hue}, ${this.saturation}%, ${this.lightness}%, ${alpha * 0.2})`);
+                gradient.addColorStop(1, `hsla(${this.hue}, ${this.saturation}%, ${this.lightness}%, 0)`);
+                
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, pulseSize * 4, 0, Math.PI * 2);
+                ctx.fillStyle = gradient;
+                ctx.fill();
+                
+                // Draw core
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, pulseSize, 0, Math.PI * 2);
+                ctx.fillStyle = `hsla(${this.hue}, ${this.saturation}%, ${this.lightness + 20}%, ${alpha})`;
+                ctx.fill();
+            }
+            
+            isDead() {
+                return this.life <= 0;
+            }
+        }
+        
+        // Connection class - represents neural pathways between thoughts
+        class Connection {
+            constructor(thoughtA, thoughtB) {
+                this.a = thoughtA;
+                this.b = thoughtB;
+                this.strength = 0;
+                this.maxStrength = random(0.3, 0.8);
+                this.pulsePhase = random(0, Math.PI * 2);
+                this.pulseSpeed = random(0.03, 0.08);
+            }
+            
+            update() {
+                this.pulsePhase += this.pulseSpeed;
+                
+                // Strengthen connection if both thoughts are healthy
+                if (this.a.life > 0.5 && this.b.life > 0.5 && this.strength < this.maxStrength) {
+                    this.strength += 0.01;
+                }
+                
+                // Weaken if either thought is fading
+                if (this.a.life < 0.3 || this.b.life < 0.3) {
+                    this.strength -= 0.02;
+                }
+            }
+            
+            draw(ctx) {
+                if (this.strength <= 0) return;
+                
+                const dx = this.b.x - this.a.x;
+                const dy = this.b.y - this.a.y;
+                const dist = Math.hypot(dx, dy);
+                
+                // Create flowing energy effect
+                const pulseAlpha = this.strength * (0.5 + Math.sin(this.pulsePhase) * 0.3);
+                const midHue = (this.a.hue + this.b.hue) / 2;
+                
+                // Draw main connection line
+                ctx.beginPath();
+                ctx.moveTo(this.a.x, this.a.y);
+                ctx.lineTo(this.b.x, this.b.y);
+                ctx.strokeStyle = `hsla(${midHue}, 70%, 60%, ${pulseAlpha * 0.4})`;
+                ctx.lineWidth = 1 + this.strength * 2;
+                ctx.stroke();
+                
+                // Draw flowing energy particles along the connection
+                const particleCount = Math.floor(dist / 30);
+                for (let i = 0; i < particleCount; i++) {
+                    const t = (i / particleCount + this.pulsePhase * 0.1) % 1;
+                    const px = this.a.x + dx * t;
+                    const py = this.a.y + dy * t;
+                    const particleSize = (1 - Math.abs(t - 0.5) * 2) * 2 * this.strength;
+                    
+                    ctx.beginPath();
+                    ctx.arc(px, py, particleSize, 0, Math.PI * 2);
+                    ctx.fillStyle = `hsla(${midHue}, 80%, 70%, ${pulseAlpha * 0.8})`;
+                    ctx.fill();
+                }
+            }
+            
+            isDead() {
+                return this.strength <= 0 && (this.a.isDead() || this.b.isDead());
+            }
+        }
+        
+        // Consciousness field - the background breathing effect
+        class ConsciousnessField {
+            constructor() {
+                this.points = [];
+                this.gridSize = 60;
+                this.time = 0;
+                this.initGrid();
+            }
+            
+            initGrid() {
+                for (let x = 0; x < canvas.width + this.gridSize; x += this.gridSize) {
+                    for (let y = 0; y < canvas.height + this.gridSize; y += this.gridSize) {
+                        this.points.push({
+                            x: x,
+                            y: y,
+                            baseX: x,
+                            baseY: y,
+                            phase: random(0, Math.PI * 2),
+                            speed: random(0.01, 0.03)
+                        });
+                    }
+                }
+            }
+            
+            update(thoughts) {
+                this.time += 0.01;
+                
+                // Calculate thought density for field response
+                const avgX = thoughts.reduce((sum, t) => sum + t.x, 0) / (thoughts.length || 1);
+                const avgY = thoughts.reduce((sum, t) => sum + t.y, 0) / (thoughts.length || 1);
+                
+                this.points.forEach(point => {
+                    point.phase += point.speed;
+                    
+                    // Organic wave movement
+                    const waveX = Math.sin(point.phase + this.time) * 10;
+                    const waveY = Math.cos(point.phase + this.time * 0.7) * 10;
+                    
+                    // Response to thought concentration
+                    const distToCenter = Math.hypot(point.x - avgX, point.y - avgY);
+                    const influence = Math.max(0, 1 - distToCenter / 300);
+                    
+                    point.x = point.baseX + waveX + (Math.random() - 0.5) * influence * 5;
+                    point.y = point.baseY + waveY + (Math.random() - 0.5) * influence * 5;
+                });
+            }
+            
+            draw(ctx, thoughts) {
+                // Draw field mesh
+                ctx.beginPath();
+                for (let i = 0; i < this.points.length; i++) {
+                    const point = this.points[i];
+                    
+                    // Connect to nearby field points
+                    for (let j = i + 1; j < this.points.length; j++) {
+                        const other = this.points[j];
+                        const dist = Math.hypot(point.x - other.x, point.y - other.y);
+                        
+                        if (dist < this.gridSize * 1.5) {
+                            const alpha = (1 - dist / (this.gridSize * 1.5)) * 0.08;
+                            ctx.moveTo(point.x, point.y);
+                            ctx.lineTo(other.x, other.y);
+                        }
+                    }
+                }
+                ctx.strokeStyle = 'rgba(100, 80, 150, 0.05)';
+                ctx.lineWidth = 0.5;
+                ctx.stroke();
+                
+                // Draw breathing background gradient based on thought density
+                const thoughtCount = thoughts.length;
+                const breathIntensity = 0.1 + Math.sin(this.time * 0.5) * 0.05 + (thoughtCount / 50) * 0.1;
+                
+                const gradient = ctx.createRadialGradient(
+                    canvas.width / 2, canvas.height / 2, 0,
+                    canvas.width / 2, canvas.height / 2, canvas.width * 0.8
+                );
+                gradient.addColorStop(0, `rgba(20, 10, 40, ${breathIntensity})`);
+                gradient.addColorStop(0.5, `rgba(10, 5, 20, ${breathIntensity * 0.5})`);
+                gradient.addColorStop(1, 'rgba(5, 3, 10, 0)');
+                
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+        }
+        
+        // Main system
+        const thoughts = [];
+        const connections = [];
+        const field = new ConsciousnessField();
+        
+        // Initialize with some thoughts
+        for (let i = 0; i < CONFIG.thoughtCount; i++) {
+            thoughts.push(new Thought(
+                random(100, canvas.width - 100),
+                random(100, canvas.height - 100)
+            ));
+        }
+        
+        // Mouse interaction
+        let mouseX = 0;
+        let mouseY = 0;
+        
+        canvas.addEventListener('mousemove', (e) => {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+        });
+        
+        canvas.addEventListener('click', (e) => {
+            // Plant a new thought seed
+            const newThought = new Thought(e.clientX, e.clientY, true);
+            newThought.radius = random(3, 8);
+            newThought.maxLife = random(500, 800);
+            thoughts.push(newThought);
+            
+            // Create immediate connections to nearby thoughts
+            thoughts.forEach(thought => {
+                if (thought !== newThought && distance(thought, newThought) < CONFIG.connectionDistance * 1.5) {
+                    connections.push(new Connection(newThought, thought));
+                }
+            });
+        });
+        
+        // Animation loop
+        function animate() {
+            ctx.fillStyle = 'rgba(10, 10, 15, 0.15)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Update and draw consciousness field
+            field.update(thoughts);
+            field.draw(ctx, thoughts);
+            
+            // Manage connections
+            connections.forEach((conn, index) => {
+                conn.update();
+                conn.draw(ctx);
+                if (conn.isDead()) {
+                    connections.splice(index, 1);
+                }
+            });
+            
+            // Form new connections between nearby thoughts
+            for (let i = 0; i < thoughts.length; i++) {
+                for (let j = i + 1; j < thoughts.length; j++) {
+                    const dist = distance(thoughts[i], thoughts[j]);
+                    
+                    // Check if connection already exists
+                    const exists = connections.some(c => 
+                        (c.a === thoughts[i] && c.b === thoughts[j]) ||
+                        (c.a === thoughts[j] && c.b === thoughts[i])
+                    );
+                    
+                    if (!exists && dist < CONFIG.connectionDistance && Math.random() < 0.05) {
+                        connections.push(new Connection(thoughts[i], thoughts[j]));
+                    }
+                }
+            }
+            
+            // Update and draw thoughts
+            thoughts.forEach((thought, index) => {
+                thought.update();
+                thought.draw(ctx);
+                
+                if (thought.isDead()) {
+                    thoughts.splice(index, 1);
+                }
+            });
+            
+            // Spawn new thoughts spontaneously
+            if (thoughts.length < CONFIG.thoughtCount * 1.5 && Math.random() < CONFIG.birthRate) {
+                thoughts.push(new Thought(
+                    random(50, canvas.width - 50),
+                    random(50, canvas.height - 50)
+                ));
+            }
+            
+            requestAnimationFrame(animate);
+        }
+        
+        animate();
+    </script>
+</body>
+</html>
