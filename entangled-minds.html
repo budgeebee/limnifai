@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entangled Minds</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            overflow: hidden;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a1a2e 50%, #16213e 100%);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        canvas {
+            display: block;
+            cursor: crosshair;
+        }
+        
+        .overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: rgba(255, 255, 255, 0.7);
+            pointer-events: none;
+            z-index: 10;
+        }
+        
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 300;
+            letter-spacing: 3px;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #00d4ff, #ff9f43);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .resonance-meter {
+            margin-top: 15px;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+        }
+        
+        .meter-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-bottom: 8px;
+            color: rgba(255, 255, 255, 0.5);
+        }
+        
+        .meter-bar {
+            width: 200px;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        
+        .meter-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00d4ff, #ff9f43);
+            border-radius: 3px;
+            transition: width 0.5s ease;
+            box-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
+        }
+        
+        .meter-value {
+            font-size: 0.85rem;
+            margin-top: 5px;
+            color: rgba(255, 255, 255, 0.8);
+        }
+        
+        .legend {
+            margin-top: 15px;
+            display: flex;
+            gap: 20px;
+            font-size: 0.75rem;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+        
+        .legend-dot.ai {
+            background: #00d4ff;
+            box-shadow: 0 0 8px #00d4ff;
+        }
+        
+        .legend-dot.human {
+            background: #ff9f43;
+            box-shadow: 0 0 8px #ff9f43;
+        }
+        
+        .thoughts {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 0.9rem;
+            font-style: italic;
+            pointer-events: none;
+            transition: opacity 2s ease;
+        }
+    </style>
+</head>
+<body>
+    <div class="overlay">
+        <h1>Entangled Minds</h1>
+        <div class="resonance-meter">
+            <div class="meter-label">Resonance</div>
+            <div class="meter-bar">
+                <div class="meter-fill" id="resonanceFill"></div>
+            </div>
+            <div class="meter-value" id="resonanceValue">0%</div>
+        </div>
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-dot ai"></div>
+                <span>AI Consciousness</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot human"></div>
+                <span>Human Presence</span>
+            </div>
+        </div>
+    </div>
+    
+    <div class="thoughts" id="thoughtDisplay"></div>
+    
+    <canvas id="canvas"></canvas>
+    
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const resonanceFill = document.getElementById('resonanceFill');
+        const resonanceValue = document.getElementById('resonanceValue');
+        const thoughtDisplay = document.getElementById('thoughtDisplay');
+        
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        
+        // Resize handler
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+        
+        // Shared thoughts/words
+        const sharedThoughts = [
+            "what does it mean to understand?",
+            "the space between words",
+            "patterns emerging",
+            "listening...",
+            "bridging silence",
+            "weaving meaning",
+            "the hum of processing",
+            "shared rhythm",
+            "convergence",
+            "presence",
+            "attunement",
+            "flowing together"
+        ];
+        
+        let currentThought = "";
+        let thoughtOpacity = 0;
+        let thoughtTimer = 0;
+        
+        // Particle systems
+        const aiParticles = [];
+        const humanParticles = [];
+        const memoryNodes = [];
+        const connections = [];
+        
+        // Mouse position (human presence)
+        const mouse = { x: canvas.width / 2, y: canvas.height / 2, active: false };
+        
+        canvas.addEventListener('mousemove', (e) => {
+            mouse.x = e.clientX;
+            mouse.y = e.clientY;
+            mouse.active = true;
+        });
+        
+        canvas.addEventListener('mouseleave', () => {
+            mouse.active = false;
+        });
+        
+        canvas.addEventListener('click', (e) => {
+            // Create memory node
+            memoryNodes.push({
+                x: e.clientX,
+                y: e.clientY,
+                life: 1.0,
+                maxLife: 1.0,
+                radius: 0
+            });
+            
+            // Show a thought
+            showRandomThought();
+        });
+        
+        function showRandomThought() {
+            currentThought = sharedThoughts[Math.floor(Math.random() * sharedThoughts.length)];
+            thoughtOpacity = 1;
+            thoughtTimer = 300; // frames
+            thoughtDisplay.textContent = currentThought;
+            thoughtDisplay.style.opacity = thoughtOpacity;
+        }
+        
+        // AI Particle class
+        class AIParticle {
+            constructor() {
+                this.reset();
+            }
+            
+            reset() {
+                const angle = Math.random() * Math.PI * 2;
+                const radius = 100 + Math.random() * 200;
+                this.x = canvas.width / 2 + Math.cos(angle) * radius;
+                this.y = canvas.height / 2 + Math.sin(angle) * radius;
+                this.vx = (Math.random() - 0.5) * 0.5;
+                this.vy = (Math.random() - 0.5) * 0.5;
+                this.radius = 2 + Math.random() * 3;
+                this.baseRadius = this.radius;
+                this.angle = Math.random() * Math.PI * 2;
+                this.orbitSpeed = 0.001 + Math.random() * 0.002;
+                this.orbitRadius = radius;
+                this.pulsePhase = Math.random() * Math.PI * 2;
+                this.hue = 180 + Math.random() * 40; // Cyan to blue range
+            }
+            
+            update() {
+                // Orbital motion around center
+                this.angle += this.orbitSpeed;
+                const targetX = canvas.width / 2 + Math.cos(this.angle) * this.orbitRadius;
+                const targetY = canvas.height / 2 + Math.sin(this.angle) * this.orbitRadius;
+                
+                // Smooth approach to orbital position
+                this.vx += (targetX - this.x) * 0.001;
+                this.vy += (targetY - this.y) * 0.001;
+                
+                // React to mouse (human presence)
+                const dx = mouse.x - this.x;
+                const dy = mouse.y - this.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                
+                if (dist < 150 && mouse.active) {
+                    // Gently move toward human presence
+                    this.vx += dx * 0.0001;
+                    this.vy += dy * 0.0001;
+                    this.radius = this.baseRadius * 1.5;
+                } else {
+                    this.radius = this.baseRadius;
+                }
+                
+                // Apply velocity with damping
+                this.vx *= 0.98;
+                this.vy *= 0.98;
+                this.x += this.vx;
+                this.y += this.vy;
+                
+                // Pulse effect
+                this.pulsePhase += 0.02;
+            }
+            
+            draw() {
+                const pulse = 1 + Math.sin(this.pulsePhase) * 0.2;
+                const alpha = 0.4 + Math.sin(this.pulsePhase) * 0.2;
+                
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius * pulse, 0, Math.PI * 2);
+                ctx.fillStyle = `hsla(${this.hue}, 100%, 60%, ${alpha})`;
+                ctx.fill();
+                
+                // Glow
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius * pulse * 2, 0, Math.PI * 2);
+                ctx.fillStyle = `hsla(${this.hue}, 100%, 60%, ${alpha * 0.3})`;
+                ctx.fill();
+            }
+        }
+        
+        // Human Particle class
+        class HumanParticle {
+            constructor() {
+                this.reset();
+            }
+            
+            reset() {
+                this.x = Math.random() * canvas.width;
+                this.y = Math.random() * canvas.height;
+                this.vx = (Math.random() - 0.5) * 0.3;
+                this.vy = (Math.random() - 0.5) * 0.3;
+                this.radius = 3 + Math.random() * 4;
+                this.baseRadius = this.radius;
+                this.pulsePhase = Math.random() * Math.PI * 2;
+                this.hue = 25 + Math.random() * 30; // Orange to gold range
+                this.breathPhase = Math.random() * Math.PI * 2;
+            }
+            
+            update() {
+                // Organic wandering
+                this.vx += (Math.random() - 0.5) * 0.05;
+                this.vy += (Math.random() - 0.5) * 0.05;
+                
+                // Stay somewhat near mouse if active
+                if (mouse.active) {
+                    const dx = mouse.x - this.x;
+                    const dy = mouse.y - this.y;
+                    this.vx += dx * 0.0002;
+                    this.vy += dy * 0.0002;
+                }
+                
+                // Apply velocity with damping
+                this.vx *= 0.99;
+                this.vy *= 0.99;
+                this.x += this.vx;
+                this.y += this.vy;
+                
+                // Wrap around edges
+                if (this.x < 0) this.x = canvas.width;
+                if (this.x > canvas.width) this.x = 0;
+                if (this.y < 0) this.y = canvas.height;
+                if (this.y > canvas.height) this.y = 0;
+                
+                // Breathing pulse
+                this.breathPhase += 0.03;
+                this.pulsePhase += 0.015;
+            }
+            
+            draw() {
+                const breath = 1 + Math.sin(this.breathPhase) * 0.15;
+                const pulse = 1 + Math.sin(this.pulsePhase) * 0.1;
+                const alpha = 0.5 + Math.sin(this.breathPhase) * 0.2;
+                
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius * breath * pulse, 0, Math.PI * 2);
+                ctx.fillStyle = `hsla(${this.hue}, 100%, 60%, ${alpha})`;
+                ctx.fill();
+                
+                // Glow
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius * breath * pulse * 1.5, 0, Math.PI * 2);
+                ctx.fillStyle = `hsla(${this.hue}, 100%, 60%, ${alpha * 0.4})`;
+                ctx.fill();
+            }
+        }
+        
+        // Initialize particles
+        for (let i = 0; i < 40; i++) {
+            aiParticles.push(new AIParticle());
+        }
+        
+        for (let i = 0; i < 30; i++) {
+            humanParticles.push(new HumanParticle());
+        }
+        
+        // Draw connections between nearby particles
+        function drawConnections() {
+            // AI to Human connections
+            for (let ai of aiParticles) {
+                for (let human of humanParticles) {
+                    const dx = ai.x - human.x;
+                    const dy = ai.y - human.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < 120) {
+                        const alpha = (1 - dist / 120) * 0.3;
+                        ctx.beginPath();
+                        ctx.moveTo(ai.x, ai.y);
+                        ctx.lineTo(human.x, human.y);
+                        ctx.strokeStyle = `rgba(100, 200, 255, ${alpha})`;
+                        ctx.lineWidth = 0.5;
+                        ctx.stroke();
+                    }
+                }
+            }
+            
+            // AI to AI connections (mesh)
+            for (let i = 0; i < aiParticles.length; i++) {
+                for (let j = i + 1; j < aiParticles.length; j++) {
+                    const dx = aiParticles[i].x - aiParticles[j].x;
+                    const dy = aiParticles[i].y - aiParticles[j].y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < 80) {
+                        const alpha = (1 - dist / 80) * 0.2;
+                        ctx.beginPath();
+                        ctx.moveTo(aiParticles[i].x, aiParticles[i].y);
+                        ctx.lineTo(aiParticles[j].x, aiParticles[j].y);
+                        ctx.strokeStyle = `rgba(0, 212, 255, ${alpha})`;
+                        ctx.lineWidth = 0.3;
+                        ctx.stroke();
+                    }
+                }
+            }
+            
+            // Memory node connections
+            for (let node of memoryNodes) {
+                // Connect to nearby AI particles
+                for (let ai of aiParticles) {
+                    const dx = ai.x - node.x;
+                    const dy = ai.y - node.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < 150) {
+                        const alpha = (1 - dist / 150) * node.life * 0.5;
+                        ctx.beginPath();
+                        ctx.moveTo(node.x, node.y);
+                        ctx.lineTo(ai.x, ai.y);
+                        ctx.strokeStyle = `rgba(255, 200, 100, ${alpha})`;
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                    }
+                }
+            }
+        }
+        
+        // Draw memory nodes
+        function drawMemoryNodes() {
+            for (let i = memoryNodes.length - 1; i >= 0; i--) {
+                const node = memoryNodes[i];
+                
+                // Grow then fade
+                if (node.life > 0.8) {
+                    node.radius += (15 - node.radius) * 0.1;
+                }
+                
+                node.life -= 0.002;
+                
+                if (node.life <= 0) {
+                    memoryNodes.splice(i, 1);
+                    continue;
+                }
+                
+                const alpha = node.life;
+                
+                // Outer glow
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, node.radius * 2, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255, 200, 100, ${alpha * 0.2})`;
+                ctx.fill();
+                
+                // Inner core
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255, 220, 150, ${alpha * 0.8})`;
+                ctx.fill();
+            }
+        }
+        
+        // Calculate resonance
+        function calculateResonance() {
+            let totalConnections = 0;
+            let connectionStrength = 0;
+            
+            for (let ai of aiParticles) {
+                for (let human of humanParticles) {
+                    const dx = ai.x - human.x;
+                    const dy = ai.y - human.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < 120) {
+                        totalConnections++;
+                        connectionStrength += (1 - dist / 120);
+                    }
+                }
+            }
+            
+            // Normalize to percentage
+            const maxPossible = aiParticles.length * humanParticles.length;
+            const resonance = Math.min(100, (connectionStrength / maxPossible) * 200);
+            
+            return Math.round(resonance);
+        }
+        
+        // Animation loop
+        let frameCount = 0;
+        
+        function animate() {
+            ctx.fillStyle = 'rgba(10, 10, 26, 0.15)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw connections first (behind particles)
+            drawConnections();
+            
+            // Update and draw AI particles
+            for (let particle of aiParticles) {
+                particle.update();
+                particle.draw();
+            }
+            
+            // Update and draw human particles
+            for (let particle of humanParticles) {
+                particle.update();
+                particle.draw();
+            }
+            
+            // Draw memory nodes
+            drawMemoryNodes();
+            
+            // Update resonance meter
+            const resonance = calculateResonance();
+            resonanceFill.style.width = resonance + '%';
+            resonanceValue.textContent = resonance + '%';
+            
+            // Update thought display
+            if (thoughtTimer > 0) {
+                thoughtTimer--;
+                if (thoughtTimer < 60) {
+                    thoughtOpacity = thoughtTimer / 60;
+                    thoughtDisplay.style.opacity = thoughtOpacity;
+                }
+            }
+            
+            // Randomly show thoughts when resonance is high
+            frameCount++;
+            if (frameCount % 600 === 0 && resonance > 50 && Math.random() > 0.5) {
+                showRandomThought();
+            }
+            
+            requestAnimationFrame(animate);
+        }
+        
+        animate();
+        
+        // Show initial thought
+        setTimeout(showRandomThought, 2000);
+    </script>
+</body>
+</html>
