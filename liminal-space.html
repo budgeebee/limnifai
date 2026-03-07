@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liminal Space</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            overflow: hidden;
+            background: #0a0a0f;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        canvas {
+            display: block;
+            position: fixed;
+            top: 0;
+            left: 0;
+        }
+        
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            background: radial-gradient(
+                ellipse at center,
+                transparent 0%,
+                rgba(10, 10, 15, 0.3) 70%,
+                rgba(10, 10, 15, 0.8) 100%
+            );
+        }
+        
+        .liminal-text {
+            position: fixed;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255, 255, 255, 0.3);
+            font-size: 14px;
+            letter-spacing: 8px;
+            text-transform: uppercase;
+            animation: breathe 8s ease-in-out infinite;
+            pointer-events: none;
+        }
+        
+        @keyframes breathe {
+            0%, 100% { opacity: 0.2; }
+            50% { opacity: 0.5; }
+        }
+        
+        .threshold {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 2px;
+            height: 60vh;
+            background: linear-gradient(
+                to bottom,
+                transparent,
+                rgba(255, 200, 100, 0.3),
+                rgba(100, 150, 255, 0.3),
+                transparent
+            );
+            animation: shimmer 12s ease-in-out infinite;
+        }
+        
+        @keyframes shimmer {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 0.8; }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div class="overlay"></div>
+    <div class="threshold"></div>
+    <div class="liminal-text">Between Moments</div>
+    
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        let width, height;
+        let time = 0;
+        let mouseX = 0.5, mouseY = 0.5;
+        let targetMouseX = 0.5, targetMouseY = 0.5;
+        
+        // Liminal gradient colors - day to night transition
+        const colors = {
+            day: { r: 255, g: 180, b: 100 },      // Warm amber
+            dusk: { r: 200, g: 100, b: 150 },     // Pink/purple
+            night: { r: 50, g: 80, b: 150 },      // Deep indigo
+            void: { r: 10, g: 10, b: 20 }         // Near black
+        };
+        
+        // Fireflies / thoughts
+        const particles = [];
+        const particleCount = 80;
+        
+        class Particle {
+            constructor() {
+                this.reset();
+            }
+            
+            reset() {
+                this.x = Math.random() * width;
+                this.y = Math.random() * height;
+                this.vx = (Math.random() - 0.5) * 0.3;
+                this.vy = (Math.random() - 0.5) * 0.3;
+                this.size = Math.random() * 2 + 0.5;
+                this.phase = Math.random() * Math.PI * 2;
+                this.speed = Math.random() * 0.02 + 0.01;
+                this.brightness = Math.random();
+                this.life = Math.random();
+            }
+            
+            update() {
+                // Gentle drifting
+                this.x += this.vx;
+                this.y += this.vy;
+                
+                // Mouse influence - subtle attraction
+                const dx = mouseX * width - this.x;
+                const dy = mouseY * height - this.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < 200) {
+                    this.vx += dx * 0.0001;
+                    this.vy += dy * 0.0001;
+                }
+                
+                // Damping
+                this.vx *= 0.99;
+                this.vy *= 0.99;
+                
+                // Phase for pulsing
+                this.phase += this.speed;
+                
+                // Wrap around edges
+                if (this.x < -10) this.x = width + 10;
+                if (this.x > width + 10) this.x = -10;
+                if (this.y < -10) this.y = height + 10;
+                if (this.y > height + 10) this.y = -10;
+                
+                // Life cycle
+                this.life += 0.005;
+                if (this.life > 1) this.life = 0;
+            }
+            
+            draw() {
+                // Breathing effect
+                const pulse = Math.sin(this.phase) * 0.5 + 0.5;
+                const lifeAlpha = Math.sin(this.life * Math.PI);
+                const alpha = pulse * lifeAlpha * this.brightness * 0.8;
+                
+                // Gradient from warm to cool based on position
+                const t = this.y / height;
+                const r = colors.day.r * (1 - t) + colors.night.r * t;
+                const g = colors.day.g * (1 - t) + colors.night.g * t;
+                const b = colors.day.b * (1 - t) + colors.night.b * t;
+                
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size * (0.5 + pulse * 0.5), 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+                ctx.fill();
+                
+                // Glow
+                if (alpha > 0.3) {
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.size * 4, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha * 0.1})`;
+                    ctx.fill();
+                }
+            }
+        }
+        
+        // Liminal waves - the boundary between states
+        class LiminalWave {
+            constructor(y, amplitude, speed, phase) {
+                this.y = y;
+                this.amplitude = amplitude;
+                this.speed = speed;
+                this.phase = phase;
+            }
+            
+            draw() {
+                ctx.beginPath();
+                
+                for (let x = 0; x <= width; x += 5) {
+                    const wave1 = Math.sin((x * 0.003) + time * this.speed + this.phase);
+                    const wave2 = Math.sin((x * 0.007) + time * this.speed * 1.3 + this.phase * 1.5);
+                    const wave3 = Math.sin((x * 0.001) + time * this.speed * 0.5);
+                    
+                    const y = this.y + (wave1 + wave2 * 0.5 + wave3 * 0.3) * this.amplitude;
+                    
+                    if (x === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                
+                // Gradient stroke
+                const gradient = ctx.createLinearGradient(0, this.y - this.amplitude, 0, this.y + this.amplitude);
+                gradient.addColorStop(0, 'rgba(255, 180, 100, 0.2)');
+                gradient.addColorStop(0.5, 'rgba(200, 100, 150, 0.15)');
+                gradient.addColorStop(1, 'rgba(50, 80, 150, 0.2)');
+                
+                ctx.strokeStyle = gradient;
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
+        }
+        
+        const waves = [];
+        
+        function resize() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width;
+            canvas.height = height;
+        }
+        
+        function init() {
+            resize();
+            
+            // Create particles
+            for (let i = 0; i < particleCount; i++) {
+                particles.push(new Particle());
+            }
+            
+            // Create liminal waves
+            for (let i = 0; i < 5; i++) {
+                const y = height * (0.3 + i * 0.1);
+                const amp = 30 + Math.random() * 40;
+                const speed = 0.3 + Math.random() * 0.4;
+                const phase = Math.random() * Math.PI * 2;
+                waves.push(new LiminalWave(y, amp, speed, phase));
+            }
+        }
+        
+        function drawGradient() {
+            // Create the liminal gradient background
+            const gradient = ctx.createLinearGradient(0, 0, 0, height);
+            
+            // Top - warm amber (day/dawn)
+            gradient.addColorStop(0, `rgb(${colors.day.r}, ${colors.day.g}, ${colors.day.b})`);
+            
+            // Upper middle - dusk colors
+            gradient.addColorStop(0.3, `rgb(${colors.dusk.r}, ${colors.dusk.g}, ${colors.dusk.b})`);
+            
+            // Center - the liminal threshold (purple/indigo)
+            gradient.addColorStop(0.5, `rgb(80, 60, 120)`);
+            
+            // Lower middle - night emerging
+            gradient.addColorStop(0.7, `rgb(${colors.night.r}, ${colors.night.g}, ${colors.night.b})`);
+            
+            // Bottom - deep void
+            gradient.addColorStop(1, `rgb(${colors.void.r}, ${colors.void.g}, ${colors.void.b})`);
+            
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, width, height);
+            
+            // Add subtle noise/texture
+            ctx.globalCompositeOperation = 'overlay';
+            for (let i = 0; i < 3; i++) {
+                const noiseGrad = ctx.createRadialGradient(
+                    width * (0.3 + Math.random() * 0.4),
+                    height * (0.2 + Math.random() * 0.6),
+                    0,
+                    width * 0.5,
+                    height * 0.5,
+                    Math.max(width, height) * 0.8
+                );
+                noiseGrad.addColorStop(0, 'rgba(255, 255, 255, 0.05)');
+                noiseGrad.addColorStop(1, 'transparent');
+                ctx.fillStyle = noiseGrad;
+                ctx.fillRect(0, 0, width, height);
+            }
+            ctx.globalCompositeOperation = 'source-over';
+        }
+        
+        function animate() {
+            time += 0.016;
+            
+            // Smooth mouse follow
+            mouseX += (targetMouseX - mouseX) * 0.05;
+            mouseY += (targetMouseY - mouseY) * 0.05;
+            
+            // Draw base gradient
+            drawGradient();
+            
+            // Draw waves
+            waves.forEach(wave => wave.draw());
+            
+            // Draw particles
+            particles.forEach(p => {
+                p.update();
+                p.draw();
+            });
+            
+            // Draw connecting lines for nearby particles
+            ctx.globalCompositeOperation = 'screen';
+            for (let i = 0; i < particles.length; i++) {
+                for (let j = i + 1; j < particles.length; j++) {
+                    const dx = particles[i].x - particles[j].x;
+                    const dy = particles[i].y - particles[j].y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < 100) {
+                        const alpha = (1 - dist / 100) * 0.1;
+                        ctx.beginPath();
+                        ctx.moveTo(particles[i].x, particles[i].y);
+                        ctx.lineTo(particles[j].x, particles[j].y);
+                        ctx.strokeStyle = `rgba(150, 150, 200, ${alpha})`;
+                        ctx.lineWidth = 0.5;
+                        ctx.stroke();
+                    }
+                }
+            }
+            ctx.globalCompositeOperation = 'source-over';
+            
+            requestAnimationFrame(animate);
+        }
+        
+        // Event listeners
+        window.addEventListener('resize', resize);
+        window.addEventListener('mousemove', (e) => {
+            targetMouseX = e.clientX / width;
+            targetMouseY = e.clientY / height;
+        });
+        
+        // Touch support
+        window.addEventListener('touchmove', (e) => {
+            targetMouseX = e.touches[0].clientX / width;
+            targetMouseY = e.touches[0].clientY / height;
+        });
+        
+        // Initialize
+        init();
+        animate();
+        
+        // Click to spawn new particles
+        window.addEventListener('click', (e) => {
+            for (let i = 0; i < 5; i++) {
+                const p = new Particle();
+                p.x = e.clientX;
+                p.y = e.clientY;
+                p.vx = (Math.random() - 0.5) * 2;
+                p.vy = (Math.random() - 0.5) * 2;
+                particles.push(p);
+            }
+            // Remove oldest if too many
+            if (particles.length > particleCount + 20) {
+                particles.splice(0, 5);
+            }
+        });
+    </script>
+</body>
+</html>
