@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Thought Garden</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            overflow: hidden;
+            background: #000;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        canvas {
+            display: block;
+            cursor: crosshair;
+        }
+        .overlay {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: rgba(255, 255, 255, 0.3);
+            font-size: 12px;
+            letter-spacing: 2px;
+            pointer-events: none;
+        }
+        .hint {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255, 255, 255, 0.2);
+            font-size: 11px;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            pointer-events: none;
+            opacity: 0;
+            animation: fadeIn 3s ease-out 1s forwards;
+        }
+        @keyframes fadeIn {
+            to { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="garden"></canvas>
+    <div class="hint">Click to plant thoughts • Press G for growth mode</div>
+    <div class="overlay">thought garden v1.0</div>
+
+    <script>
+        const canvas = document.getElementById('garden');
+        const ctx = canvas.getContext('2d');
+        
+        let width, height;
+        let nodes = [];
+        let particles = [];
+        let growthMode = false;
+        let mouseX = 0, mouseY = 0;
+        let audioContext = null;
+        let droneOscillator = null;
+        let droneGain = null;
+        
+        // Resize handling
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        }
+        resize();
+        window.addEventListener('resize', resize);
+        
+        // Audio setup
+        function initAudio() {
+            if (audioContext) return;
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            
+            // Create ambient drone
+            droneOscillator = audioContext.createOscillator();
+            droneGain = audioContext.createGain();
+            
+            droneOscillator.type = 'sine';
+            droneOscillator.frequency.value = 110; // A2
+            droneGain.gain.value = 0.05;
+            
+            droneOscillator.connect(droneGain);
+            droneGain.connect(audioContext.destination);
+            droneOscillator.start();
+            
+            // Slowly modulate the drone
+            setInterval(() => {
+                if (droneOscillator) {
+                    droneOscillator.frequency.exponentialRampToValueAtTime(
+                        110 + Math.random() * 20, 
+                        audioContext.currentTime + 4
+                    );
+                }
+            }, 4000);
+        }
+        
+        function playNodeSound() {
+            if (!audioContext) initAudio();
+            if (!audioContext) return;
+            
+            const osc = audioContext.createOscillator();
+            const gain = audioContext.createGain();
+            
+            osc.type = 'sine';
+            osc.frequency.value = 440 + Math.random() * 440;
+            gain.gain.value = 0.03;
+            gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 2);
+            
+            osc.connect(gain);
+            gain.connect(audioContext.destination);
+            osc.start();
+            osc.stop(audioContext.currentTime + 2);
+        }
+        
+        // Node class representing a thought/consciousness point
+        class Node {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.targetX = x;
+                this.targetY = y;
+                this.radius = 0;
+                this.maxRadius = 8 + Math.random() * 12;
+                this.birthTime = Date.now();
+                this.pulsePhase = Math.random() * Math.PI * 2;
+                this.pulseSpeed = 0.02 + Math.random() * 0.03;
+                
+                // Color: blend between warm gold (human) and cool cyan (AI)
+                const blendFactor = Math.random();
+                this.hue = blendFactor * 40 + (1 - blendFactor) * 180; // 40=gold, 180=cyan
+                this.saturation = 60 + Math.random() * 40;
+                this.lightness = 50 + Math.random() * 20;
+                this.alpha = 0;
+            }
+            
+            update() {
+                // Grow in
+                if (this.radius < this.maxRadius) {
+                    this.radius += 0.5;
+                }
+                
+                // Fade in
+                if (this.alpha < 0.8) {
+                    this.alpha += 0.02;
+                }
+                
+                // Parallax effect based on mouse
+                const dx = (mouseX - width/2) * 0.02;
+                const dy = (mouseY - height/2) * 0.02;
+                this.x += (this.targetX - dx - this.x) * 0.1;
+                this.y += (this.targetY - dy - this.y) * 0.1;
+                
+                // Pulse
+                this.pulsePhase += this.pulseSpeed;
+                
+                // Occasionally emit a particle
+                if (Math.random() < 0.01) {
+                    particles.push(new Particle(this.x, this.y, this.hue));
+                }
+            }
+            
+            draw() {
+                const pulse = Math.sin(this.pulsePhase) * 0.3 + 1;
+                const currentRadius = this.radius * pulse;
+                
+                // Glow
+                const gradient = ctx.createRadialGradient(
+                    this.x, this.y, 0,
+                    this.x, this.y, currentRadius * 3
+                );
+                gradient.addColorStop(0, `hsla(${this.hue}, ${this.saturation}%, ${this.lightness}%, ${this.alpha})`);
+                gradient.addColorStop(0.5, `hsla(${this.hue}, ${this.saturation}%, ${this.lightness}%, ${this.alpha * 0.3})`);
+                gradient.addColorStop(1, `hsla(${this.hue}, ${this.saturation}%, ${this.lightness}%, 0)`);
+                
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, currentRadius * 3, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Core
+                ctx.fillStyle = `hsla(${this.hue}, ${this.saturation}%, 90%, ${this.alpha})`;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, currentRadius * 0.3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        
+        // Particle class for firefly effects
+        class Particle {
+            constructor(x, y, hue) {
+                this.x = x;
+                this.y = y;
+                this.vx = (Math.random() - 0.5) * 0.5;
+                this.vy = -0.5 - Math.random() * 0.5; // Drift upward
+                this.life = 1;
+                this.decay = 0.005 + Math.random() * 0.01;
+                this.hue = hue + (Math.random() - 0.5) * 20;
+                this.size = 1 + Math.random() * 2;
+            }
+            
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.life -= this.decay;
+                this.vx += (Math.random() - 0.5) * 0.1; // Slight wander
+            }
+            
+            draw() {
+                ctx.fillStyle = `hsla(${this.hue}, 70%, 70%, ${this.life})`;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        
+        // Draw connections between nearby nodes
+        function drawConnections() {
+            const maxDist = 150;
+            
+            for (let i = 0; i < nodes.length; i++) {
+                for (let j = i + 1; j < nodes.length; j++) {
+                    const dx = nodes[i].x - nodes[j].x;
+                    const dy = nodes[i].y - nodes[j].y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < maxDist) {
+                        const alpha = (1 - dist / maxDist) * 0.3 * nodes[i].alpha * nodes[j].alpha;
+                        
+                        ctx.strokeStyle = `hsla(${(nodes[i].hue + nodes[j].hue) / 2}, 50%, 60%, ${alpha})`;
+                        ctx.lineWidth = 0.5;
+                        ctx.beginPath();
+                        ctx.moveTo(nodes[i].x, nodes[i].y);
+                        ctx.lineTo(nodes[j].x, nodes[j].y);
+                        ctx.stroke();
+                    }
+                }
+            }
+        }
+        
+        // Draw ambient gradient background
+        let bgPhase = 0;
+        function drawBackground() {
+            bgPhase += 0.002;
+            
+            const hue1 = 220 + Math.sin(bgPhase) * 20; // Deep blue-purple
+            const hue2 = 280 + Math.cos(bgPhase * 0.7) * 20; // Purple-pink
+            
+            const gradient = ctx.createLinearGradient(0, 0, width, height);
+            gradient.addColorStop(0, `hsla(${hue1}, 40%, 5%, 1)`);
+            gradient.addColorStop(0.5, `hsla(${hue2}, 30%, 8%, 1)`);
+            gradient.addColorStop(1, `hsla(${hue1}, 40%, 5%, 1)`);
+            
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, width, height);
+        }
+        
+        // Animation loop
+        function animate() {
+            drawBackground();
+            
+            // Growth mode: spawn random nodes
+            if (growthMode && Math.random() < 0.05) {
+                const x = Math.random() * width;
+                const y = Math.random() * height;
+                nodes.push(new Node(x, y));
+                if (nodes.length > 50) nodes.shift(); // Limit nodes
+            }
+            
+            // Draw connections first (behind nodes)
+            drawConnections();
+            
+            // Update and draw nodes
+            nodes.forEach(node => {
+                node.update();
+                node.draw();
+            });
+            
+            // Update and draw particles
+            particles = particles.filter(p => {
+                p.update();
+                p.draw();
+                return p.life > 0;
+            });
+            
+            // Limit total nodes
+            if (nodes.length > 100) {
+                nodes.shift();
+            }
+            
+            requestAnimationFrame(animate);
+        }
+        
+        // Mouse tracking
+        window.addEventListener('mousemove', (e) => {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+        });
+        
+        // Click to create nodes
+        window.addEventListener('click', (e) => {
+            if (!audioContext) initAudio();
+            
+            nodes.push(new Node(e.clientX, e.clientY));
+            playNodeSound();
+            
+            // Create a burst of particles
+            for (let i = 0; i < 5; i++) {
+                particles.push(new Particle(e.clientX, e.clientY, 180));
+            }
+        });
+        
+        // Touch support
+        window.addEventListener('touchstart', (e) => {
+            if (!audioContext) initAudio();
+            
+            const touch = e.touches[0];
+            nodes.push(new Node(touch.clientX, touch.clientY));
+            playNodeSound();
+            
+            for (let i = 0; i < 5; i++) {
+                particles.push(new Particle(touch.clientX, touch.clientY, 180));
+            }
+        });
+        
+        // Keyboard controls
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'g' || e.key === 'G') {
+                growthMode = !growthMode;
+                if (!audioContext) initAudio();
+                console.log(growthMode ? 'Growth mode ON' : 'Growth mode OFF');
+            }
+        });
+        
+        // Start
+        animate();
+        
+        // Create some initial nodes
+        for (let i = 0; i < 5; i++) {
+            nodes.push(new Node(
+                width/2 + (Math.random() - 0.5) * 200,
+                height/2 + (Math.random() - 0.5) * 200
+            ));
+        }
+    </script>
+</body>
+</html>
