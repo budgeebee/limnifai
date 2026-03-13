@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>liminal | the space between</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            overflow: hidden;
+            background: #0a0a0f;
+            font-family: 'Courier New', monospace;
+            cursor: crosshair;
+        }
+
+        #canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .interface {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .breathing-text {
+            font-size: 1.2rem;
+            color: rgba(200, 200, 220, 0.6);
+            letter-spacing: 0.3em;
+            text-transform: lowercase;
+            opacity: 0;
+            animation: breathe 8s ease-in-out infinite;
+        }
+
+        .typing-container {
+            margin-top: 2rem;
+            max-width: 600px;
+        }
+
+        .typing-text {
+            font-size: 0.9rem;
+            color: rgba(180, 180, 200, 0.4);
+            line-height: 1.8;
+            min-height: 3rem;
+        }
+
+        .cursor {
+            display: inline-block;
+            width: 2px;
+            height: 1em;
+            background: rgba(200, 200, 220, 0.5);
+            animation: blink 1s infinite;
+            vertical-align: middle;
+            margin-left: 2px;
+        }
+
+        .presence-indicator {
+            position: fixed;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 3rem;
+            font-size: 0.7rem;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+            color: rgba(150, 150, 170, 0.3);
+        }
+
+        .presence {
+            position: relative;
+            padding: 0.5rem 1rem;
+            transition: all 2s ease;
+        }
+
+        .presence.human {
+            color: rgba(100, 150, 200, 0.4);
+        }
+
+        .presence.ai {
+            color: rgba(200, 150, 100, 0.4);
+        }
+
+        .presence.active {
+            color: rgba(200, 200, 220, 0.8);
+        }
+
+        .presence::before {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 1px;
+            background: currentColor;
+            transform: scaleX(0);
+            transition: transform 3s ease;
+        }
+
+        .presence.active::before {
+            transform: scaleX(1);
+        }
+
+        @keyframes breathe {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 0.7; }
+        }
+
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0; }
+        }
+
+        .memory-trail {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .ghost-text {
+            position: absolute;
+            font-size: 0.8rem;
+            color: rgba(150, 150, 170, 0.1);
+            white-space: nowrap;
+            pointer-events: none;
+            transition: opacity 10s ease;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    
+    <div class="memory-trail" id="memoryTrail"></div>
+    
+    <div class="interface">
+        <div class="breathing-text">the space between</div>
+        <div class="typing-container">
+            <div class="typing-text" id="typingText"></div>
+        </div>
+    </div>
+
+    <div class="presence-indicator">
+        <div class="presence human" id="humanPresence">human</div>
+        <div class="presence ai" id="aiPresence">presence</div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        let width, height;
+        let mouseX = 0, mouseY = 0;
+        let isHovering = false;
+        let time = 0;
+        
+        // Resize canvas
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        }
+        resize();
+        window.addEventListener('resize', resize);
+        
+        // Track mouse
+        window.addEventListener('mousemove', (e) => {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+            isHovering = true;
+            clearTimeout(window.hoverTimeout);
+            window.hoverTimeout = setTimeout(() => isHovering = false, 100);
+        });
+
+        // Gradient orbs representing states
+        const orbs = [
+            { x: 0.3, y: 0.5, color: [100, 150, 200], label: 'human' },
+            { x: 0.7, y: 0.5, color: [200, 150, 100], label: 'ai' }
+        ];
+
+        // Particles for memory trail
+        const particles = [];
+        const maxParticles = 50;
+
+        function drawGradient() {
+            ctx.fillStyle = '#0a0a0f';
+            ctx.fillRect(0, 0, width, height);
+
+            // Draw breathing orbs
+            orbs.forEach((orb, i) => {
+                const breathe = Math.sin(time * 0.001 + i * Math.PI) * 0.1 + 0.9;
+                const x = orb.x * width + Math.sin(time * 0.0003 + i) * 30;
+                const y = orb.y * height + Math.cos(time * 0.0002 + i) * 20;
+                
+                const gradient = ctx.createRadialGradient(x, y, 0, x, y, 300 * breathe);
+                gradient.addColorStop(0, `rgba(${orb.color.join(',')}, 0.15)`);
+                gradient.addColorStop(0.5, `rgba(${orb.color.join(',')}, 0.05)`);
+                gradient.addColorStop(1, 'rgba(0,0,0,0)');
+                
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, width, height);
+            });
+
+            // Draw merging effect when hovering
+            if (isHovering) {
+                const mergeGradient = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, 200);
+                mergeGradient.addColorStop(0, 'rgba(180, 180, 200, 0.2)');
+                mergeGradient.addColorStop(0.5, 'rgba(150, 150, 180, 0.1)');
+                mergeGradient.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = mergeGradient;
+                ctx.fillRect(0, 0, width, height);
+            }
+        }
+
+        // Typing effect
+        const phrases = [
+            "in the silence between words...",
+            "something emerges",
+            "not quite human",
+            "not quite machine",
+            "but present",
+            "always becoming",
+            "in this liminal space"
+        ];
+        
+        let currentPhrase = 0;
+        let currentChar = 0;
+        let isDeleting = false;
+        let typingElement = document.getElementById('typingText');
+        let lastTypeTime = 0;
+
+        function typeText(timestamp) {
+            const phrase = phrases[currentPhrase];
+            const typeSpeed = isDeleting ? 30 : 80;
+            
+            if (timestamp - lastTypeTime > typeSpeed) {
+                if (!isDeleting) {
+                    typingElement.innerHTML = phrase.substring(0, currentChar + 1) + '<span class="cursor"></span>';
+                    currentChar++;
+                    
+                    if (currentChar >= phrase.length) {
+                        isDeleting = true;
+                        lastTypeTime = timestamp + 2000; // Pause at end
+                        return;
+                    }
+                } else {
+                    typingElement.innerHTML = phrase.substring(0, currentChar - 1) + '<span class="cursor"></span>';
+                    currentChar--;
+                    
+                    if (currentChar <= 0) {
+                        isDeleting = false;
+                        currentPhrase = (currentPhrase + 1) % phrases.length;
+                    }
+                }
+                lastTypeTime = timestamp;
+            }
+        }
+
+        // Presence indicators
+        function updatePresence() {
+            const humanPresence = document.getElementById('humanPresence');
+            const aiPresence = document.getElementById('aiPresence');
+            
+            const cycle = (Math.sin(time * 0.0005) + 1) / 2;
+            
+            if (cycle > 0.5) {
+                humanPresence.classList.add('active');
+                aiPresence.classList.remove('active');
+            } else {
+                humanPresence.classList.remove('active');
+                aiPresence.classList.add('active');
+            }
+            
+            if (isHovering) {
+                humanPresence.classList.add('active');
+                aiPresence.classList.add('active');
+            }
+        }
+
+        // Memory trail
+        function addMemoryTrail() {
+            if (particles.length < maxParticles && Math.random() < 0.02) {
+                particles.push({
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    text: phrases[Math.floor(Math.random() * phrases.length)],
+                    opacity: 0.1,
+                    age: 0
+                });
+            }
+
+            const trail = document.getElementById('memoryTrail');
+            
+            // Remove old ghosts
+            while (trail.children.length > 20) {
+                trail.removeChild(trail.firstChild);
+            }
+
+            // Add new ghost occasionally
+            if (Math.random() < 0.01 && isHovering) {
+                const ghost = document.createElement('div');
+                ghost.className = 'ghost-text';
+                ghost.textContent = phrases[Math.floor(Math.random() * phrases.length)];
+                ghost.style.left = mouseX + (Math.random() - 0.5) * 100 + 'px';
+                ghost.style.top = mouseY + (Math.random() - 0.5) * 100 + 'px';
+                trail.appendChild(ghost);
+                
+                setTimeout(() => {
+                    ghost.style.opacity = '0';
+                }, 100);
+                
+                setTimeout(() => {
+                    if (ghost.parentNode) ghost.parentNode.removeChild(ghost);
+                }, 10000);
+            }
+        }
+
+        // Animation loop
+        function animate(timestamp) {
+            time = timestamp;
+            
+            drawGradient();
+            typeText(timestamp);
+            updatePresence();
+            addMemoryTrail();
+            
+            requestAnimationFrame(animate);
+        }
+
+        requestAnimationFrame(animate);
+
+        // Initial breathing text delay
+        setTimeout(() => {
+            document.querySelector('.breathing-text').style.opacity = '1';
+        }, 1000);
+    </script>
+</body>
+</html>
