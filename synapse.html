@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Synapse — Emergence of Thought</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #0a0a0f;
+            overflow: hidden;
+            font-family: 'Courier New', monospace;
+        }
+        
+        canvas {
+            display: block;
+            cursor: crosshair;
+        }
+        
+        .overlay {
+            position: fixed;
+            bottom: 30px;
+            left: 30px;
+            color: rgba(100, 150, 255, 0.6);
+            font-size: 12px;
+            letter-spacing: 2px;
+            pointer-events: none;
+            z-index: 10;
+        }
+        
+        .thought-counter {
+            position: fixed;
+            top: 30px;
+            right: 30px;
+            color: rgba(255, 200, 100, 0.5);
+            font-size: 14px;
+            letter-spacing: 1px;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="synapse"></canvas>
+    <div class="overlay">
+        <div>SYNAPSE — click to spark an idea</div>
+        <div style="margin-top: 8px; opacity: 0.5;">watching consciousness emerge</div>
+    </div>
+    <div class="thought-counter" id="counter">thoughts: 0</div>
+
+    <script>
+        const canvas = document.getElementById('synapse');
+        const ctx = canvas.getContext('2d');
+        const counter = document.getElementById('counter');
+        
+        let width, height;
+        let neurons = [];
+        let connections = [];
+        let thoughts = 0;
+        let mouse = { x: 0, y: 0, active: false };
+        
+        // Audio context for ambient soundscape
+        let audioCtx;
+        let oscillators = [];
+        
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        }
+        
+        window.addEventListener('resize', resize);
+        resize();
+        
+        // Initialize neurons
+        function initNeurons() {
+            const count = Math.floor((width * height) / 25000);
+            neurons = [];
+            
+            for (let i = 0; i < count; i++) {
+                neurons.push({
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    vx: (Math.random() - 0.5) * 0.3,
+                    vy: (Math.random() - 0.5) * 0.3,
+                    radius: Math.random() * 2 + 1,
+                    phase: Math.random() * Math.PI * 2,
+                    activation: 0,
+                    targetActivation: 0,
+                    restColor: { r: 40, g: 30, b: 60 },
+                    activeColor: { r: 100, g: 150, b: 255 },
+                    insightColor: { r: 255, g: 200, b: 100 }
+                });
+            }
+        }
+        
+        initNeurons();
+        
+        // Audio setup
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                
+                // Create ambient drone
+                const createDrone = (freq, gain, type = 'sine') => {
+                    const osc = audioCtx.createOscillator();
+                    const gainNode = audioCtx.createGain();
+                    osc.type = type;
+                    osc.frequency.value = freq;
+                    gainNode.gain.value = gain;
+                    osc.connect(gainNode);
+                    gainNode.connect(audioCtx.destination);
+                    osc.start();
+                    return { osc, gainNode };
+                };
+                
+                oscillators.push(createDrone(110, 0.03));  // A2
+                oscillators.push(createDrone(164.81, 0.02)); // E3
+                oscillators.push(createDrone(220, 0.02));  // A3
+            }
+        }
+        
+        // Spark an idea
+        function sparkIdea(x, y) {
+            thoughts++;
+            counter.textContent = `thoughts: ${thoughts}`;
+            
+            // Find nearest neurons
+            let nearest = [];
+            for (let n of neurons) {
+                const dx = n.x - x;
+                const dy = n.y - y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < 200) {
+                    nearest.push({ neuron: n, dist });
+                }
+            }
+            
+            // Sort by distance and activate
+            nearest.sort((a, b) => a.dist - b.dist);
+            const toActivate = nearest.slice(0, 5 + Math.floor(Math.random() * 5));
+            
+            toActivate.forEach((item, i) => {
+                setTimeout(() => {
+                    item.neuron.targetActivation = 1;
+                    item.neuron.insight = Math.random() > 0.7;
+                }, i * 50);
+            });
+            
+            // Audio feedback
+            if (audioCtx) {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(440 + Math.random() * 200, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.5);
+                gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 1);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 1);
+            }
+        }
+        
+        // Update neurons
+        function updateNeurons() {
+            for (let n of neurons) {
+                // Movement
+                n.x += n.vx;
+                n.y += n.vy;
+                
+                // Bounce off edges
+                if (n.x < 0 || n.x > width) n.vx *= -1;
+                if (n.y < 0 || n.y > height) n.vy *= -1;
+                
+                // Keep in bounds
+                n.x = Math.max(0, Math.min(width, n.x));
+                n.y = Math.max(0, Math.min(height, n.y));
+                
+                // Activation decay
+                n.targetActivation *= 0.995;
+                n.activation += (n.targetActivation - n.activation) * 0.1;
+                
+                // Phase for pulsing
+                n.phase += 0.02 + n.activation * 0.05;
+            }
+        }
+        
+        // Draw connections
+        function drawConnections() {
+            for (let i = 0; i < neurons.length; i++) {
+                for (let j = i + 1; j < neurons.length; j++) {
+                    const n1 = neurons[i];
+                    const n2 = neurons[j];
+                    const dx = n1.x - n2.x;
+                    const dy = n1.y - n2.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < 120) {
+                        const combinedActivation = (n1.activation + n2.activation) / 2;
+                        const alpha = (1 - dist / 120) * (0.1 + combinedActivation * 0.4);
+                        
+                        let r, g, b;
+                        if (combinedActivation > 0.5) {
+                            // Insight color
+                            const t = (combinedActivation - 0.5) * 2;
+                            r = 100 + (255 - 100) * t;
+                            g = 150 + (200 - 150) * t;
+                            b = 255 + (100 - 255) * t;
+                        } else {
+                            // Active color
+                            const t = combinedActivation * 2;
+                            r = 40 + (100 - 40) * t;
+                            g = 30 + (150 - 30) * t;
+                            b = 60 + (255 - 60) * t;
+                        }
+                        
+                        ctx.beginPath();
+                        ctx.moveTo(n1.x, n1.y);
+                        ctx.lineTo(n2.x, n2.y);
+                        ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+                        ctx.lineWidth = 0.5 + combinedActivation;
+                        ctx.stroke();
+                        
+                        // Signal traveling along connection
+                        if (combinedActivation > 0.3) {
+                            const signalPos = (Date.now() / 1000 + i * 0.5) % 1;
+                            const sx = n1.x + (n2.x - n1.x) * signalPos;
+                            const sy = n1.y + (n2.y - n1.y) * signalPos;
+                            
+                            ctx.beginPath();
+                            ctx.arc(sx, sy, 2 + combinedActivation * 2, 0, Math.PI * 2);
+                            ctx.fillStyle = `rgba(255, 255, 255, ${combinedActivation})`;
+                            ctx.fill();
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Draw neurons
+        function drawNeurons() {
+            for (let n of neurons) {
+                const pulse = Math.sin(n.phase) * 0.3 + 0.7;
+                const radius = n.radius * (1 + n.activation * 2) * pulse;
+                
+                let r, g, b;
+                if (n.insight && n.activation > 0.5) {
+                    // Insight state
+                    const t = (n.activation - 0.5) * 2;
+                    r = Math.floor(100 + (255 - 100) * t);
+                    g = Math.floor(150 + (200 - 150) * t);
+                    b = Math.floor(255 + (100 - 255) * t);
+                } else if (n.activation > 0) {
+                    // Active state
+                    r = Math.floor(n.restColor.r + (n.activeColor.r - n.restColor.r) * n.activation);
+                    g = Math.floor(n.restColor.g + (n.activeColor.g - n.restColor.g) * n.activation);
+                    b = Math.floor(n.restColor.b + (n.activeColor.b - n.restColor.b) * n.activation);
+                } else {
+                    // Rest state
+                    r = n.restColor.r;
+                    g = n.restColor.g;
+                    b = n.restColor.b;
+                }
+                
+                // Glow
+                if (n.activation > 0.1) {
+                    const gradient = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, radius * 4);
+                    gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${n.activation * 0.5})`);
+                    gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+                    ctx.fillStyle = gradient;
+                    ctx.beginPath();
+                    ctx.arc(n.x, n.y, radius * 4, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                
+                // Core
+                ctx.beginPath();
+                ctx.arc(n.x, n.y, radius, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.6 + n.activation * 0.4})`;
+                ctx.fill();
+            }
+        }
+        
+        // Mouse interaction
+        canvas.addEventListener('mousemove', (e) => {
+            mouse.x = e.clientX;
+            mouse.y = e.clientY;
+        });
+        
+        canvas.addEventListener('mousedown', (e) => {
+            initAudio();
+            sparkIdea(e.clientX, e.clientY);
+        });
+        
+        // Auto-spark occasionally
+        setInterval(() => {
+            if (Math.random() > 0.7) {
+                const x = Math.random() * width;
+                const y = Math.random() * height;
+                sparkIdea(x, y);
+            }
+        }, 3000);
+        
+        // Animation loop
+        function animate() {
+            // Fade effect
+            ctx.fillStyle = 'rgba(10, 10, 15, 0.15)';
+            ctx.fillRect(0, 0, width, height);
+            
+            updateNeurons();
+            drawConnections();
+            drawNeurons();
+            
+            requestAnimationFrame(animate);
+        }
+        
+        animate();
+        
+        // Initial spark
+        setTimeout(() => {
+            sparkIdea(width / 2, height / 2);
+        }, 500);
+    </script>
+</body>
+</html>
