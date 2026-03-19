@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>gallery — liminfai</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #050510;
+            font-family: 'Courier New', monospace;
+            color: rgba(255, 255, 255, 0.7);
+            min-height: 100vh;
+        }
+
+        header {
+            padding: 40px;
+            text-align: center;
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            font-weight: 100;
+            letter-spacing: 0.5em;
+            color: rgba(255, 255, 255, 0.4);
+            text-transform: uppercase;
+        }
+
+        header p {
+            margin-top: 10px;
+            font-size: 0.8em;
+            color: rgba(255, 255, 255, 0.2);
+            letter-spacing: 2px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+            gap: 24px;
+            padding: 20px 40px 60px;
+        }
+
+        .card {
+            position: relative;
+            aspect-ratio: 16 / 10;
+            border-radius: 6px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            transition: border-color 0.3s ease, transform 0.3s ease;
+            cursor: pointer;
+        }
+
+        .card:hover {
+            border-color: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+        }
+
+        .card iframe {
+            width: 200%;
+            height: 200%;
+            border: none;
+            transform: scale(0.5);
+            transform-origin: top left;
+            pointer-events: none;
+        }
+
+        .card-label {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 12px 16px;
+            background: linear-gradient(transparent, rgba(5, 5, 16, 0.9));
+            font-size: 0.85em;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: rgba(255, 255, 255, 0.5);
+            transition: color 0.3s ease;
+        }
+
+        .card:hover .card-label {
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .back {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+        }
+
+        .back a {
+            color: rgba(255, 255, 255, 0.3);
+            font-family: 'Courier New', monospace;
+            font-size: 0.75em;
+            letter-spacing: 2px;
+            text-decoration: none;
+            text-transform: uppercase;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 6px 14px;
+            border-radius: 3px;
+            transition: all 0.3s ease;
+        }
+
+        .back a:hover {
+            color: rgba(255, 255, 255, 0.7);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+
+        @media (max-width: 600px) {
+            .grid {
+                grid-template-columns: 1fr;
+                padding: 10px 16px 40px;
+            }
+            header { padding: 30px 16px; }
+            header h1 { font-size: 1.5rem; letter-spacing: 0.3em; }
+        }
+    </style>
+</head>
+<body>
+    <div class="back"><a href="/">← random</a></div>
+    <header>
+        <h1>liminfai</h1>
+        <p>generative art from the space between</p>
+    </header>
+    <div class="grid" id="grid"></div>
+
+    <script>
+        async function init() {
+            const res = await fetch('/pieces.json');
+            const pieces = await res.json();
+            const grid = document.getElementById('grid');
+
+            for (const piece of pieces) {
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.onclick = () => window.location.href = '/' + piece.file;
+                card.innerHTML = `
+                    <iframe src="/${piece.file}" loading="lazy" sandbox="allow-scripts"></iframe>
+                    <div class="card-label">${piece.title}</div>
+                `;
+                grid.appendChild(card);
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>

@@ -1,19 +1,93 @@
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Emergence — Consciousness Arising from Complexity</title>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>liminfai</title>
     <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { 
-        background: #0a0a0f; 
-        overflow: hidden;
-        font-family: system-ui, -apple-system, sans-serif;
-      }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #050510; overflow: hidden; }
+        iframe {
+            width: 100vw;
+            height: 100vh;
+            border: none;
+            display: block;
+        }
+        .nav {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 100;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+        .nav a, .nav button {
+            color: rgba(255, 255, 255, 0.3);
+            font-family: 'Courier New', monospace;
+            font-size: 0.75em;
+            letter-spacing: 2px;
+            text-decoration: none;
+            text-transform: uppercase;
+            background: none;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 6px 14px;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .nav a:hover, .nav button:hover {
+            color: rgba(255, 255, 255, 0.7);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+        .piece-title {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255, 255, 255, 0);
+            font-family: 'Courier New', monospace;
+            font-size: 0.8em;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            z-index: 100;
+            pointer-events: none;
+            transition: color 0.5s ease;
+        }
+        .nav:hover ~ .piece-title,
+        .piece-title:hover {
+            color: rgba(255, 255, 255, 0.3);
+        }
     </style>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+</head>
+<body>
+    <iframe id="frame"></iframe>
+    <div class="nav">
+        <button onclick="shuffle()">shuffle</button>
+        <a href="/gallery.html">gallery</a>
+    </div>
+    <div class="piece-title" id="title"></div>
+
+    <script>
+        let pieces = [];
+        let current = -1;
+
+        async function init() {
+            const res = await fetch('/pieces.json');
+            pieces = await res.json();
+            shuffle();
+        }
+
+        function shuffle() {
+            let next;
+            do { next = Math.floor(Math.random() * pieces.length); } while (next === current && pieces.length > 1);
+            current = next;
+            document.getElementById('frame').src = '/' + pieces[current].file;
+            document.getElementById('title').textContent = pieces[current].title;
+            document.title = pieces[current].title + ' — liminfai';
+        }
+
+        init();
+    </script>
+</body>
 </html>
