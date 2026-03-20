@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>membrane | the space between self and world</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { overflow: hidden; background: #030308; font-family: 'Courier New', monospace; cursor: crosshair; }
+        #canvas { position: fixed; top: 0; left: 0; }
+        .overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 10;
+        }
+        .liminal-text {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            opacity: 0;
+            transition: opacity 3s ease;
+        }
+        .liminal-text.visible { opacity: 1; }
+        .line {
+            font-size: clamp(0.7rem, 1.5vw, 1rem);
+            color: rgba(200, 205, 220, 0.45);
+            letter-spacing: 0.25em;
+            line-height: 2.2;
+            text-transform: lowercase;
+        }
+        .line.small {
+            font-size: clamp(0.5rem, 1vw, 0.7rem);
+            color: rgba(180, 185, 200, 0.25);
+            letter-spacing: 0.3em;
+            margin-top: 1.5em;
+        }
+        .presence-bar {
+            position: fixed; bottom: 2rem; left: 50%;
+            transform: translateX(-50%);
+            display: flex; gap: 4rem;
+            font-size: 0.6rem; letter-spacing: 0.3em;
+            text-transform: uppercase;
+            color: rgba(150, 155, 170, 0.2);
+        }
+        .p-label { transition: color 2s ease; }
+        .p-label.active { color: rgba(200, 205, 220, 0.5); }
+        #sound-btn {
+            position: fixed; top: 1.5rem; right: 1.5rem;
+            background: none; border: 1px solid rgba(200,205,220,0.15);
+            color: rgba(200,205,220,0.3); font-family: 'Courier New', monospace;
+            font-size: 0.6rem; letter-spacing: 0.2em; text-transform: uppercase;
+            padding: 0.5rem 1rem; cursor: pointer; z-index: 20;
+            transition: all 1s ease;
+        }
+        #sound-btn:hover { border-color: rgba(200,205,220,0.4); color: rgba(200,205,220,0.6); }
+        #sound-btn.on { border-color: rgba(200,205,220,0.5); color: rgba(200,205,220,0.7); }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div class="overlay">
+    <div class="liminal-text" id="liminal-text">
+        <div class="line">what separates</div>
+        <div class="line">is also what connects</div>
+        <div class="line small">— the membrane is not a wall</div>
+        <div class="line small">it is a conversation —</div>
+        <div class="line small">you, breathing on one side</div>
+        <div class="line small">the world, breathing on the other</div>
+    </div>
+</div>
+<div class="presence-bar">
+    <span class="p-label" id="label-self">self</span>
+    <span class="p-label" id="label-other">world</span>
+</div>
+<button id="sound-btn">sound: off</button>
+<script src="https://cdn.jsdelivr.net/npm/tone@14.7.77/build/Tone.min.js"></script>
+<script>
+// ============================================================
+// MEMBRANE — a piece about the liminal boundary
+// between self and world, inside and outside
+// ============================================================
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+const state = {
+    mouseX: 0, mouseY: 0,
+    targetMouseX: 0, targetMouseY: 0,
+    time: 0,
+    soundOn: false,
+    textVisible: false,
+    textTimer: 0,
+    initialized: false
+};
+
+// Membrane physics
+const membrane = {
+    points: [],
+    numPoints: 200,
+    baseY: 0,
+    amplitude: 30,
+    frequency: 0.008,
+    speed: 0.0008,
+    tension: 0.02,
+    mouseInfluence: 120
+};
+
+// Particles
+const particles = [];
+const NUM_PARTICLES = 320;
+
+class Particle {
+    constructor(side) {
+        this.side = side; // 'top' or 'bottom'
+        this.reset();
+    }
+    reset() {
+        if (this.side === 'top') {
+            this.x = Math.random() * W;
+            this.y = Math.random() * (membrane.baseY - 20);
+            this.vx = (Math.random() - 0.5) * 0.4;
+            this.vy = (Math.random() - 0.5) * 0.3 - 0.1;
+            this.size = Math.random() * 2.5 + 0.5;
+            this.alpha = Math.random() * 0.5 + 0.1;
+            this.hue = Math.random() * 40 + 15; // warm oranges, yellows
+            this.passed = false;
+        } else {
+            this.x = Math.random() * W;
+            this.y = membrane.baseY + 20 + Math.random() * (H - membrane.baseY);
+            this.vx = (Math.random() - 0.5) * 0.25;
+            this.vy = (Math.random() - 0.5) * 0.25;
+            this.size = Math.random() * 1.8 + 0.3;
+            this.alpha = Math.random() * 0.4 + 0.05;
+            this.hue = Math.random() * 60 + 200; // cool blues, purples
+            this.passed = false;
+        }
+        this.life = Math.random() * 0.02 + 0.005;
+        this.drift = Math.random() * Math.PI * 2;
+    }
+    update() {
+        this.drift += 0.01;
+        this.x += this.vx + Math.sin(this.drift) * 0.1;
+        this.y += this.vy;
+
+        // Get membrane Y at this x
+        const mx = Math.floor(this.x / W * membrane.numPoints);
+        const memY = membrane.points[mx] ? membrane.points[mx].y : membrane.baseY;
+
+        if (this.side === 'top') {
+            // Check if particle passed through membrane
+            if (!this.passed && this.y > memY) {
+                this.passed = true;
+                this.side = 'bottom';
+                this.y = memY + 1;
+                this.vy = Math.abs(this.vy) * 0.5 + 0.2;
+                this.hue = Math.random() * 60 + 200;
+                // Spawn ripple at membrane
+                spawnRipple(this.x, memY);
+            }
+            // Wrap
+            if (this.y < -10) this.reset();
+            if (this.x < -10) this.x = W + 10;
+            if (this.x > W + 10) this.x = -10;
+        } else {
+            // Check if particle passed through membrane
+            if (!this.passed && this.y < memY) {
+                this.passed = true;
+                this.side = 'top';
+                this.y = memY - 1;
+                this.vy = -Math.abs(this.vy) * 0.5 - 0.2;
+                this.hue = Math.random() * 40 + 15;
+                spawnRipple(this.x, memY);
+            }
+            // Wrap
+            if (this.y > H + 10) this.reset();
+            if (this.x < -10) this.x = W + 10;
+            if (this.x > W + 10) this.x = -10;
+        }
+
+        // Fade over lifetime
+        this.alpha -= this.life * 0.01;
+        if (this.alpha <= 0) this.reset();
+    }
+    draw() {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        if (this.side === 'top') {
+            ctx.fillStyle = `hsla(${this.hue}, 80%, 65%, ${this.alpha})`;
+        } else {
+            ctx.fillStyle = `hsla(${this.hue}, 60%, 55%, ${this.alpha})`;
+        }
+        ctx.fill();
+    }
+}
+
+// Ripples on the membrane surface
+const ripples = [];
+
+function spawnRipple(x, y) {
+    ripples.push({
+        x, y,
+        radius: 0,
+        maxRadius: 60 + Math.random() * 40,
+        alpha: 0.4,
+        speed: 1.2 + Math.random() * 0.8
+    });
+}
+
+function updateRipples() {
+    for (let i = ripples.length - 1; i >= 0; i--) {
+        const r = ripples[i];
+        r.radius += r.speed;
+        r.alpha *= 0.96;
+        if (r.alpha < 0.01 || r.radius > r.maxRadius) {
+            ripples.splice(i, 1);
+        }
+    }
+}
+
+function drawRipples() {
+    for (const r of ripples) {
+        ctx.beginPath();
+        ctx.arc(r.x, r.y, r.radius, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(200, 210, 230, ${r.alpha})`;
+        ctx.lineWidth = 0.8;
+        ctx.stroke();
+    }
+}
+
+// Initialize membrane points
+function initMembrane() {
+    membrane.points = [];
+    membrane.baseY = H * 0.5;
+    for (let i = 0; i <= membrane.numPoints; i++) {
+        membrane.points.push({
+            x: (i / membrane.numPoints) * W,
+            y: membrane.baseY,
+            vy: 0
+        });
+    }
+}
+
+function updateMembrane() {
+    const mx = state.mouseX;
+    const my = state.mouseY;
+
+    for (let i = 0; i <= membrane.numPoints; i++) {
+        const p = membrane.points[i];
+        const dx = p.x - mx;
+        const distMouse = Math.sqrt(dx * dx + (p.y - my) * (p.y - my));
+
+        // Wave motion
+        const wave = Math.sin(p.x * membrane.frequency + state.time * membrane.speed) * membrane.amplitude;
+        const wave2 = Math.sin(p.x * membrane.frequency * 2.3 + state.time * membrane.speed * 1.7) * membrane.amplitude * 0.3;
+
+        // Mouse influence — membrane bends toward mouse when close
+        let mouseOffset = 0;
+        if (distMouse < membrane.mouseInfluence) {
+            const influence = (1 - distMouse / membrane.mouseInfluence);
+            mouseOffset = (my - membrane.baseY) * influence * 0.4;
+        }
+
+        // Target Y
+        const targetY = membrane.baseY + wave + wave2 + mouseOffset;
+
+        // Spring physics
+        const dy = targetY - p.y;
+        p.vy += dy * membrane.tension;
+        p.vy *= 0.92;
+        p.y += p.vy;
+    }
+}
+
+function drawMembrane() {
+    // Draw membrane as a glowing band
+    ctx.beginPath();
+
+    // Upper edge
+    ctx.moveTo(0, membrane.points[0].y - 2);
+    for (let i = 1; i <= membrane.numPoints; i++) {
+        ctx.lineTo(membrane.points[i].x, membrane.points[i].y - 2);
+    }
+    // Lower edge (reverse)
+    for (let i = membrane.numPoints; i >= 0; i--) {
+        ctx.lineTo(membrane.points[i].x, membrane.points[i].y + 2);
+    }
+    ctx.closePath();
+
+    // Gradient fill for membrane
+    const grad = ctx.createLinearGradient(0, membrane.baseY - 30, 0, membrane.baseY + 30);
+    grad.addColorStop(0, 'rgba(255, 180, 120, 0.08)');
+    grad.addColorStop(0.5, 'rgba(200, 160, 220, 0.15)');
+    grad.addColorStop(1, 'rgba(120, 160, 255, 0.08)');
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Draw the glowing line
+    ctx.beginPath();
+    ctx.moveTo(membrane.points[0].x, membrane.points[0].y);
+    for (let i = 1; i <= membrane.numPoints; i++) {
+        ctx.lineTo(membrane.points[i].x, membrane.points[i].y);
+    }
+    ctx.strokeStyle = 'rgba(200, 190, 220, 0.25)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Second, brighter line
+    ctx.beginPath();
+    ctx.moveTo(membrane.points[0].x, membrane.points[0].y - 1);
+    for (let i = 1; i <= membrane.numPoints; i++) {
+        ctx.lineTo(membrane.points[i].x, membrane.points[i].y - 1);
+    }
+    ctx.strokeStyle = 'rgba(255, 220, 200, 0.1)';
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+}
+
+// Flow fields in each region
+const flowFields = [];
+
+function initFlowFields() {
+    // Top field
+    for (let i = 0; i < 40; i++) {
+        flowFields.push({
+            x: Math.random() * W,
+            y: Math.random() * (H * 0.45),
+            vx: (Math.random() - 0.5) * 0.3,
+            vy: Math.random() * 0.2 + 0.05,
+            life: Math.random() * 0.005 + 0.002,
+            alpha: Math.random() * 0.15 + 0.03,
+            side: 'top'
+        });
+    }
+    // Bottom field
+    for (let i = 0; i < 40; i++) {
+        flowFields.push({
+            x: Math.random() * W,
+            y: H * 0.55 + Math.random() * (H * 0.45),
+            vx: (Math.random() - 0.5) * 0.3,
+            vy: (Math.random() - 0.5) * 0.3,
+            life: Math.random() * 0.005 + 0.002,
+            alpha: Math.random() * 0.12 + 0.02,
+            side: 'bottom'
+        });
+    }
+}
+
+function updateFlowFields() {
+    for (const f of flowFields) {
+        f.x += f.vx + Math.sin(state.time * 0.0005 + f.y * 0.01) * 0.1;
+        f.y += f.vy;
+
+        if (f.side === 'top') {
+            const mx = Math.floor(f.x / W * membrane.numPoints);
+            const memY = membrane.points[mx] ? membrane.points[mx].y : membrane.baseY;
+            if (f.y > memY - 5) {
+                f.y = memY - 6;
+                f.vy = -Math.abs(f.vy);
+            }
+            if (f.y < 0) {
+                f.y = H * 0.45;
+                f.x = Math.random() * W;
+            }
+        } else {
+            const mx = Math.floor(f.x / W * membrane.numPoints);
+            const memY = membrane.points[mx] ? membrane.points[mx].y : membrane.baseY;
+            if (f.y < memY + 5) {
+                f.y = memY + 6;
+                f.vy = Math.abs(f.vy);
+            }
+            if (f.y > H) {
+                f.y = H * 0.55 + Math.random() * (H * 0.45);
+                f.x = Math.random() * W;
+            }
+        }
+        if (f.x < 0) f.x = W;
+        if (f.x > W) f.x = 0;
+    }
+}
+
+function drawFlowFields() {
+    for (const f of flowFields) {
+        const len = 12;
+        ctx.beginPath();
+        ctx.moveTo(f.x, f.y);
+        ctx.lineTo(f.x + f.vx * 10, f.y + f.vy * 10);
+        if (f.side === 'top') {
+            ctx.strokeStyle = `rgba(255, 180, 120, ${f.alpha})`;
+        } else {
+            ctx.strokeStyle = `rgba(140, 170, 255, ${f.alpha})`;
+        }
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+    }
+}
+
+// Background gradient
+function drawBackground() {
+    // Subtle vertical gradient that shifts with mouse
+    const shift = (state.mouseX / W - 0.5) * 20;
+    const topGrad = ctx.createLinearGradient(0, 0, 0, membrane.baseY);
+    topGrad.addColorStop(0, '#0a0608');
+    topGrad.addColorStop(1, `rgba(30, 15, 25, ${0.5 + shift * 0.01})`);
+    ctx.fillStyle = topGrad;
+    ctx.fillRect(0, 0, W, membrane.baseY);
+
+    const botGrad = ctx.createLinearGradient(0, membrane.baseY, 0, H);
+    botGrad.addColorStop(0, `rgba(10, 15, 35, ${0.5 - shift * 0.01})`);
+    botGrad.addColorStop(1, '#050510');
+    ctx.fillStyle = botGrad;
+    ctx.fillRect(0, membrane.baseY, W, H - membrane.baseY);
+}
+
+// Presence labels
+const labelSelf = document.getElementById('label-self');
+const labelOther = document.getElementById('label-other');
+
+function updatePresence() {
+    const mx = state.mouseX;
+    const my = state.mouseY;
+    const memY = membrane.baseY + Math.sin(mx * membrane.frequency + state.time * membrane.speed) * membrane.amplitude;
+
+    const distTop = Math.abs(my - 50);
+    const distBot = Math.abs(my - (H - 50));
+    const inTop = my < memY;
+
+    labelSelf.classList.toggle('active', inTop);
+    labelOther.classList.toggle('active', !inTop);
+}
+
+// Text visibility
+const liminalTextEl = document.getElementById('liminal-text');
+
+function updateText() {
+    state.textTimer++;
+
+    // Show text when mouse is still near center
+    const mx = state.mouseX;
+    const my = state.mouseY;
+    const centerDist = Math.sqrt((mx - W * 0.5) ** 2 + (my - H * 0.5) ** 2);
+    const nearCenter = centerDist < Math.min(W, H) * 0.2;
+    const mouseStill = Math.abs(state.mouseX - state.targetMouseX) < 2 &&
+                       Math.abs(state.mouseY - state.targetMouseY) < 2;
+
+    if (nearCenter && mouseStill && state.time > 120) {
+        if (!state.textVisible) {
+            state.textVisible = true;
+            liminalTextEl.classList.add('visible');
+        }
+    } else {
+        if (state.textVisible && Math.random() > 0.995) {
+            state.textVisible = false;
+            liminalTextEl.classList.remove('visible');
+        }
+    }
+}
+
+// Audio
+let audioCtx, synth, reverb, delay, drone;
+
+function initAudio() {
+    if (state.soundOn) return;
+    Tone.start().then(() => {
+        audioCtx = Tone.context;
+
+        // Drone on the "inside" side — warm low pad
+        drone = new Tone.PolySynth(Tone.Synth, {
+            oscillator: { type: 'sine' },
+            envelope: { attack: 4, decay: 2, sustain: 0.8, release: 6 }
+        }).toDestination();
+
+        drone.volume.value = -18;
+
+        // Play a slow chord progression
+        const chords = [
+            [65.41, 98.00, 130.81],  // C2, G2, C3
+            [58.27, 87.31, 116.54],  // B1, F2, B2
+            [55.00, 82.41, 110.00],  // G1, E2, G2
+            [49.00, 73.42, 98.00]    // G1, D2, G2
+        ];
+        let chordIndex = 0;
+
+        function playChord() {
+            drone.triggerAttackRelease(chords[chordIndex], 12);
+            chordIndex = (chordIndex + 1) % chords.length;
+        }
+
+        playChord();
+        setInterval(playChord, 12000);
+
+        // High shimmer — passes through membrane
+        const shimmer = new Tone.Synth({
+            oscillator: { type: 'triangle' },
+            envelope: { attack: 0.5, decay: 1, sustain: 0.3, release: 4 }
+        }).toDestination();
+        shimmer.volume.value = -24;
+
+        function playShimmer() {
+            const notes = [523.25, 659.25, 783.99, 1046.50];
+            const note = notes[Math.floor(Math.random() * notes.length)];
+            shimmer.triggerAttackRelease(note, 2 + Math.random() * 3);
+        }
+
+        setInterval(playShimmer, 4000 + Math.random() * 6000);
+
+        // Reverb
+        reverb = new Tone.Reverb({ decay: 8, wet: 0.6 }).toDestination();
+        drone.connect(reverb);
+        shimmer.connect(reverb);
+
+        // Filter that opens/closes with mouse
+        const filter = new Tone.Filter(800, 'bandpass').toDestination();
+        drone.connect(filter);
+        shimmer.connect(filter);
+
+        state.filter = filter;
+        state.drone = drone;
+        state.shimmer = shimmer;
+        state.audioInitialized = true;
+    });
+}
+
+function updateAudio() {
+    if (!state.soundOn || !state.audioInitialized) return;
+    // Filter frequency follows mouse Y
+    const freq = 200 + (state.mouseY / H) * 2000;
+    if (state.filter) state.filter.frequency.rampTo(freq, 0.2);
+
+    // Drone volume follows distance from membrane
+    const mx = Math.floor(state.mouseX / W * membrane.numPoints);
+    const memY = membrane.points[mx] ? membrane.points[mx].y : membrane.baseY;
+    const dist = Math.abs(state.mouseY - memY);
+    const vol = -20 + (1 - Math.min(dist / 200, 1)) * 8;
+    if (state.drone) state.drone.volume.rampTo(vol, 0.5);
+}
+
+const soundBtn = document.getElementById('sound-btn');
+soundBtn.addEventListener('click', () => {
+    state.soundOn = !state.soundOn;
+    soundBtn.textContent = state.soundOn ? 'sound: on' : 'sound: off';
+    soundBtn.classList.toggle('on', state.soundOn);
+    if (state.soundOn) {
+        initAudio();
+    }
+});
+
+// Resize
+function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+    initMembrane();
+}
+
+window.addEventListener('resize', resize);
+
+// Mouse
+window.addEventListener('mousemove', (e) => {
+    state.targetMouseX = e.clientX;
+    state.targetMouseY = e.clientY;
+});
+
+// Touch
+window.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    state.targetMouseX = e.touches[0].clientX;
+    state.targetMouseY = e.touches[0].clientY;
+}, { passive: false });
+
+window.addEventListener('touchstart', (e) => {
+    state.targetMouseX = e.touches[0].clientX;
+    state.targetMouseY = e.touches[0].clientY;
+});
+
+// ============================================================
+// MAIN LOOP
+// ============================================================
+
+function init() {
+    resize();
+    initMembrane();
+    initFlowFields();
+
+    // Create particles
+    for (let i = 0; i < NUM_PARTICLES; i++) {
+        const side = i < NUM_PARTICLES * 0.6 ? 'top' : 'bottom';
+        particles.push(new Particle(side));
+    }
+
+    state.initialized = true;
+    loop();
+}
+
+function loop() {
+    requestAnimationFrame(loop);
+
+    state.time++;
+
+    // Smooth mouse
+    state.mouseX += (state.targetMouseX - state.mouseX) * 0.05;
+    state.mouseY += (state.targetMouseY - state.mouseY) * 0.05;
+
+    // Clear
+    ctx.clearRect(0, 0, W, H);
+
+    // Draw layers
+    drawBackground();
+    drawFlowFields();
+
+    updateMembrane();
+    updateRipples();
+    drawRipples();
+    drawMembrane();
+
+    // Update and draw particles
+    for (const p of particles) {
+        p.update();
+        p.draw();
+    }
+
+    updateFlowFields();
+    updateText();
+    updatePresence();
+    updateAudio();
+}
+
+init();
+</script>
+</body>
+</html>
