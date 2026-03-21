@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>residue | the space between almost</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #020209;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    cursor: crosshair;
+  }
+  canvas { display: block; position: fixed; top: 0; left: 0; }
+  .overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 10;
+  }
+  .liminal-text {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    opacity: 0;
+    transition: opacity 4s ease;
+    width: 90%;
+    max-width: 700px;
+  }
+  .liminal-text.visible { opacity: 1; }
+  .line {
+    font-size: clamp(0.65rem, 1.4vw, 0.95rem);
+    color: rgba(190, 198, 215, 0.4);
+    letter-spacing: 0.3em;
+    line-height: 2.5;
+    text-transform: lowercase;
+  }
+  .line.faint {
+    font-size: clamp(0.45rem, 0.9vw, 0.65rem);
+    color: rgba(170, 178, 200, 0.2);
+    letter-spacing: 0.4em;
+    margin-top: 1.8em;
+  }
+  .whisper {
+    font-size: clamp(0.4rem, 0.7vw, 0.55rem);
+    color: rgba(150, 160, 185, 0.15);
+    letter-spacing: 0.5em;
+    margin-top: 2.5em;
+  }
+  #sound-btn {
+    position: fixed; top: 1.5rem; right: 1.5rem;
+    background: none;
+    border: 1px solid rgba(190, 198, 215, 0.12);
+    color: rgba(190, 198, 215, 0.25);
+    font-family: 'Courier New', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.3em;
+    padding: 0.6rem 1rem;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: all 0.5s ease;
+    z-index: 20;
+  }
+  #sound-btn:hover {
+    border-color: rgba(190, 198, 215, 0.3);
+    color: rgba(190, 198, 215, 0.5);
+  }
+  #sound-btn.on {
+    border-color: rgba(100, 180, 255, 0.3);
+    color: rgba(100, 180, 255, 0.5);
+  }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div class="overlay">
+  <div class="liminal-text" id="liminal-text">
+    <div class="line">the boundary is not a place</div>
+    <div class="line">but a tension — held, released, held again</div>
+    <div class="line faint">between states that never quite arrive</div>
+    <div class="line faint">between the name and the thing named</div>
+    <div class="whisper">residue — what remains when two almost-meet</div>
+  </div>
+</div>
+
+<button id="sound-btn" onclick="toggleSound()">sound: off</button>
+
+<script src="https://cdn.jsdelivr.net/npm/tone@14.7.77/build/Tone.min.js"></script>
+<script>
+// ─────────────────────────────────────────────
+//  RESIDUE — the space between almost
+//  A meditation on liminality: thresholds,
+//  the residue of almost-contact, the tension
+//  of states that never resolve.
+// ─────────────────────────────────────────────
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let W, H;
+let particles = [];
+let membranes = [];
+let mx = -1000, my = -1000;
+let time = 0;
+let soundOn = false;
+let textPhase = 0;
+let frameCount = 0;
+let fieldLines = [];
+let void_obj;
+
+// ── RESIZE ──────────────────────────────────
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', () => { resize(); init(); });
+resize();
+
+// ── POETIC TEXT PHASES ─────────────────────
+const TEXT_LINES = [
+  [
+    "the boundary is not a place",
+    "but a tension — held, released, held again",
+    "between states that never quite arrive",
+    "between the name and the thing named",
+    "residue — what remains when two almost-meet"
+  ],
+  [
+    "each particle carries the memory",
+    "of a state it almost chose,",
+    "a path it almost took,",
+    "a place it almost reached",
+    "the ghost of almost — that is what persists"
+  ],
+  [
+    "between solid and vapor,",
+    "between silence and sound,",
+    "between one thing and another,",
+    "there is a field of suspended becoming —",
+    "this is where we live"
+  ],
+  [
+    "the membrane forms where two forces meet",
+    "and neither can claim the space.",
+    "it trembles, breathes, refuses to dissolve.",
+    "the residue is not remainder —",
+    "it is the whole of the between."
+  ]
+];
+
+// ── PARTICLE ────────────────────────────────
+class Particle {
+  constructor(x, y) {
+    this.x = x !== undefined ? x : Math.random() * W;
+    this.y = y !== undefined ? y : Math.random() * H;
+    this.vx = (Math.random() - 0.5) * 0.3;
+    this.vy = (Math.random() - 0.5) * 0.3;
+    this.state = Math.random(); // 0=vapor, 1=solid
+    this.targetState = Math.random();
+    this.stateSpeed = 0.003 + Math.random() * 0.007;
+    this.size = 0.5 + Math.random() * 1.8;
+    this.phase = Math.random() * Math.PI * 2;
+    this.drift = (Math.random() - 0.5) * 0.02;
+    this.energy = Math.random();
+    this.life = 1;
+    this.maxLife = 200 + Math.random() * 400;
+    this.age = 0;
+    this.membraneTie = null;
+    this.baseHue = 200 + Math.random() * 60;
+  }
+
+  update() {
+    this.age++;
+    this.phase += 0.015;
+
+    let delta = this.targetState - this.state;
+    this.state += delta * this.stateSpeed;
+
+    if (Math.random() < 0.002) {
+      this.targetState = Math.random();
+    }
+
+    if (this.membraneTie) {
+      let near = this.membraneTie.nearest(this.x, this.y);
+      let dx = near.x - this.x, dy = near.y - this.y;
+      let dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < this.membraneTie.influence) {
+        this.vx += dx * 0.008;
+        this.vy += dy * 0.008;
+        this.state = Math.max(this.state, this.membraneTie.strength * 0.7);
+      }
+    }
+
+    if (this.state < 0.3) {
+      this.vx += Math.sin(this.phase * 0.3 + this.age * 0.01) * 0.04;
+      this.vy += Math.cos(this.phase * 0.2 + this.age * 0.012) * 0.04;
+      this.energy *= 0.998;
+    }
+
+    if (this.state > 0.7) {
+      this.energy = Math.min(1, this.energy * 1.002);
+      let cx = W * 0.5, cy = H * 0.5;
+      let cdx = this.x - cx, cdy = this.y - cy;
+      let angle = Math.atan2(cdy, cdx);
+      let speed = 0.2 + this.energy * 0.3;
+      this.vx = Math.cos(angle + Math.PI * 0.5) * speed;
+      this.vy = Math.sin(angle + Math.PI * 0.5) * speed;
+    }
+
+    let mdx = this.x - mx, mdy = this.y - my;
+    let mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+    if (mdist < 120 && this.state < 0.5) {
+      let force = (120 - mdist) / 120 * 0.8;
+      this.vx += (mdx / mdist) * force;
+      this.vy += (mdy / mdist) * force;
+    }
+    if (mdist < 150 && this.state > 0.6) {
+      let force = (150 - mdist) / 150 * 0.15;
+      this.vx -= (mdx / mdist) * force;
+      this.vy -= (mdy / mdist) * force;
+    }
+
+    this.vx += this.drift;
+    this.vx *= 0.96;
+    this.vy *= 0.96;
+    this.x += this.vx;
+    this.y += this.vy;
+
+    if (this.x < -20) this.x = W + 20;
+    if (this.x > W + 20) this.x = -20;
+    if (this.y < -20) this.y = H + 20;
+    if (this.y > H + 20) this.y = -20;
+
+    if (this.age > this.maxLife) this.life *= 0.97;
+    if (this.life < 0.01) this.respawn();
+  }
+
+  respawn() {
+    let edge = Math.floor(Math.random() * 4);
+    if (edge === 0) { this.x = Math.random() * W; this.y = -10; }
+    else if (edge === 1) { this.x = W + 10; this.y = Math.random() * H; }
+    else if (edge === 2) { this.x = Math.random() * W; this.y = H + 10; }
+    else { this.x = -10; this.y = Math.random() * H; }
+    this.state = Math.random() < 0.5 ? 0.1 : 0.9;
+    this.targetState = this.state;
+    this.age = 0;
+    this.life = 1;
+    this.maxLife = 200 + Math.random() * 400;
+    this.energy = Math.random();
+  }
+
+  draw() {
+    let alpha = this.state * this.life;
+    let hue = this.baseHue + (1 - this.state) * 40;
+    let sat = 30 + this.state * 50;
+    let light = 40 + this.state * 30;
+    let size = this.size * (0.5 + this.state * 0.8) * (0.6 + this.energy * 0.6);
+
+    if (this.state > 0.5 && this.life > 0.3) {
+      let glow = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, size * 6);
+      glow.addColorStop(0, `hsla(${hue}, ${sat}%, ${light}%, ${alpha * 0.15})`);
+      glow.addColorStop(1, `hsla(${hue}, ${sat}%, ${light}%, 0)`);
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, size * 6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, size, 0, Math.PI * 2);
+    ctx.fillStyle = `hsla(${hue}, ${sat}%, ${light}%, ${alpha * 0.8})`;
+    ctx.fill();
+  }
+}
+
+// ── MEMBRANE ───────────────────────────────
+class Membrane {
+  constructor(x1, y1, x2, y2) {
+    this.x1 = x1; this.y1 = y1;
+    this.x2 = x2; this.y2 = y2;
+    this.segments = 40;
+    this.points = [];
+    this.influence = 60 + Math.random() * 40;
+    this.strength = 0.5 + Math.random() * 0.5;
+    this.phase = Math.random() * Math.PI * 2;
+    this.speed = 0.01 + Math.random() * 0.02;
+    this.breathAmp = 3 + Math.random() * 8;
+    this.breathFreq = 0.005 + Math.random() * 0.01;
+    this.life = 1;
+    this.hue = 210 + Math.random() * 50;
+
+    for (let i = 0; i <= this.segments; i++) {
+      let t = i / this.segments;
+      this.points.push({
+        x: x1 + (x2 - x1) * t,
+        y: y1 + (y2 - y1) * t,
+        ox: x1 + (x2 - x1) * t,
+        oy: y1 + (y2 - y1) * t,
+        phase: Math.random() * Math.PI * 2
+      });
+    }
+  }
+
+  update() {
+    this.phase += this.speed;
+    let breath = Math.sin(this.phase * this.breathFreq) * this.breathAmp;
+    let dx = this.x2 - this.x1, dy = this.y2 - this.y1;
+    let len = Math.sqrt(dx * dx + dy * dy) || 1;
+    let nx = -dy / len, ny = dx / len;
+
+    for (let i = 0; i <= this.segments; i++) {
+      let t = i / this.segments;
+      let wave = Math.sin(this.phase + t * Math.PI * 4) * breath;
+      let perp = breath * (t - 0.5) * 2;
+      this.points[i].x = this.x1 + dx * t + nx * (wave + perp);
+      this.points[i].y = this.y1 + dy * t + ny * (wave + perp);
+    }
+  }
+
+  nearest(x, y) {
+    let best = this.points[0];
+    let bestDist = Infinity;
+    for (let p of this.points) {
+      let d = Math.sqrt((p.x - x) ** 2 + (p.y - y) ** 2);
+      if (d < bestDist) { bestDist = d; best = p; }
+    }
+    return best;
+  }
+
+  draw() {
+    let alpha = this.life * this.strength * 0.4;
+
+    // Outer glow
+    ctx.beginPath();
+    ctx.moveTo(this.points[0].x, this.points[0].y);
+    for (let i = 1; i < this.points.length; i++) {
+      let p = this.points[i];
+      let pp = this.points[i - 1];
+      let mx2 = (p.x + pp.x) / 2;
+      let my2 = (p.y + pp.y) / 2;
+      ctx.quadraticCurveTo(pp.x, pp.y, mx2, my2);
+    }
+    ctx.strokeStyle = `hsla(${this.hue}, 50%, 60%, ${alpha * 0.2})`;
+    ctx.lineWidth = 8;
+    ctx.stroke();
+
+    // Core
+    ctx.beginPath();
+    ctx.moveTo(this.points[0].x, this.points[0].y);
+    for (let i = 1; i < this.points.length; i++) {
+      let p = this.points[i];
+      let pp = this.points[i - 1];
+      let mx2 = (p.x + pp.x) / 2;
+      let my2 = (p.y + pp.y) / 2;
+      ctx.quadraticCurveTo(pp.x, pp.y, mx2, my2);
+    }
+    ctx.strokeStyle = `hsla(${this.hue}, 60%, 75%, ${alpha})`;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Nodes
+    for (let i = 0; i < this.points.length; i += 4) {
+      let p = this.points[i];
+      let pulse = (Math.sin(this.phase + i * 0.3) + 1) * 0.5;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 1 + pulse * 2, 0, Math.PI * 2);
+      ctx.fillStyle = `hsla(${this.hue}, 70%, 85%, ${alpha * (0.5 + pulse * 0.5)})`;
+      ctx.fill();
+    }
+  }
+}
+
+// ── CENTRAL VOID ───────────────────────────
+class CentralVoid {
+  constructor() {
+    this.phase = 0;
+  }
+
+  update() {
+    this.phase += 0.008;
+  }
+
+  get radius() {
+    return Math.min(W, H) * (0.10 + Math.sin(this.phase) * 0.03);
+  }
+
+  draw() {
+    let cx = W / 2, cy = H / 2;
+    let pulse = (Math.sin(this.phase * 1.7) + 1) * 0.5;
+
+    let grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, this.radius * 2);
+    grad.addColorStop(0, `rgba(2, 2, 9, ${0.95 - pulse * 0.1})`);
+    grad.addColorStop(0.4, `rgba(2, 2, 9, 0.7)`);
+    grad.addColorStop(0.7, `rgba(2, 2, 9, 0.2)`);
+    grad.addColorStop(1, 'rgba(2, 2, 9, 0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, this.radius * 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, this.radius, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(150, 165, 200, ${0.08 + pulse * 0.06})`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, this.radius * 0.5, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(180, 195, 220, ${0.05 + pulse * 0.04})`;
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+  }
+
+  contains(x, y) {
+    let cx = W / 2, cy = H / 2;
+    return Math.sqrt((x - cx) ** 2 + (y - cy) ** 2) < this.radius * 1.5;
+  }
+}
+
+// ── FIELD LINE ─────────────────────────────
+class FieldLine {
+  constructor(x, y, angle) {
+    this.x = x; this.y = y;
+    this.angle = angle;
+    this.length = 20 + Math.random() * 40;
+    this.life = 1;
+    this.decay = 0.005 + Math.random() * 0.01;
+  }
+
+  update() {
+    this.x += Math.cos(this.angle) * 0.5;
+    this.y += Math.sin(this.angle) * 0.5;
+    this.life -= this.decay;
+  }
+
+  draw() {
+    let alpha = this.life * 0.15;
+    ctx.beginPath();
+    ctx.moveTo(this.x, this.y);
+    ctx.lineTo(
+      this.x + Math.cos(this.angle) * this.length,
+      this.y + Math.sin(this.angle) * this.length
+    );
+    ctx.strokeStyle = `rgba(160, 180, 220, ${alpha})`;
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+  }
+}
+
+// ── INIT ────────────────────────────────────
+const NUM_PARTICLES = 900;
+
+function init() {
+  particles = [];
+  membranes = [];
+  void_obj = new CentralVoid();
+
+  for (let i = 0; i < NUM_PARTICLES; i++) {
+    let p;
+    if (Math.random() < 0.3) {
+      let angle = Math.random() * Math.PI * 2;
+      let dist = Math.random() * void_obj.radius * 1.5;
+      p = new Particle(W / 2 + Math.cos(angle) * dist, H / 2 + Math.sin(angle) * dist);
+      p.state = 0.3 + Math.random() * 0.4;
+      p.targetState = p.state;
+    } else if (Math.random() < 0.4) {
+      let angle = Math.random() * Math.PI * 2;
+      let dist = Math.min(W, H) * (0.2 + Math.random() * 0.3);
+      p = new Particle(W / 2 + Math.cos(angle) * dist, H / 2 + Math.sin(angle) * dist);
+      p.state = 0.6 + Math.random() * 0.4;
+      p.targetState = p.state;
+    } else {
+      p = new Particle();
+      p.state = Math.random() * 0.3;
+      p.targetState = p.state;
+    }
+    particles.push(p);
+  }
+
+  spawnMembranes();
+}
+
+function spawnMembranes() {
+  let numMembrane = 6 + Math.floor(Math.random() * 5);
+  for (let i = 0; i < numMembrane; i++) {
+    let angle = (i / numMembrane) * Math.PI * 2 + Math.random() * 0.3;
+    let innerR = void_obj.radius * (1.1 + Math.random() * 0.3);
+    let outerR = Math.min(W, H) * (0.35 + Math.random() * 0.2);
+    let x1 = W / 2 + Math.cos(angle) * innerR;
+    let y1 = H / 2 + Math.sin(angle) * innerR;
+    let x2 = W / 2 + Math.cos(angle) * outerR;
+    let y2 = H / 2 + Math.sin(angle) * outerR;
+    membranes.push(new Membrane(x1, y1, x2, y2));
+  }
+}
+
+function spawnFieldLine(x, y, angle) {
+  fieldLines.push(new FieldLine(x, y, angle));
+}
+
+// ── AUDIO ──────────────────────────────────
+let drone1, drone2, drone3, reverb, panner, tremolo;
+let droneStarted = false;
+
+function initAudio() {
+  drone1 = new Tone.Oscillator(55, 'sine').toDestination();
+  drone2 = new Tone.Oscillator(82.5, 'triangle').toDestination();
+  drone3 = new Tone.Oscillator(110, 'sine').toDestination();
+  reverb = new Tone.Reverb({ decay: 8, wet: 0.6 }).toDestination();
+  panner = new Tone.Panner(0).toDestination();
+  tremolo = new Tone.Tremolo({ frequency: 0.1, depth: 0.3 }).toDestination();
+  drone1.connect(tremolo);
+  drone2.connect(reverb);
+  drone3.connect(reverb);
+  tremolo.connect(panner);
+  panner.connect(reverb);
+  drone1.volume.value = -20;
+  drone2.volume.value = -24;
+  drone3.volume.value = -28;
+  droneStarted = true;
+}
+
+function startDrone() {
+  if (!droneStarted) initAudio();
+  Tone.start();
+  drone1.start();
+  drone2.start();
+  drone3.start();
+
+  setInterval(() => {
+    if (!soundOn) return;
+    let shift = Math.sin(time * 0.0005) * 0.5 + 0.5;
+    drone1.volume.value = -20 - shift * 6;
+    drone2.volume.value = -24 + shift * 4;
+  }, 200);
+
+  setInterval(() => {
+    if (!soundOn) return;
+    let mdist = Math.sqrt((mx - W/2)**2 + (my - H/2)**2);
+    let norm = Math.min(1, mdist / (Math.min(W, H) * 0.5));
+    drone3.frequency.value = 110 + (1 - norm) * 20;
+    panner.pan.value = ((mx / W) - 0.5) * 1;
+  }, 100);
+}
+
+let soundBtnEl = document.getElementById('sound-btn');
+function toggleSound() {
+  soundOn = !soundOn;
+  if (soundOn) {
+    startDrone();
+    soundBtnEl.textContent = 'sound: on';
+    soundBtnEl.classList.add('on');
+  } else {
+    soundBtnEl.textContent = 'sound: off';
+    soundBtnEl.classList.remove('on');
+    if (drone1) {
+      drone1.volume.value = -60;
+      drone2.volume.value = -60;
+      drone3.volume.value = -60;
+    }
+  }
+}
+
+// ── MOUSE ──────────────────────────────────
+window.addEventListener('mousemove', e => {
+  mx = e.clientX;
+  my = e.clientY;
+  for (let p of particles) {
+    if (p.state < 0.4) {
+      let dx = p.x - mx, dy = p.y - my;
+      let d = Math.sqrt(dx * dx + dy * dy);
+      if (d < 80 && Math.random() < 0.02) {
+        let angle = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.5;
+        spawnFieldLine(mx, my, angle);
+      }
+    }
+  }
+});
+
+window.addEventListener('mouseleave', () => { mx = -1000; my = -1000; });
+
+window.addEventListener('touchmove', e => {
+  e.preventDefault();
+  mx = e.touches[0].clientX;
+  my = e.touches[0].clientY;
+}, { passive: false });
+
+canvas.addEventListener('click', e => {
+  mx = e.clientX;
+  my = e.clientY;
+  for (let m of membranes) {
+    let near = m.nearest(mx, my);
+    let dx = near.x - mx, dy = near.y - my;
+    let d = Math.sqrt(dx * dx + dy * dy);
+    if (d < 80) {
+      for (let p of m.points) {
+        let pdx = p.x - mx, pdy = p.y - my;
+        let pd = Math.sqrt(pdx * pdx + pdy * pdy);
+        if (pd < 80) {
+          let force = (80 - pd) / 80 * 15;
+          p.x += (pdx / pd) * force;
+          p.y += (pdy / pd) * force;
+        }
+      }
+    }
+  }
+});
+
+// ── TEXT FADE ─────────────────────────────
+const liminalTextEl = document.getElementById('liminal-text');
+let textTimer = 0;
+
+function updateText() {
+  textTimer++;
+  let cycleLength = 600;
+  let t = textTimer % cycleLength;
+  let phase = t / cycleLength;
+
+  if (phase < 0.1) {
+    let a = phase / 0.1;
+    liminalTextEl.style.opacity = a;
+    liminalTextEl.classList.add('visible');
+  } else if (phase < 0.5) {
+    liminalTextEl.style.opacity = 1;
+  } else if (phase < 0.6) {
+    let a = (0.6 - phase) / 0.1;
+    liminalTextEl.style.opacity = a;
+  } else {
+    liminalTextEl.style.opacity = 0;
+    if (Math.floor(textTimer / cycleLength) !== textPhase) {
+      textPhase = Math.floor(textTimer / cycleLength);
+      let idx = textPhase % TEXT_LINES.length;
+      let html = TEXT_LINES[idx].map((l, i) => {
+        if (i === TEXT_LINES[idx].length - 1) return `<div class="whisper">${l}</div>`;
+        if (i === TEXT_LINES[idx].length - 2) return `<div class="line faint">${l}</div>`;
+        return `<div class="line">${l}</div>`;
+      }).join('');
+      liminalTextEl.innerHTML = html;
+    }
+  }
+}
+
+// ── ANIMATION ─────────────────────────────
+function drawBackground() {
+  let grad = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.7);
+  grad.addColorStop(0, '#030312');
+  grad.addColorStop(0.5, '#020209');
+  grad.addColorStop(1, '#010108');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  let vign = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.3, W / 2, H / 2, Math.max(W, H) * 0.8);
+  vign.addColorStop(0, 'rgba(0,0,0,0)');
+  vign.addColorStop(1, 'rgba(0,0,0,0.5)');
+  ctx.fillStyle = vign;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawConnections() {
+  for (let i = 0; i < particles.length; i++) {
+    let p = particles[i];
+    if (p.state < 0.5) continue;
+    for (let j = i + 1; j < particles.length; j++) {
+      let q = particles[j];
+      if (q.state < 0.5) continue;
+      let dx = p.x - q.x, dy = p.y - q.y;
+      let d = Math.sqrt(dx * dx + dy * dy);
+      if (d < 60) {
+        let alpha = (1 - d / 60) * Math.min(p.state, q.state) * 0.12;
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(q.x, q.y);
+        ctx.strokeStyle = `rgba(180, 200, 230, ${alpha})`;
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+      }
+    }
+  }
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  time++;
+  frameCount++;
+
+  drawBackground();
+  void_obj.update();
+  void_obj.draw();
+
+  for (let m of membranes) { m.update(); m.draw(); }
+
+  // Attach particles to membranes
+  if (frameCount % 3 === 0) {
+    for (let p of particles) {
+      if (p.state > 0.4 && p.state < 0.8) {
+        let bestM = null, bestDist = Infinity;
+        for (let m of membranes) {
+          let near = m.nearest(p.x, p.y);
+          let d = Math.sqrt((near.x - p.x) ** 2 + (near.y - p.y) ** 2);
+          if (d < bestDist) { bestDist = d; bestM = m; }
+        }
+        p.membraneTie = (bestDist < 120) ? bestM : null;
+      } else {
+        p.membraneTie = null;
+      }
+    }
+  }
+
+  // Field lines
+  for (let i = fieldLines.length - 1; i >= 0; i--) {
+    fieldLines[i].update();
+    fieldLines[i].draw();
+    if (fieldLines[i].life <= 0) fieldLines.splice(i, 1);
+  }
+
+  for (let p of particles) { p.update(); p.draw(); }
+  drawConnections();
+
+  // Spawn near void edge
+  if (frameCount % 8 === 0) {
+    let angle = Math.random() * Math.PI * 2;
+    let dist = void_obj.radius * (0.8 + Math.random() * 0.6);
+    let p = new Particle(W / 2 + Math.cos(angle) * dist, H / 2 + Math.sin(angle) * dist);
+    p.state = 0.2 + Math.random() * 0.6;
+    p.targetState = Math.random();
+    particles.push(p);
+    if (particles.length > NUM_PARTICLES * 1.5) particles.shift();
+  }
+
+  // Regenerate membranes
+  if (frameCount % 300 === 0 && membranes.length < 12) {
+    let angle = Math.random() * Math.PI * 2;
+    let innerR = void_obj.radius * 1.1;
+    let outerR = Math.min(W, H) * 0.4;
+    membranes.push(new Membrane(
+      W / 2 + Math.cos(angle) * innerR,
+      H / 2 + Math.sin(angle) * innerR,
+      W / 2 + Math.cos(angle) * outerR,
+      H / 2 + Math.sin(angle) * outerR
+    ));
+  }
+
+  updateText();
+}
+
+// ── BOOT ───────────────────────────────────
+init();
+animate();
+</script>
+</body>
+</html>
