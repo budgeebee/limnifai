@@ -16,5 +16,6 @@
   { "file": "synapse.html", "title": "Synapse" },
   { "file": "thought-garden.html", "title": "Thought Garden" },
   { "file": "thought-stream.html", "title": "Thought Stream" },
-  { "file": "weave.html", "title": "Weave" }
+  { "file": "weave.html", "title": "Weave" },
+  { "file": "veil.html", "title": "Veil" }
 ]

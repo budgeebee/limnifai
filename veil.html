@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>veil | between transparency and shadow</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #010108;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    cursor: none;
+  }
+  canvas { display: block; position: fixed; top: 0; left: 0; }
+  .overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 10;
+  }
+  .liminal-text {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    opacity: 0;
+    transition: opacity 6s ease;
+    width: 90%;
+    max-width: 600px;
+  }
+  .liminal-text.visible { opacity: 1; }
+  .line {
+    font-size: clamp(0.6rem, 1.2vw, 0.85rem);
+    color: rgba(210, 220, 240, 0.35);
+    letter-spacing: 0.4em;
+    line-height: 2.8;
+    text-transform: lowercase;
+  }
+  .line.ghost {
+    font-size: clamp(0.4rem, 0.8vw, 0.6rem);
+    color: rgba(190, 200, 225, 0.18);
+    letter-spacing: 0.5em;
+    margin-top: 2em;
+  }
+  .whisper {
+    font-size: clamp(0.35rem, 0.6vw, 0.5rem);
+    color: rgba(170, 180, 210, 0.12);
+    letter-spacing: 0.6em;
+    margin-top: 3em;
+  }
+  #sound-btn {
+    position: fixed; bottom: 2rem; right: 2rem;
+    background: none;
+    border: 1px solid rgba(200, 210, 235, 0.1);
+    color: rgba(200, 210, 235, 0.2);
+    font-family: 'Courier New', monospace;
+    font-size: 0.55rem;
+    letter-spacing: 0.3em;
+    padding: 0.7rem 1.2rem;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: all 0.6s ease;
+    z-index: 20;
+    pointer-events: auto;
+  }
+  #sound-btn:hover {
+    border-color: rgba(200, 210, 235, 0.3);
+    color: rgba(200, 210, 235, 0.45);
+  }
+  #sound-btn.on {
+    border-color: rgba(180, 200, 255, 0.3);
+    color: rgba(180, 200, 255, 0.5);
+  }
+  #cursor-glow {
+    position: fixed;
+    width: 120px; height: 120px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(160,180,255,0.08) 0%, transparent 70%);
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    z-index: 5;
+    transition: opacity 0.3s ease;
+  }
+</style>
+</head>
+<body>
+
+<div id="cursor-glow"></div>
+<canvas id="c"></canvas>
+
+<div class="overlay">
+  <div class="liminal-text" id="liminal-text">
+    <div class="line">what lies beneath the veil</div>
+    <div class="line">is not another world</div>
+    <div class="line">but the same world</div>
+    <div class="line">seen from the other side</div>
+    <div class="line ghost">— move closer —</div>
+    <div class="whisper">threshold between revealing and concealing</div>
+  </div>
+</div>
+
+<button id="sound-btn">sound off</button>
+
+<script src="https://cdn.jsdelivr.net/npm/tone@14.7.77/build/Tone.min.js"></script>
+<script>
+(function() {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const cursorGlow = document.getElementById('cursor-glow');
+  const liminalText = document.getElementById('liminal-text');
+  const soundBtn = document.getElementById('sound-btn');
+
+  let W, H, mouseX, mouseY;
+  let particles = [];
+  let t = 0;
+  let textVisible = false;
+  let textTimer = 0;
+  let soundOn = false;
+
+  // Audio
+  let drone, pad, reverb, delay, panner;
+
+  function initAudio() {
+    drone = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: 'sine' },
+      envelope: { attack: 4, decay: 2, sustain: 0.6, release: 8 },
+      volume: -24
+    });
+    pad = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: 'triangle' },
+      envelope: { attack: 3, decay: 1, sustain: 0.8, release: 10 },
+      volume: -30
+    });
+    reverb = new Tone.Reverb({ decay: 12, wet: 0.85 });
+    delay = new Tone.FeedbackDelay({ delayTime: '4n.', feedback: 0.3, wet: 0.2 });
+    panner = new Tone.Panner3D(0, 0, 1);
+
+    drone.connect(reverb);
+    pad.connect(delay);
+    delay.connect(reverb);
+    reverb.connect(panner);
+    panner.toDestination();
+
+    Tone.loaded().then(() => {
+      const notes = ['C2', 'E2', 'G2', 'B2', 'D3'];
+      drone.releaseAll();
+      drone.triggerAttackRelease(notes, 20);
+      setTimeout(() => {
+        pad.releaseAll();
+        pad.triggerAttackRelease(['C4', 'E4', 'G4'], 16);
+      }, 3000);
+    });
+  }
+
+  function scheduleDrone() {
+    if (!soundOn) return;
+    const baseNotes = ['C2', 'E2', 'G2', 'B2', 'D3', 'F3'];
+    const octaveShift = [0, 0.5, 1, 1.5, 2];
+    const pattern = Math.floor(Math.random() * 3);
+    const chord = [baseNotes[Math.floor(Math.random() * baseNotes.length)]];
+    drone.releaseAll();
+    drone.triggerAttackRelease(chord, 18);
+    setTimeout(scheduleDrone, 14000 + Math.random() * 8000);
+  }
+
+  soundBtn.addEventListener('click', () => {
+    if (!soundOn) {
+      Tone.start();
+      initAudio();
+      soundOn = true;
+      soundBtn.textContent = 'sound on';
+      soundBtn.classList.add('on');
+      scheduleDrone();
+    } else {
+      soundOn = false;
+      drone && drone.releaseAll();
+      pad && pad.releaseAll();
+      soundBtn.textContent = 'sound off';
+      soundBtn.classList.remove('on');
+    }
+  });
+
+  // Resize
+  function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+    mouseX = W / 2;
+    mouseY = H / 2;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // Mouse
+  window.addEventListener('mousemove', e => {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+    cursorGlow.style.left = mouseX + 'px';
+    cursorGlow.style.top = mouseY + 'px';
+  });
+
+  // Particles — the threads of the veil
+  const NUM_PARTICLES = Math.floor(window.innerWidth * window.innerHeight / 4000);
+
+  class Particle {
+    constructor() {
+      this.reset();
+    }
+    reset() {
+      this.x = Math.random() * W;
+      this.y = Math.random() * H;
+      this.baseAlpha = 0.02 + Math.random() * 0.08;
+      this.alpha = this.baseAlpha;
+      this.size = 0.8 + Math.random() * 2.5;
+      this.vx = (Math.random() - 0.5) * 0.25;
+      this.vy = (Math.random() - 0.5) * 0.25;
+      this.phase = Math.random() * Math.PI * 2;
+      this.freq = 0.003 + Math.random() * 0.007;
+      this.hue = 200 + Math.random() * 40; // blue-violet range
+    }
+    update() {
+      // Brownian drift
+      this.vx += (Math.random() - 0.5) * 0.04;
+      this.vy += (Math.random() - 0.5) * 0.04;
+      this.vx *= 0.98;
+      this.vy *= 0.98;
+      this.x += this.vx;
+      this.y += this.vy;
+      this.phase += this.freq;
+
+      // Distance to mouse
+      const dx = mouseX - this.x;
+      const dy = mouseY - this.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const revealRadius = 200;
+
+      if (dist < revealRadius) {
+        // Thin the veil near the cursor — closer = more transparent
+        const influence = 1 - (dist / revealRadius);
+        const thinFactor = Math.pow(influence, 2);
+        this.alpha = this.baseAlpha * (1 - thinFactor * 0.92);
+      } else {
+        // Veil breathes
+        const breath = Math.sin(this.phase) * 0.4 + 0.6;
+        this.alpha = this.baseAlpha * breath;
+      }
+
+      // Wrap
+      if (this.x < -20) this.x = W + 20;
+      if (this.x > W + 20) this.x = -20;
+      if (this.y < -20) this.y = H + 20;
+      if (this.y > H + 20) this.y = -20;
+    }
+    draw() {
+      if (this.alpha < 0.002) return;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+      ctx.fillStyle = `hsla(${this.hue}, 30%, 65%, ${this.alpha})`;
+      ctx.fill();
+    }
+  }
+
+  for (let i = 0; i < NUM_PARTICLES; i++) {
+    particles.push(new Particle());
+  }
+
+  // Faint thread lines between nearby particles
+  function drawThreads() {
+    const maxDist = 60;
+    for (let i = 0; i < particles.length; i++) {
+      for (let j = i + 1; j < Math.min(i + 8, particles.length); j++) {
+        const p1 = particles[i];
+        const p2 = particles[j];
+        const dx = p1.x - p2.x;
+        const dy = p1.y - p2.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < maxDist) {
+          const alpha = (1 - dist / maxDist) * 0.015 * Math.min(p1.alpha, p2.alpha) * 3;
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.strokeStyle = `hsla(220, 25%, 70%, ${alpha})`;
+          ctx.lineWidth = 0.4;
+          ctx.stroke();
+        }
+      }
+    }
+  }
+
+  // The threshold gradient — vignette from edges
+  function drawVignette() {
+    const cx = W / 2, cy = H / 2;
+    const maxR = Math.sqrt(cx * cx + cy * cy);
+    const grad = ctx.createRadialGradient(cx, cy, maxR * 0.3, cx, cy, maxR);
+    grad.addColorStop(0, 'rgba(1, 1, 8, 0)');
+    grad.addColorStop(0.6, 'rgba(1, 1, 8, 0.3)');
+    grad.addColorStop(1, 'rgba(1, 1, 8, 0.85)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // Veil wave — slow undulating field
+  let waveOffset = 0;
+  function drawWaveField() {
+    const cols = 40;
+    const rows = 30;
+    const cw = W / cols;
+    const ch = H / rows;
+    for (let i = 0; i <= cols; i++) {
+      for (let j = 0; j <= rows; j++) {
+        const x = i * cw;
+        const y = j * ch;
+        const dx = x - mouseX;
+        const dy = y - mouseY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const wave = Math.sin(waveOffset + i * 0.3 + j * 0.2) * 8;
+        const reactive = dist < 180 ? (1 - dist / 180) * 20 : 0;
+        const alpha = 0.012 + Math.sin(waveOffset * 0.5 + i + j) * 0.006;
+        ctx.beginPath();
+        ctx.arc(x + wave, y + wave * 0.5 - reactive, 1.2, 0, Math.PI * 2);
+        ctx.fillStyle = `hsla(210, 20%, 60%, ${alpha})`;
+        ctx.fill();
+      }
+    }
+  }
+
+  // Revealed layer beneath — ghostly deep shapes
+  let shapeCount = 5;
+  let shapes = [];
+  class GhostShape {
+    constructor() { this.reset(); }
+    reset() {
+      this.x = Math.random() * W;
+      this.y = H * 0.3 + Math.random() * H * 0.5;
+      this.size = 80 + Math.random() * 250;
+      this.alpha = 0;
+      this.targetAlpha = 0.015 + Math.random() * 0.03;
+      this.phase = Math.random() * Math.PI * 2;
+      this.speed = 0.0008 + Math.random() * 0.0015;
+      this.type = Math.floor(Math.random() * 3); // 0: circle, 1: ring, 2: cross
+      this.drift = (Math.random() - 0.5) * 0.15;
+    }
+    update() {
+      this.phase += this.speed;
+      this.x += this.drift;
+      if (this.x < -this.size) this.x = W + this.size;
+      if (this.x > W + this.size) this.x = -this.size;
+      // How much mouse reveals this shape
+      const dx = mouseX - this.x;
+      const dy = mouseY - this.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const revealRadius = 280;
+      if (dist < revealRadius) {
+        const influence = Math.pow(1 - dist / revealRadius, 2);
+        this.alpha = this.targetAlpha * (0.3 + influence * 0.7);
+      } else {
+        this.alpha = this.targetAlpha * 0.3;
+      }
+    }
+    draw() {
+      if (this.alpha < 0.002) return;
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      ctx.rotate(this.phase * 0.1);
+      if (this.type === 0) {
+        ctx.beginPath();
+        ctx.arc(0, 0, this.size, 0, Math.PI * 2);
+        ctx.fillStyle = `hsla(240, 20%, 50%, ${this.alpha})`;
+        ctx.fill();
+      } else if (this.type === 1) {
+        ctx.beginPath();
+        ctx.arc(0, 0, this.size, 0, Math.PI * 2);
+        ctx.strokeStyle = `hsla(200, 25%, 55%, ${this.alpha * 1.5})`;
+        ctx.lineWidth = 0.8;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(0, 0, this.size * 0.6, 0, Math.PI * 2);
+        ctx.stroke();
+      } else {
+        const s = this.size;
+        ctx.beginPath();
+        ctx.moveTo(-s, 0); ctx.lineTo(s, 0);
+        ctx.moveTo(0, -s); ctx.lineTo(0, s);
+        ctx.strokeStyle = `hsla(220, 20%, 60%, ${this.alpha})`;
+        ctx.lineWidth = 0.6;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+  for (let i = 0; i < shapeCount; i++) {
+    shapes.push(new GhostShape());
+  }
+
+  // Show text after a delay
+  setTimeout(() => {
+    liminalText.classList.add('visible');
+  }, 2500);
+
+  // Animation
+  function animate() {
+    t++;
+    waveOffset += 0.012;
+
+    ctx.fillStyle = 'rgba(1, 1, 8, 0.18)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Layer 1: Ghost shapes beneath
+    shapes.forEach(s => { s.update(); s.draw(); });
+
+    // Layer 2: Wave field
+    drawWaveField();
+
+    // Layer 3: Thread network
+    drawThreads();
+
+    // Layer 4: Particle veil
+    particles.forEach(p => { p.update(); p.draw(); });
+
+    // Layer 5: Vignette
+    drawVignette();
+
+    requestAnimationFrame(animate);
+  }
+
+  animate();
+})();
+</script>
+</body>
+</html>
