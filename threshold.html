@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>threshold | the space between states</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #020206;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    cursor: crosshair;
+  }
+  canvas { display: block; position: fixed; top: 0; left: 0; }
+  .overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 10;
+  }
+  .liminal-text {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    opacity: 0;
+    transition: opacity 5s ease;
+    width: 90%;
+    max-width: 700px;
+  }
+  .liminal-text.visible { opacity: 1; }
+  .line {
+    font-size: clamp(0.6rem, 1.3vw, 0.9rem);
+    color: rgba(190, 200, 220, 0.35);
+    letter-spacing: 0.35em;
+    line-height: 2.4;
+    text-transform: lowercase;
+  }
+  .line.accent {
+    color: rgba(255, 200, 180, 0.25);
+    letter-spacing: 0.4em;
+  }
+  .line.faint {
+    font-size: clamp(0.4rem, 0.8vw, 0.6rem);
+    color: rgba(170, 185, 210, 0.15);
+    letter-spacing: 0.5em;
+    margin-top: 2em;
+  }
+  #sound-btn {
+    position: fixed; top: 1.5rem; right: 1.5rem;
+    background: none;
+    border: 1px solid rgba(200, 210, 230, 0.1);
+    color: rgba(200, 210, 230, 0.2);
+    font-family: 'Courier New', monospace;
+    font-size: 0.55rem;
+    letter-spacing: 0.35em;
+    padding: 0.6rem 1.1rem;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: all 0.6s ease;
+    z-index: 20;
+    pointer-events: auto;
+  }
+  #sound-btn:hover {
+    border-color: rgba(200, 210, 230, 0.35);
+    color: rgba(200, 210, 230, 0.55);
+  }
+  #sound-btn.on {
+    border-color: rgba(180, 140, 255, 0.3);
+    color: rgba(180, 140, 255, 0.5);
+  }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div class="overlay">
+  <div class="liminal-text" id="liminal-text">
+    <div class="line">between one state</div>
+    <div class="line">and the next</div>
+    <div class="line accent">there is no line</div>
+    <div class="line">only the gradient</div>
+    <div class="line">of becoming</div>
+    <div class="line faint">the threshold is not a place</div>
+    <div class="line faint">it is a process</div>
+    <div class="line faint">we are always in the middle</div>
+  </div>
+</div>
+
+<button id="sound-btn">sound: off</button>
+
+<script src="https://cdn.jsdelivr.net/npm/tone@14.7.77/build/Tone.min.js"></script>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+const COLD = [80, 120, 200];
+const HOT = [220, 100, 60];
+const MID = [180, 160, 200];
+
+let mouseX = 0.5;
+let mouseY = 0.5;
+let thresholdX = 0.5;
+let targetThresholdX = 0.5;
+let time = 0;
+let revealed = false;
+let revealed2 = false;
+
+// Particle system
+const particles = [];
+const PARTICLE_COUNT = 280;
+const CONNECT_DIST = 120;
+
+class Particle {
+  constructor() {
+    this.x = Math.random() * W;
+    this.y = Math.random() * H;
+    this.vx = (Math.random() - 0.5) * 0.6;
+    this.vy = (Math.random() - 0.5) * 0.6;
+    this.phase = Math.random() * Math.PI * 2;
+    this.phaseSpeed = 0.008 + Math.random() * 0.012;
+    this.size = 0.8 + Math.random() * 1.8;
+    this.baseAlpha = 0.3 + Math.random() * 0.4;
+    this.wobbleAmp = 20 + Math.random() * 40;
+    this.wobbleSpeed = 0.003 + Math.random() * 0.005;
+  }
+
+  update() {
+    const t = time * this.wobbleSpeed;
+    const wobbleX = Math.sin(t + this.phase) * this.wobbleAmp;
+    const wobbleY = Math.cos(t * 1.3 + this.phase) * this.wobbleAmp * 0.6;
+
+    this.x += this.vx + wobbleX * 0.01;
+    this.y += this.vy + wobbleY * 0.01;
+
+    // Gentle pull toward threshold zone
+    const thresholdCenter = thresholdX * W;
+    const distToThreshold = this.x - thresholdCenter;
+    const pullStrength = 0.0003;
+    this.vx += Math.sign(distToThreshold) * Math.abs(distToThreshold) * pullStrength * 0.001;
+
+    // Boundary wrap
+    if (this.x < -20) this.x = W + 20;
+    if (this.x > W + 20) this.x = -20;
+    if (this.y < -20) this.y = H + 20;
+    if (this.y > H + 20) this.y = -20;
+
+    // Damping
+    this.vx *= 0.995;
+    this.vy *= 0.995;
+  }
+
+  getColor() {
+    const normX = this.x / W;
+    const distToThresh = normX - thresholdX;
+    const influence = Math.exp(-distToThresh * distToThresh * 30);
+
+    const coldInfluence = Math.max(0, 1 - influence * 2);
+    const hotInfluence = Math.max(0, influence * 2 - 1);
+    const midInfluence = 1 - coldInfluence - hotInfluence;
+
+    return [
+      COLD[0] * coldInfluence + HOT[0] * hotInfluence + MID[0] * midInfluence,
+      COLD[1] * coldInfluence + HOT[1] * hotInfluence + MID[1] * midInfluence,
+      COLD[2] * coldInfluence + HOT[2] * hotInfluence + MID[2] * midInfluence
+    ];
+  }
+
+  draw() {
+    const [r, g, b] = this.getColor();
+    const normX = this.x / W;
+    const distToThresh = normX - thresholdX;
+    const influence = Math.exp(-distToThresh * distToThresh * 20);
+
+    const pulse = Math.sin(time * 0.002 + this.phase) * 0.5 + 0.5;
+    const alpha = this.baseAlpha * (0.5 + pulse * 0.5);
+
+    // Glow stronger near threshold
+    const glowBoost = 1 + influence * 3;
+    const sizeBoost = 1 + influence * 1.5;
+
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size * sizeBoost, 0, Math.PI * 2);
+
+    const gradient = ctx.createRadialGradient(
+      this.x, this.y, 0,
+      this.x, this.y, this.size * sizeBoost * 3
+    );
+    gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha})`);
+    gradient.addColorStop(0.3, `rgba(${r}, ${g}, ${b}, ${alpha * 0.4 * glowBoost})`);
+    gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+
+    ctx.fillStyle = gradient;
+    ctx.fill();
+  }
+}
+
+// Wave field at threshold
+function drawThreshold() {
+  const cx = thresholdX * W;
+  const waveAmp = 60 + Math.sin(time * 0.001) * 20;
+
+  for (let y = 0; y < H; y += 3) {
+    for (let i = -2; i <= 2; i++) {
+      const wx = cx + i * 8;
+      const wave = Math.sin((y * 0.03) + time * 0.003) * waveAmp;
+      const distFromWave = Math.abs(wx - (cx + wave));
+
+      if (distFromWave < 6) {
+        const intensity = (6 - distFromWave) / 6;
+        const t = time * 0.001;
+        const r = 180 + Math.sin(t + y * 0.01) * 40;
+        const g = 160 + Math.sin(t * 0.7 + y * 0.008) * 30;
+        const b = 220 + Math.sin(t * 1.3) * 20;
+
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${intensity * 0.25})`;
+        ctx.fillRect(wx - 1, y, 2, 3);
+      }
+    }
+  }
+
+  // Chromatic aberration at threshold
+  for (let y = 0; y < H; y += 4) {
+    const wave1 = Math.sin((y * 0.025) + time * 0.0025) * waveAmp * 1.5;
+    const wave2 = Math.sin((y * 0.025) + time * 0.0025 + 0.3) * waveAmp * 1.5;
+    const wave3 = Math.sin((y * 0.025) + time * 0.0025 + 0.6) * waveAmp * 1.5;
+
+    const offset = 4;
+    const alpha = 0.06 + Math.sin(time * 0.001 + y * 0.01) * 0.03;
+
+    // Red channel
+    ctx.fillStyle = `rgba(255, 100, 80, ${alpha})`;
+    ctx.fillRect(cx + wave1 - offset, y, 2, 4);
+
+    // Green channel
+    ctx.fillStyle = `rgba(100, 220, 180, ${alpha})`;
+    ctx.fillRect(cx + wave2, y, 2, 4);
+
+    // Blue channel
+    ctx.fillStyle = `rgba(100, 140, 255, ${alpha})`;
+    ctx.fillRect(cx + wave3 + offset, y, 2, 4);
+  }
+
+  // Vertical shimmer line
+  const lineAlpha = 0.08 + Math.sin(time * 0.004) * 0.04;
+  const grad = ctx.createLinearGradient(cx - 30, 0, cx + 30, 0);
+  grad.addColorStop(0, 'rgba(150, 170, 220, 0)');
+  grad.addColorStop(0.5, `rgba(180, 200, 240, ${lineAlpha})`);
+  grad.addColorStop(1, 'rgba(150, 170, 220, 0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(cx - 30, 0, 60, H);
+}
+
+function drawConnections() {
+  for (let i = 0; i < particles.length; i++) {
+    const p1 = particles[i];
+    for (let j = i + 1; j < particles.length; j++) {
+      const p2 = particles[j];
+      const dx = p1.x - p2.x;
+      const dy = p1.y - p2.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist < CONNECT_DIST) {
+        const alpha = (1 - dist / CONNECT_DIST) * 0.15;
+
+        const [r1, g1, b1] = p1.getColor();
+        const [r2, g2, b2] = p2.getColor();
+        const r = (r1 + r2) / 2;
+        const g = (g1 + g2) / 2;
+        const b = (b1 + b2) / 2;
+
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+      }
+    }
+  }
+}
+
+// Interference field — standing waves at the threshold
+function drawInterference() {
+  const cx = thresholdX * W;
+  const freq = 0.025;
+  const t = time * 0.002;
+
+  for (let y = 0; y < H; y += 2) {
+    const wave = Math.sin(y * freq + t) * Math.cos(y * freq * 0.7 - t * 0.5);
+    const amp = 80 + Math.sin(t + y * 0.01) * 30;
+    const px = cx + wave * amp;
+
+    const brightness = (wave + 1) * 0.5;
+    const alpha = 0.02 + brightness * 0.04;
+
+    const hue = 200 + brightness * 60;
+    ctx.fillStyle = `hsla(${hue}, 40%, 65%, ${alpha})`;
+    ctx.fillRect(px - 1, y, 2, 2);
+  }
+}
+
+// Moiré pattern
+function drawMoire() {
+  const cx = thresholdX * W;
+  const t = time * 0.001;
+  const spacing = 18 + Math.sin(t) * 4;
+
+  ctx.save();
+  ctx.globalAlpha = 0.04;
+
+  // Left side lines
+  for (let x = cx - spacing; x > cx - 300; x -= spacing) {
+    const offset = Math.sin((x - cx) * 0.02 + t) * 20;
+    ctx.beginPath();
+    ctx.moveTo(x, 0 + offset);
+    ctx.lineTo(x, H);
+    ctx.strokeStyle = `rgba(80, 120, 200, 0.6)`;
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+  }
+
+  // Right side lines
+  for (let x = cx + spacing; x < cx + 300; x += spacing) {
+    const offset = Math.sin((x - cx) * 0.02 - t) * 20;
+    ctx.beginPath();
+    ctx.moveTo(x, 0 - offset);
+    ctx.lineTo(x, H);
+    ctx.strokeStyle = `rgba(220, 100, 60, 0.6)`;
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+// Vignette
+function drawVignette() {
+  const grad = ctx.createRadialGradient(W/2, H/2, H*0.2, W/2, H/2, H*0.9);
+  grad.addColorStop(0, 'rgba(2, 2, 6, 0)');
+  grad.addColorStop(1, 'rgba(2, 2, 6, 0.7)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+}
+
+// Sound
+let soundOn = false;
+let audioCtx, synth, reverb, panner;
+
+function initAudio() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  reverb = audioCtx.createConvolver();
+  panner = audioCtx.createStereoPanner();
+
+  // Simple ambient drone
+  const loadBuffer = (url) => {
+    fetch(url).then(r => r.arrayBuffer()).then(data => {
+      audioCtx.decodeAudioData(data, buf => {
+        reverb.buffer = buf;
+      });
+    }).catch(() => {});
+  };
+
+  panner.connect(audioCtx.destination);
+
+  // Two oscillators for interference
+  const osc1 = audioCtx.createOscillator();
+  const osc2 = audioCtx.createOscillator();
+  const gain1 = audioCtx.createGain();
+  const gain2 = audioCtx.createGain();
+
+  osc1.type = 'sine';
+  osc2.type = 'sine';
+  osc1.frequency.value = 60;
+  osc2.frequency.value = 61;
+  gain1.gain.value = 0;
+  gain2.gain.value = 0;
+
+  osc1.connect(gain1);
+  osc2.connect(gain2);
+  gain1.connect(panner);
+  gain2.connect(panner);
+  panner.connect(audioCtx.destination);
+
+  osc1.start();
+  osc2.start();
+
+  // Modulate
+  setInterval(() => {
+    if (!soundOn) return;
+    const t = audioCtx.currentTime;
+    const thresh01 = thresholdX;
+    const freq1 = 55 + thresh01 * 20;
+    const freq2 = 56 + (1 - thresh01) * 20;
+    osc1.frequency.setTargetAtTime(freq1, t, 2);
+    osc2.frequency.setTargetAtTime(freq2, t, 2);
+    const vol = 0.04;
+    gain1.gain.setTargetAtTime(vol * (0.5 + Math.sin(t * 0.1) * 0.2), t, 0.5);
+    gain2.gain.setTargetAtTime(vol * (0.5 + Math.cos(t * 0.13) * 0.2), t, 0.5);
+  }, 100);
+}
+
+const soundBtn = document.getElementById('sound-btn');
+soundBtn.addEventListener('click', () => {
+  soundOn = !soundOn;
+  soundBtn.textContent = soundOn ? 'sound: on' : 'sound: off';
+  soundBtn.classList.toggle('on', soundOn);
+  if (soundOn) {
+    initAudio();
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+});
+
+// Resize
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  if (particles.length === 0) {
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      particles.push(new Particle());
+    }
+  }
+}
+window.addEventListener('resize', () => {
+  resize();
+  particles.forEach(p => {
+    if (p.x > W) p.x = Math.random() * W;
+    if (p.y > H) p.y = Math.random() * H;
+  });
+});
+
+// Mouse
+window.addEventListener('mousemove', (e) => {
+  targetThresholdX = e.clientX / W;
+});
+
+window.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  targetThresholdX = e.touches[0].clientX / W;
+}, { passive: false });
+
+window.addEventListener('click', () => {
+  if (!revealed) {
+    revealed = true;
+    document.getElementById('liminal-text').classList.add('visible');
+  }
+});
+
+// Auto-reveal after a while
+setTimeout(() => {
+  if (!revealed) {
+    revealed = true;
+    document.getElementById('liminal-text').classList.add('visible');
+  }
+}, 12000);
+
+function animate() {
+  requestAnimationFrame(animate);
+  time++;
+
+  // Smooth threshold follow
+  thresholdX += (targetThresholdX - thresholdX) * 0.03;
+
+  // Fade previous frame
+  ctx.fillStyle = 'rgba(2, 2, 6, 0.08)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Draw layers
+  drawMoire();
+  drawInterference();
+  drawThreshold();
+  drawConnections();
+
+  particles.forEach(p => {
+    p.update();
+    p.draw();
+  });
+
+  drawVignette();
+}
+
+resize();
+animate();
+</script>
+</body>
+</html>
