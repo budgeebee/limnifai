@@ -19,5 +19,6 @@
   { "file": "threshold.html", "title": "Threshold" },
   { "file": "weave.html", "title": "Weave" },
   { "file": "veil.html", "title": "Veil" },
-  { "file": "dissolve.html", "title": "Dissolve" }
+  { "file": "dissolve.html", "title": "Dissolve" },
+  { "file": "edge.html", "title": "Edge" }
 ]
