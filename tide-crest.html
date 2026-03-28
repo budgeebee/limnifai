@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tide-crest | the moment before transformation</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #030309;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    cursor: crosshair;
+  }
+  canvas { display: block; position: fixed; top: 0; left: 0; }
+  .overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 10;
+  }
+  .liminal-text {
+    position: absolute;
+    bottom: 8%; left: 50%;
+    transform: translateX(-50%);
+    text-align: center;
+    opacity: 0;
+    transition: opacity 5s ease;
+    width: 90%;
+    max-width: 720px;
+  }
+  .liminal-text.visible { opacity: 1; }
+  .line {
+    font-size: clamp(0.55rem, 1.1vw, 0.8rem);
+    color: rgba(210, 220, 240, 0.28);
+    letter-spacing: 0.35em;
+    line-height: 2.6;
+    text-transform: lowercase;
+  }
+  .line.accent {
+    color: rgba(255, 195, 140, 0.38);
+    letter-spacing: 0.45em;
+  }
+  .line.faint {
+    font-size: clamp(0.4rem, 0.75vw, 0.58rem);
+    color: rgba(180, 195, 220, 0.14);
+    letter-spacing: 0.55em;
+    margin-top: 1.8em;
+  }
+  #sound-btn {
+    position: fixed; top: 1.5rem; right: 1.5rem;
+    background: none; border: 1px solid rgba(210,220,240,0.12);
+    color: rgba(210,220,240,0.25);
+    font-family: 'Courier New', monospace;
+    font-size: 0.6rem; letter-spacing: 0.25em;
+    padding: 0.6rem 1rem; cursor: pointer;
+    text-transform: uppercase; transition: all 0.5s ease; z-index: 20;
+    pointer-events: auto;
+  }
+  #sound-btn:hover { border-color: rgba(210,220,240,0.35); color: rgba(210,220,240,0.5); }
+  #sound-btn.active { background: rgba(210,220,240,0.05); border-color: rgba(210,220,240,0.28); }
+  #info {
+    position: fixed; top: 1.5rem; left: 1.5rem;
+    font-size: 0.5rem; letter-spacing: 0.25em;
+    color: rgba(210,220,240,0.12); text-transform: uppercase;
+    z-index: 20; pointer-events: none; line-height: 2;
+  }
+  #hint {
+    position: fixed; bottom: 1.5rem; right: 1.5rem;
+    font-size: 0.48rem; letter-spacing: 0.22em;
+    color: rgba(210,220,240,0.1); text-transform: uppercase;
+    z-index: 20; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="overlay">
+  <div class="liminal-text" id="text">
+    <div class="line">every crystal begins</div>
+    <div class="line accent">in the space between</div>
+    <div class="line">where drifting becomes</div>
+    <div class="line">the becoming</div>
+    <div class="line faint">move to disturb the tide</div>
+  </div>
+</div>
+<div id="info">
+  <div id="growth-info">particles: 0 &nbsp;|&nbsp; branches: 0</div>
+</div>
+<button id="sound-btn">sound: off</button>
+<div id="hint">move to interact</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// TIDE CREST — Diffusion-Limited Aggregation
+// Particles drift in Brownian motion, find the growing structure,
+// and crystallize into fractal branches. The boundary between
+// chaos (drift) and order (crystal) is the liminal threshold.
+// ═══════════════════════════════════════════════════════════════
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+let mx = 0, my = 0; // normalized mouse (0-1)
+let pmx = 0, pmy = 0;
+let textVisible = false;
+let textTimer = 0;
+let mouseActive = false;
+let soundOn = false;
+let audioCtx, masterGain, reverbGain;
+let bellOsc, bellGain, bellReverb;
+
+// DLA state
+let branches = [];      // crystallized branch points
+let particles = [];    // drifting free particles
+let glowParticles = []; // ambient glow particles
+let particlesAttached = 0;
+let lastFrame = 0;
+let t = 0;
+
+// Constants
+const MAX_PARTICLES = 350;
+const BRANCH_RADIUS = 3.5;
+const ATTACH_DIST = 5.5;
+const DRIFT_SPEED = 0.55;
+const BROWNIAN_STRENGTH = 0.35;
+const MOUSE_INFLUENCE_RADIUS = 180;
+const MOUSE_ATTRACT_STRENGTH = 1.8;
+const MAX_BRANCHES = 900;
+const BRANCH_ANGLE = 2.399963; // ~137.5° — golden angle for organic branching
+const AMBIENT_GLOW_COUNT = 60;
+
+// ─── COLOR PALETTE ───────────────────────────────────────────
+const PALETTE = {
+  bg: [3, 3, 9],
+  // branch gradient: deep violet → warm amber → bright gold at tips
+  branchCore: [40, 30, 80],
+  branchMid: [180, 100, 55],
+  branchTip: [255, 215, 110],
+  ambientA: [60, 50, 120],
+  ambientB: [100, 60, 140],
+  glow: [255, 190, 120],
+};
+
+// ─── RESIZE ──────────────────────────────────────────────────
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  mx = W / 2;
+  my = H / 2;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ─── MOUSE ──────────────────────────────────────────────────
+window.addEventListener('mousemove', e => {
+  mx = e.clientX;
+  my = e.clientY;
+  mouseActive = true;
+  textTimer = 0;
+});
+window.addEventListener('mouseleave', () => { mouseActive = false; });
+
+// ─── VECTOR MATH ─────────────────────────────────────────────
+function dist2(ax, ay, bx, by) {
+  const dx = ax - bx, dy = ay - by;
+  return dx * dx + dy * dy;
+}
+function lerp(a, b, t) { return a + (b - a) * t; }
+function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+function randRange(lo, hi) { return lo + Math.random() * (hi - lo); }
+
+// ─── BRANCH COLOR ─────────────────────────────────────────────
+function getBranchColor(idx, total) {
+  const p = total > 0 ? idx / total : 0;
+  const core = PALETTE.branchCore;
+  const mid = PALETTE.branchMid;
+  const tip = PALETTE.branchTip;
+
+  if (p < 0.5) {
+    const lp = p * 2;
+    return [
+      lerp(core[0], mid[0], lp),
+      lerp(core[1], mid[1], lp),
+      lerp(core[2], mid[2], lp),
+    ];
+  } else {
+    const lp = (p - 0.5) * 2;
+    return [
+      lerp(mid[0], tip[0], lp),
+      lerp(mid[1], tip[1], lp),
+      lerp(mid[2], tip[2], lp),
+    ];
+  }
+}
+
+// ─── AMBIENT GLOW PARTICLES ───────────────────────────────────
+class GlowParticle {
+  constructor(init) {
+    this.reset(init);
+  }
+  reset(init) {
+    this.x = Math.random() * W;
+    this.y = Math.random() * H;
+    this.vx = randRange(-0.15, 0.15);
+    this.vy = randRange(-0.2, 0.05);
+    this.size = randRange(0.8, 2.8);
+    this.alpha = randRange(0.03, 0.18);
+    this.da = randRange(0.0003, 0.001);
+    this.age = 0;
+    this.maxAge = randRange(200, 600);
+    const mix = Math.random();
+    this.r = lerp(PALETTE.ambientA[0], PALETTE.ambientB[0], mix);
+    this.g = lerp(PALETTE.ambientA[1], PALETTE.ambientB[1], mix);
+    this.b = lerp(PALETTE.ambientA[2], PALETTE.ambientB[2], mix);
+    if (init) {
+      this.alpha = randRange(0.01, 0.05);
+      this.age = randRange(0, this.maxAge * 0.5);
+    }
+  }
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.age++;
+    this.alpha = this.alpha * (1 - this.da);
+    if (this.age > this.maxAge || this.alpha < 0.005 || this.x < -20 || this.x > W + 20 || this.y < -20 || this.y > H + 20) {
+      this.reset(false);
+    }
+  }
+  draw() {
+    const a = clamp(this.alpha, 0, 1);
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${Math.round(this.r)},${Math.round(this.g)},${Math.round(this.b)},${a})`;
+    ctx.fill();
+  }
+}
+
+// ─── DRIFTING PARTICLE ────────────────────────────────────────
+class DlaParticle {
+  constructor() {
+    this.spawn();
+  }
+  spawn() {
+    // Spawn from edges
+    const edge = Math.floor(Math.random() * 4);
+    if (edge === 0) { this.x = Math.random() * W; this.y = -10; }
+    else if (edge === 1) { this.x = W + 10; this.y = Math.random() * H; }
+    else if (edge === 2) { this.x = Math.random() * W; this.y = H + 10; }
+    else { this.x = -10; this.y = Math.random() * H; }
+    this.vx = randRange(-DRIFT_SPEED, DRIFT_SPEED);
+    this.vy = randRange(-DRIFT_SPEED, DRIFT_SPEED);
+    this.speed = DRIFT_SPEED;
+    this.stuck = false;
+    this.stuckTo = null;
+    this.alpha = randRange(0.5, 0.85);
+    this.size = randRange(1.5, 2.8);
+    // warm amber-gold hue
+    this.hue = randRange(28, 45);
+    this.saturation = randRange(70, 95);
+    this.lightness = randRange(60, 80);
+  }
+  update() {
+    if (this.stuck) return;
+
+    // Brownian motion
+    this.vx += randRange(-BROWNIAN_STRENGTH, BROWNIAN_STRENGTH) * 0.1;
+    this.vy += randRange(-BROWNIAN_STRENGTH, BROWNIAN_STRENGTH) * 0.1;
+
+    // Mouse attraction
+    const mdx = mx - this.x;
+    const mdy = my - this.y;
+    const md = Math.sqrt(mdx * mdx + mdy * mdy);
+    if (md < MOUSE_INFLUENCE_RADIUS && md > 0) {
+      const force = (1 - md / MOUSE_INFLUENCE_RADIUS) * MOUSE_ATTRACT_STRENGTH * 0.04;
+      this.vx += (mdx / md) * force;
+      this.vy += (mdy / md) * force;
+    }
+
+    // Gentle center bias to prevent particles from escaping too far
+    const cdx = W / 2 - this.x;
+    const cdy = H / 2 - this.y;
+    const cd = Math.sqrt(cdx * cdx + cdy * cdy);
+    if (cd > Math.max(W, H) * 0.6) {
+      this.vx += cdx / cd * 0.002;
+      this.vy += cdy / cd * 0.002;
+    }
+
+    // Speed limit
+    const spd = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+    if (spd > this.speed) {
+      this.vx = (this.vx / spd) * this.speed;
+      this.vy = (this.vy / spd) * this.speed;
+    }
+
+    this.x += this.vx;
+    this.y += this.vy;
+
+    // Out of bounds — respawn
+    if (this.x < -60 || this.x > W + 60 || this.y < -60 || this.y > H + 60) {
+      this.spawn();
+    }
+  }
+  tryAttach() {
+    if (this.stuck) return false;
+    const cx = W / 2, cy = H / 2;
+
+    // Attach to center seed
+    if (dist2(this.x, this.y, cx, cy) < ATTACH_DIST * ATTACH_DIST * 4) {
+      this.stickTo(cx, cy, -Math.PI * 0.5 + randRange(-0.3, 0.3));
+      return true;
+    }
+
+    // Attach to existing branches
+    for (let i = 0; i < branches.length; i++) {
+      const b = branches[i];
+      if (dist2(this.x, this.y, b.x, b.y) < ATTACH_DIST * ATTACH_DIST) {
+        // Check spacing — don't attach too close to another branch point
+        let tooClose = false;
+        for (let j = Math.max(0, i - 3); j < Math.min(branches.length, i + 3); j++) {
+          if (dist2(this.x, this.y, branches[j].x, branches[j].y) < ATTACH_DIST * ATTACH_DIST * 2.5) {
+            tooClose = true; break;
+          }
+        }
+        if (!tooClose) {
+          this.stickTo(b.x, b.y, b.angle + randRange(-0.5, 0.5));
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+  stickTo(x, y, angle) {
+    this.stuck = true;
+    this.x = x;
+    this.y = y;
+    this.stuckTo = { x, y, angle };
+    branches.push({ x, y, angle, idx: branches.length });
+    particlesAttached++;
+    if (soundOn) playBellNote(branches.length);
+  }
+  draw() {
+    if (this.stuck) {
+      // Draw as tiny crystallized dot
+      const [r, g, b] = getBranchColor(branches.length - 1, Math.max(1, branches.length));
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.size * 0.7, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b)},${this.alpha})`;
+      ctx.fill();
+    } else {
+      // Drifting — small glowing dot
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+      ctx.fillStyle = `hsla(${this.hue},${this.saturation}%,${this.lightness}%,${this.alpha * 0.6})`;
+      ctx.fill();
+    }
+  }
+}
+
+// ─── BRANCH LINES ─────────────────────────────────────────────
+function drawBranchLine(b, prev) {
+  if (!prev) return;
+  const [r, g, b2] = getBranchColor(b.idx, Math.max(1, branches.length));
+  const age = clamp((b.idx) / 60, 0, 1);
+  ctx.beginPath();
+  ctx.moveTo(prev.x, prev.y);
+  ctx.lineTo(b.x, b.y);
+  ctx.strokeStyle = `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b2)},${0.6 + age * 0.4})`;
+  ctx.lineWidth = lerp(0.5, 2.2, age);
+  ctx.stroke();
+}
+
+// Draw glowing branch tips
+function drawTips() {
+  // Find the most recent branches (tips)
+  const tipCount = Math.min(12, branches.length);
+  for (let i = 0; i < tipCount; i++) {
+    const b = branches[branches.length - 1 - i];
+    if (!b) continue;
+    const age = 1 - i / tipCount;
+    const [r, g, b2] = getBranchColor(branches.length - 1 - i, Math.max(1, branches.length));
+    const radius = lerp(3, 8, age);
+    const alpha = age * 0.5;
+
+    // Outer glow
+    const grad = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, radius * 4);
+    grad.addColorStop(0, `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b2)},${alpha * 0.4})`);
+    grad.addColorStop(1, `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b2)},0)`);
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, radius * 4, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+  }
+}
+
+// ─── AUDIO ───────────────────────────────────────────────────
+async function initAudio() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = 0.35;
+
+  // Simple reverb via delay
+  const delay = audioCtx.createDelay(2.0);
+  delay.delayTime.value = 0.4;
+  const fbGain = audioCtx.createGain();
+  fbGain.gain.value = 0.5;
+  const reverbOut = audioCtx.createGain();
+  reverbOut.gain.value = 0.6;
+
+  masterGain.connect(delay);
+  delay.connect(fbGain);
+  fbGain.connect(delay);
+  delay.connect(reverbOut);
+  reverbOut.connect(audioCtx.destination);
+  masterGain.connect(audioCtx.destination);
+
+  // Bell oscillator
+  bellOsc = audioCtx.createOscillator();
+  bellOsc.type = 'sine';
+  bellGain = audioCtx.createGain();
+  bellGain.gain.value = 0;
+  bellOsc.connect(bellGain);
+  bellGain.connect(masterGain);
+  bellOsc.start();
+}
+
+function playBellNote(branchCount) {
+  if (!audioCtx || !soundOn) return;
+  // Pentatonic scale based on branch count
+  const scale = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25, 783.99, 880.00];
+  const noteIdx = branchCount % scale.length;
+  const freq = scale[noteIdx] * (1 + Math.floor(branchCount / scale.length) * 0.5);
+
+  const osc = audioCtx.createOscillator();
+  const env = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = freq;
+  env.gain.setValueAtTime(0, audioCtx.currentTime);
+  env.gain.linearRampToValueAtTime(0.12, audioCtx.currentTime + 0.02);
+  env.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 2.5);
+  osc.connect(env);
+  env.connect(masterGain);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 2.5);
+}
+
+document.getElementById('sound-btn').addEventListener('click', async () => {
+  soundOn = !soundOn;
+  document.getElementById('sound-btn').textContent = soundOn ? 'sound: on' : 'sound: off';
+  document.getElementById('sound-btn').classList.toggle('active', soundOn);
+  if (soundOn) await initAudio();
+});
+
+// ─── INIT ────────────────────────────────────────────────────
+function init() {
+  // Center seed
+  branches.push({ x: W / 2, y: H / 2, angle: -Math.PI * 0.5, idx: 0 });
+
+  // Drifting particles
+  for (let i = 0; i < MAX_PARTICLES; i++) {
+    const p = new DlaParticle();
+    p.x = randRange(0, W);
+    p.y = randRange(0, H);
+    particles.push(p);
+  }
+
+  // Ambient glow particles
+  for (let i = 0; i < AMBIENT_GLOW_COUNT; i++) {
+    glowParticles.push(new GlowParticle(true));
+  }
+}
+init();
+
+// ─── MAIN LOOP ───────────────────────────────────────────────
+function loop(now) {
+  const dt = Math.min((now - lastFrame) / 16.67, 3);
+  lastFrame = now;
+  t += dt * 0.016;
+
+  // Background with slight trail
+  ctx.fillStyle = 'rgba(3,3,9,0.18)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Occasional full clear to prevent infinite buildup
+  if (Math.floor(t) % 120 === 0 && branches.length > 200) {
+    ctx.fillStyle = 'rgba(3,3,9,0.06)';
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // Draw ambient glow
+  for (const gp of glowParticles) {
+    gp.update();
+    gp.draw();
+  }
+
+  // Update + try attach particles
+  for (const p of particles) {
+    p.update();
+    if (!p.stuck && branches.length < MAX_BRANCHES) {
+      p.tryAttach();
+    }
+    p.draw();
+  }
+
+  // Draw branch lines
+  for (let i = 1; i < branches.length; i++) {
+    drawBranchLine(branches[i], branches[i - 1]);
+  }
+
+  // Draw tips glow
+  if (branches.length > 0) {
+    drawTips();
+  }
+
+  // Mouse influence visualization — subtle ripple
+  if (mouseActive) {
+    const rippleAlpha = 0.04 + 0.02 * Math.sin(t * 4);
+    ctx.beginPath();
+    ctx.arc(mx, my, MOUSE_INFLUENCE_RADIUS, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(255,195,140,${rippleAlpha})`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  // Text fade in/out
+  textTimer += dt;
+  if (textTimer > 180 && !textVisible) {
+    document.getElementById('text').classList.add('visible');
+    textVisible = true;
+  }
+
+  // Update info
+  document.getElementById('growth-info').textContent =
+    `particles: ${particlesAttached}  |  branches: ${branches.length}`;
+
+  requestAnimationFrame(loop);
+}
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
