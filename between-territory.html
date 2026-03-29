@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>between-territory | the space that's neither</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #050508;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    cursor: crosshair;
+  }
+  canvas { display: block; position: fixed; top: 0; left: 0; }
+  .overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 10;
+  }
+  .liminal-text {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    opacity: 0;
+    transition: opacity 5s ease;
+    width: 90%;
+    max-width: 680px;
+  }
+  .liminal-text.visible { opacity: 1; }
+  .line {
+    font-size: clamp(0.6rem, 1.2vw, 0.85rem);
+    color: rgba(200, 210, 230, 0.25);
+    letter-spacing: 0.4em;
+    line-height: 2.5;
+    text-transform: lowercase;
+  }
+  .line.accent {
+    color: rgba(160, 200, 220, 0.35);
+    letter-spacing: 0.5em;
+  }
+  .line.faint {
+    font-size: clamp(0.4rem, 0.8vw, 0.58rem);
+    color: rgba(180, 195, 215, 0.12);
+    letter-spacing: 0.55em;
+    margin-top: 2em;
+  }
+  #sound-btn {
+    position: fixed; top: 1.5rem; right: 1.5rem;
+    background: none; border: 1px solid rgba(200,210,230,0.12);
+    color: rgba(200,210,230,0.25);
+    font-family: 'Courier New', monospace;
+    font-size: 0.6rem; letter-spacing: 0.3em;
+    padding: 0.6rem 1rem; cursor: pointer;
+    text-transform: uppercase; transition: all 0.5s ease; z-index: 20;
+    pointer-events: auto;
+  }
+  #sound-btn:hover { border-color: rgba(200,210,230,0.35); color: rgba(200,210,230,0.5); }
+  #sound-btn.active { border-color: rgba(160,200,220,0.35); color: rgba(160,200,220,0.55); }
+  #info {
+    position: fixed; top: 1.5rem; left: 1.5rem;
+    font-size: 0.5rem; letter-spacing: 0.25em;
+    color: rgba(200,210,230,0.12); text-transform: uppercase;
+    z-index: 20; pointer-events: none; line-height: 2;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="overlay">
+  <div class="liminal-text" id="text">
+    <div class="line">no territory is fixed</div>
+    <div class="line">no boundary holds forever</div>
+    <div class="line accent">the between</div>
+    <div class="line">is where influence changes hands</div>
+    <div class="line">neither here nor there</div>
+    <div class="line faint">hover at the edge of things</div>
+  </div>
+</div>
+<button id="sound-btn">sound off</button>
+<div id="info">between-territory<br>move to disturb</div>
+
+<script>
+// =============================================================
+// BETWEEN-TERRITORY — Voronoi boundary exploration
+// Liminality: the space between influence zones
+// Mouse interaction disturbs the cellular territory balance
+// =============================================================
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let W, H;
+const NUM_CELLS = 48;
+const SUBDIVISION_DEPTH = 3;
+
+let cells = [];
+let mouseX = -1000, mouseY = -1000;
+let targetMouseX = -1000, targetMouseY = -1000;
+let time = 0;
+let soundOn = false;
+
+// Tone.js for generative audio
+let toneScript = document.createElement('script');
+toneScript.src = 'https://cdn.jsdelivr.net/npm/tone@14.7.77';
+document.head.appendChild(toneScript);
+
+let synth, reverb, panner;
+let initialized = false;
+
+async function initAudio() {
+  if (initialized) return;
+  await Tone.start();
+  
+  // Ambient drone that shifts based on mouse position
+  synth = new Tone.PolySynth(Tone.Synth, {
+    oscillator: { type: 'sine' },
+    envelope: { attack: 4, decay: 2, sustain: 0.8, release: 8 },
+    volume: -24
+  });
+  
+  reverb = new Tone.Reverb({ decay: 8, wet: 0.7 }).toDestination();
+  panner = new Tone.Panner3D(0, 0, 1).connect(reverb);
+  
+  synth.connect(panner);
+  
+  // Play a soft chord that shifts
+  const notes = ['C2', 'E2', 'G2', 'B2'];
+  synth.triggerAttackRelease(notes, 12);
+  
+  // LFO to shift the notes subtly
+  const lfo = new Tone.LFO({ frequency: 0.05, min: -2, max: 2 }).start();
+  lfo.connect(synth.detune);
+  
+  initialized = true;
+}
+
+document.getElementById('sound-btn').addEventListener('click', async () => {
+  soundOn = !soundOn;
+  document.getElementById('sound-btn').textContent = soundOn ? 'sound on' : 'sound off';
+  document.getElementById('sound-btn').classList.toggle('active', soundOn);
+  if (soundOn) await initAudio();
+});
+
+// Cell class representing a Voronoi territory
+class Cell {
+  constructor(x, y, depth = 0, parent = null) {
+    this.x = x;
+    this.y = y;
+    this.depth = depth;
+    this.parent = parent;
+    this.vx = (Math.random() - 0.5) * 0.3;
+    this.vy = (Math.random() - 0.5) * 0.3;
+    this.baseX = x;
+    this.baseY = y;
+    this.radius = 3 + Math.random() * 4;
+    this.phase = Math.random() * Math.PI * 2;
+    this.pulseRadius = 0;
+    this.color = this.randomColor();
+    this.children = [];
+  }
+  
+  randomColor() {
+    const colors = [
+      { r: 60, g: 80, b: 120 },   // blue-gray
+      { r: 80, g: 70, b: 100 },   // purple-gray
+      { r: 50, g: 90, b: 110 },   // teal-gray
+      { r: 90, g: 75, b: 80 },    // rose-gray
+      { r: 70, g: 85, b: 90 },    // cyan-gray
+    ];
+    return colors[Math.floor(Math.random() * colors.length)];
+  }
+  
+  subdivide() {
+    if (this.depth >= SUBDIVISION_DEPTH) return;
+    
+    // Clear children
+    this.children = [];
+    
+    // Create 4 sub-cells in a grid around this cell
+    const offset = 15 + this.depth * 8;
+    const positions = [
+      { dx: -offset, dy: -offset },
+      { dx: offset, dy: -offset },
+      { dx: -offset, dy: offset },
+      { dx: offset, dy: offset }
+    ];
+    
+    for (let pos of positions) {
+      const child = new Cell(
+        this.x + pos.dx + (Math.random() - 0.5) * 10,
+        this.y + pos.dy + (Math.random() - 0.5) * 10,
+        this.depth + 1,
+        this
+      );
+      child.vx = (Math.random() - 0.5) * 0.4;
+      child.vy = (Math.random() - 0.5) * 0.4;
+      this.children.push(child);
+    }
+  }
+  
+  pulse(intensity) {
+    this.pulseRadius = Math.max(this.pulseRadius, intensity * 30);
+  }
+  
+  update(mx, my) {
+    // Gentle drift
+    this.x += this.vx;
+    this.y += this.vy;
+    
+    // Return to base position slowly
+    this.x += (this.baseX - this.x) * 0.002;
+    this.y += (this.baseY - this.y) * 0.002;
+    
+    // Mouse influence
+    const dx = this.x - mx;
+    const dy = this.y - my;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const influence = Math.max(0, 1 - dist / 250);
+    
+    if (influence > 0) {
+      // Push away from mouse
+      const pushStrength = influence * influence * 2;
+      this.x += (dx / dist) * pushStrength;
+      this.y += (dy / dist) * pushStrength;
+      
+      // Pulse effect
+      if (influence > 0.3) {
+        this.pulse(influence);
+      }
+    }
+    
+    // Decay pulse
+    this.pulseRadius *= 0.92;
+    
+    // Boundary wrap
+    if (this.x < -50) this.x = W + 50;
+    if (this.x > W + 50) this.x = -50;
+    if (this.y < -50) this.y = H + 50;
+    if (this.y > H + 50) this.y = -50;
+    
+    // Update children recursively
+    for (let child of this.children) {
+      child.update(mx, my);
+    }
+  }
+  
+  draw(ctx, allCells) {
+    if (this.depth === 0) {
+      // Root cells - draw Voronoi boundaries
+      this.drawVoronoi(ctx, allCells);
+    }
+    
+    // Draw children
+    for (let child of this.children) {
+      child.draw(ctx, allCells);
+    }
+  }
+  
+  drawVoronoi(ctx, allCells) {
+    // For each pixel, find which cell it's closest to
+    // But we optimize by only checking near this cell
+    const step = 3;
+    
+    for (let py = 0; py < H; py += step) {
+      for (let px = 0; px < W; px += step) {
+        let minDist = Infinity;
+        let secondMinDist = Infinity;
+        let closestCell = null;
+        let secondClosest = null;
+        
+        for (let cell of allCells) {
+          const dx = px - cell.x;
+          const dy = py - cell.y;
+          const dist = dx * dx + dy * dy;
+          
+          if (dist < minDist) {
+            secondMinDist = minDist;
+            secondClosest = closestCell;
+            minDist = dist;
+            closestCell = cell;
+          } else if (dist < secondMinDist) {
+            secondMinDist = dist;
+            secondClosest = cell;
+          }
+        }
+        
+        if (closestCell === this) {
+          const boundaryRatio = Math.sqrt(minDist) / Math.sqrt(secondMinDist);
+          
+          // We're in this cell's territory
+          // Color intensity based on distance to boundary
+          const boundaryFactor = 1 - Math.pow(boundaryRatio, 4);
+          
+          if (boundaryFactor > 0.02) {
+            // Near boundary - draw edge
+            const alpha = boundaryFactor * 0.6;
+            
+            // Pulse glow near mouse
+            const mdx = px - mouseX;
+            const mdy = py - mouseY;
+            const mouseDist = Math.sqrt(mdx * mdx + mdy * mdy);
+            const glowFactor = Math.max(0, 1 - mouseDist / 100);
+            
+            const r = this.color.r + Math.floor(boundaryFactor * 40);
+            const g = this.color.g + Math.floor(boundaryFactor * 40);
+            const b = this.color.b + Math.floor(boundaryFactor * 40);
+            
+            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha + glowFactor * 0.4})`;
+            ctx.fillRect(px, py, step, step);
+          }
+          
+          // Draw cell center
+          const centerDist = Math.sqrt(minDist);
+          if (centerDist < this.radius) {
+            const centerAlpha = (1 - centerDist / this.radius) * 0.3;
+            const pr = this.pulseRadius / 30;
+            const pulseGlow = Math.max(0, 1 - centerDist / (this.radius + this.pulseRadius));
+            
+            ctx.fillStyle = `rgba(${this.color.r + 60}, ${this.color.g + 60}, ${this.color.b + 60}, ${centerAlpha + pulseGlow * 0.5})`;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius + this.pulseRadius * 0.5, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      }
+    }
+    
+    // Draw edge lines between cells
+    ctx.strokeStyle = 'rgba(200, 210, 230, 0.08)';
+    ctx.lineWidth = 0.5;
+    
+    // Compute and draw Voronoi edges
+    this.computeVoronoiEdges(ctx, allCells);
+  }
+  
+  computeVoronoiEdges(ctx, allCells) {
+    // For each pair of cells, draw the perpendicular bisector
+    // But simplified: draw lines from cell centers outward
+    const numRays = 6;
+    
+    for (let i = 0; i < allCells.length; i++) {
+      const cell = allCells[i];
+      const angleOffset = (i / allCells.length) * Math.PI * 2;
+      
+      for (let r = 0; r < numRays; r++) {
+        const angle = angleOffset + (r / numRays) * Math.PI * 2 + time * 0.0003;
+        const rayLength = 200 + Math.sin(time * 0.002 + r) * 50;
+        
+        // Find midpoint between this cell and the boundary
+        let endX = cell.x + Math.cos(angle) * rayLength;
+        let endY = cell.y + Math.sin(angle) * rayLength;
+        
+        // Check if this ray hits a boundary (midpoint between two cells)
+        let closestOther = null;
+        let closestDist = Infinity;
+        
+        for (let j = 0; j < allCells.length; j++) {
+          if (i === j) continue;
+          const other = allCells[j];
+          
+          // Midpoint
+          const mx = (cell.x + other.x) / 2;
+          const my = (cell.y + other.y) / 2;
+          
+          // Distance from ray to midpoint
+          const dx = mx - cell.x;
+          const dy = my - cell.y;
+          const dot = dx * Math.cos(angle) + dy * Math.sin(angle);
+          
+          if (dot > 0 && dot < rayLength) {
+            const perpDist = Math.abs(-dy * Math.cos(angle) + dx * Math.sin(angle));
+            if (perpDist < 15 && dot < closestDist) {
+              closestDist = dot;
+              closestOther = { x: mx, y: my };
+            }
+          }
+        }
+        
+        if (closestOther) {
+          // Draw edge segment
+          const gradient = ctx.createLinearGradient(cell.x, cell.y, closestOther.x, closestOther.y);
+          gradient.addColorStop(0, 'rgba(200, 210, 230, 0.15)');
+          gradient.addColorStop(1, 'rgba(200, 210, 230, 0.02)');
+          
+          ctx.strokeStyle = gradient;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(cell.x, cell.y);
+          ctx.lineTo(closestOther.x, closestOther.y);
+          ctx.stroke();
+        }
+      }
+    }
+  }
+}
+
+function init() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  
+  cells = [];
+  
+  // Create initial cells in a somewhat organized pattern
+  const cols = Math.ceil(Math.sqrt(NUM_CELLS * (W / H)));
+  const rows = Math.ceil(NUM_CELLS / cols);
+  const cellW = W / cols;
+  const cellH = H / rows;
+  
+  for (let i = 0; i < NUM_CELLS; i++) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const x = (col + 0.5) * cellW + (Math.random() - 0.5) * cellW * 0.6;
+    const y = (row + 0.5) * cellH + (Math.random() - 0.5) * cellH * 0.6;
+    
+    const cell = new Cell(x, y);
+    
+    // Subdivide some cells
+    if (Math.random() > 0.4) {
+      cell.subdivide();
+    }
+    
+    cells.push(cell);
+  }
+  
+  // Show text after delay
+  setTimeout(() => {
+    document.getElementById('text').classList.add('visible');
+  }, 2000);
+}
+
+function drawGrid() {
+  // Subtle background grid that fades in and out
+  const gridAlpha = (Math.sin(time * 0.001) + 1) * 0.03;
+  ctx.strokeStyle = `rgba(200, 210, 230, ${gridAlpha})`;
+  ctx.lineWidth = 0.5;
+  
+  const gridSize = 60;
+  
+  for (let x = 0; x < W; x += gridSize) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, H);
+    ctx.stroke();
+  }
+  
+  for (let y = 0; y < H; y += gridSize) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+  }
+}
+
+function drawConnections() {
+  // Draw subtle lines between nearby cells
+  ctx.strokeStyle = 'rgba(200, 210, 230, 0.04)';
+  ctx.lineWidth = 0.5;
+  
+  for (let i = 0; i < cells.length; i++) {
+    for (let j = i + 1; j < cells.length; j++) {
+      const dx = cells[i].x - cells[j].x;
+      const dy = cells[i].y - cells[j].y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      
+      if (dist < 150) {
+        const alpha = (1 - dist / 150) * 0.08;
+        ctx.strokeStyle = `rgba(200, 210, 230, ${alpha})`;
+        ctx.beginPath();
+        ctx.moveTo(cells[i].x, cells[i].y);
+        ctx.lineTo(cells[j].x, cells[j].y);
+        ctx.stroke();
+      }
+    }
+  }
+}
+
+function drawMouseGlow() {
+  if (mouseX < 0) return;
+  
+  // Draw expanding rings from mouse position
+  const numRings = 3;
+  
+  for (let i = 0; i < numRings; i++) {
+    const phase = (time * 0.003 + i * 0.3) % 1;
+    const radius = phase * 200;
+    const alpha = (1 - phase) * 0.15;
+    
+    ctx.strokeStyle = `rgba(160, 200, 220, ${alpha})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(mouseX, mouseY, radius, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  
+  // Central glow
+  const gradient = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, 50);
+  gradient.addColorStop(0, 'rgba(160, 200, 220, 0.15)');
+  gradient.addColorStop(1, 'rgba(160, 200, 220, 0)');
+  ctx.fillStyle = gradient;
+  ctx.beginPath();
+  ctx.arc(mouseX, mouseY, 50, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  time++;
+  
+  // Smooth mouse
+  mouseX += (targetMouseX - mouseX) * 0.1;
+  mouseY += (targetMouseY - mouseY) * 0.1;
+  
+  // Fade effect
+  ctx.fillStyle = 'rgba(5, 5, 8, 0.15)';
+  ctx.fillRect(0, 0, W, H);
+  
+  // Accumulate bright
+  ctx.fillStyle = 'rgba(15, 15, 25, 0.1)';
+  ctx.fillRect(0, 0, W, H);
+  
+  // Draw elements
+  drawGrid();
+  drawMouseGlow();
+  drawConnections();
+  
+  // Update and draw cells
+  for (let cell of cells) {
+    cell.update(mouseX, mouseY);
+  }
+  
+  // Draw cells (roots only, which recursively draw children)
+  for (let cell of cells) {
+    if (cell.depth === 0) {
+      cell.draw(ctx, cells);
+    }
+  }
+  
+  // Draw cell centers on top
+  for (let cell of cells) {
+    if (cell.depth === 0) {
+      // Pulse effect
+      const pulseSize = cell.radius + cell.pulseRadius;
+      
+      const gradient = ctx.createRadialGradient(
+        cell.x, cell.y, 0,
+        cell.x, cell.y, pulseSize
+      );
+      gradient.addColorStop(0, `rgba(${cell.color.r + 80}, ${cell.color.g + 80}, ${cell.color.b + 80}, 0.6)`);
+      gradient.addColorStop(0.5, `rgba(${cell.color.r + 40}, ${cell.color.g + 40}, ${cell.color.b + 40}, 0.2)`);
+      gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(cell.x, cell.y, pulseSize, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Core dot
+      ctx.fillStyle = `rgba(255, 255, 255, 0.5)`;
+      ctx.beginPath();
+      ctx.arc(cell.x, cell.y, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+window.addEventListener('resize', init);
+
+window.addEventListener('mousemove', (e) => {
+  targetMouseX = e.clientX;
+  targetMouseY = e.clientY;
+});
+
+window.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  targetMouseX = e.touches[0].clientX;
+  targetMouseY = e.touches[0].clientY;
+}, { passive: false });
+
+window.addEventListener('touchstart', (e) => {
+  targetMouseX = e.touches[0].clientX;
+  targetMouseY = e.touches[0].clientY;
+});
+
+init();
+animate();
+</script>
+</body>
+</html>
