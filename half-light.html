@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>half-light | the hour between</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #f2f0eb;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    cursor: crosshair;
+  }
+  canvas { display: block; position: fixed; top: 0; left: 0; }
+  .overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 10;
+  }
+  .liminal-text {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    opacity: 0;
+    transition: opacity 6s ease;
+    width: 90%;
+    max-width: 640px;
+  }
+  .liminal-text.visible { opacity: 1; }
+  .line {
+    font-size: clamp(0.55rem, 1.1vw, 0.82rem);
+    color: rgba(60, 65, 90, 0.22);
+    letter-spacing: 0.4em;
+    line-height: 2.7;
+    text-transform: lowercase;
+  }
+  .line.accent {
+    color: rgba(90, 100, 140, 0.32);
+    letter-spacing: 0.52em;
+  }
+  .line.faint {
+    font-size: clamp(0.38rem, 0.75vw, 0.56rem);
+    color: rgba(80, 85, 110, 0.14);
+    letter-spacing: 0.58em;
+    margin-top: 2em;
+  }
+  #sound-btn {
+    position: fixed; top: 1.5rem; right: 1.5rem;
+    background: none; border: 1px solid rgba(60,65,90,0.15);
+    color: rgba(60,65,90,0.3);
+    font-family: 'Courier New', monospace;
+    font-size: 0.6rem; letter-spacing: 0.3em;
+    padding: 0.6rem 1rem; cursor: pointer;
+    text-transform: uppercase; transition: all 0.5s ease; z-index: 20;
+    pointer-events: auto;
+  }
+  #sound-btn:hover { border-color: rgba(60,65,90,0.35); color: rgba(60,65,90,0.5); }
+  #sound-btn.active { background: rgba(60,65,90,0.05); border-color: rgba(60,65,90,0.3); }
+  #info {
+    position: fixed; top: 1.5rem; left: 1.5rem;
+    font-size: 0.5rem; letter-spacing: 0.25em;
+    color: rgba(60,65,90,0.15); text-transform: uppercase;
+    z-index: 20; pointer-events: none; line-height: 2;
+  }
+  #hint {
+    position: fixed; bottom: 1.5rem; right: 1.5rem;
+    font-size: 0.48rem; letter-spacing: 0.22em;
+    color: rgba(60,65,90,0.1); text-transform: uppercase;
+    z-index: 20; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="overlay">
+  <div class="liminal-text" id="text">
+    <div class="line">neither night</div>
+    <div class="line accent">nor morning</div>
+    <div class="line">the world holds its breath</div>
+    <div class="line">between what was</div>
+    <div class="line">and what will be</div>
+    <div class="line faint">the hour that belongs to no one</div>
+  </div>
+</div>
+<button id="sound-btn">sound off</button>
+<div id="info">half-light<br>move to disturb</div>
+<div id="hint">hover</div>
+
+<script>
+// =============================================================
+// HALF-LIGHT — Noise field flow visualization
+// Liminality: the threshold between night and day,
+// the breath between exhale and inhale, the moment
+// between sleeping and waking.
+// Mouse creates turbulence in the flow.
+// Light background — a departure from the gallery's dark themes.
+// =============================================================
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let W, H;
+let time = 0;
+let mouseX = -1000, mouseY = -1000;
+let targetMouseX = -1000, targetMouseY = -1000;
+let soundOn = false;
+
+// Particles in the flow field
+const NUM_PARTICLES = 1200;
+let particles = [];
+
+// Contour lines (threshold boundaries)
+const CONTOUR_RESOLUTION = 60;
+let contourCanvas, contourCtx;
+let noiseImageData;
+
+// Audio
+let toneScript = document.createElement('script');
+toneScript.src = 'https://cdn.jsdelivr.net/npm/tone@14.7.77';
+document.head.appendChild(toneScript);
+
+let synth, reverb, panner, filter;
+let initialized = false;
+
+async function initAudio() {
+  if (initialized) return;
+  await Tone.start();
+  
+  filter = new Tone.Filter({
+    frequency: 800,
+    type: 'lowpass',
+    rolloff: -24
+  }).toDestination();
+  
+  reverb = new Tone.Reverb({ decay: 10, wet: 0.8 }).toDestination();
+  filter.connect(reverb);
+  
+  synth = new Tone.PolySynth(Tone.Synth, {
+    oscillator: { type: 'sine' },
+    envelope: { attack: 3, decay: 2, sustain: 0.9, release: 10 },
+    volume: -28
+  }).connect(filter);
+  
+  panner = new Tone.Panner3D(0, 0, 1).connect(synth);
+  
+  // Play a shifting chord — the hour between
+  const chord = ['D3', 'F3', 'A3', 'C4'];
+  synth.triggerAttackRelease(chord, 16);
+  
+  // Slow LFO on filter to create breathing quality
+  const lfo = new Tone.LFO({ frequency: 0.06, min: 400, max: 1400 }).start();
+  lfo.connect(filter.frequency);
+  
+  initialized = true;
+}
+
+document.getElementById('sound-btn').addEventListener('click', async () => {
+  soundOn = !soundOn;
+  document.getElementById('sound-btn').textContent = soundOn ? 'sound on' : 'sound off';
+  document.getElementById('sound-btn').classList.toggle('active', soundOn);
+  if (soundOn) await initAudio();
+});
+
+// =============================================================
+// PERLIN NOISE IMPLEMENTATION
+// =============================================================
+const permutation = [];
+for (let i = 0; i < 256; i++) permutation[i] = i;
+for (let i = 255; i > 0; i--) {
+  const j = Math.floor(Math.random() * (i + 1));
+  [permutation[i], permutation[j]] = [permutation[j], permutation[i]];
+}
+const perm = [...permutation, ...permutation];
+
+function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+function lerp(a, b, t) { return a + t * (b - a); }
+function grad(hash, x, y) {
+  const h = hash & 3;
+  const u = h < 2 ? x : y;
+  const v = h < 2 ? y : x;
+  return ((h & 1) ? -u : u) + ((h & 2) ? -v : v);
+}
+
+function noise2D(x, y) {
+  const X = Math.floor(x) & 255;
+  const Y = Math.floor(y) & 255;
+  x -= Math.floor(x);
+  y -= Math.floor(y);
+  const u = fade(x);
+  const v = fade(y);
+  const A = perm[X] + Y;
+  const B = perm[X + 1] + Y;
+  return lerp(
+    lerp(grad(perm[A], x, y), grad(perm[B], x - 1, y), u),
+    lerp(grad(perm[A + 1], x, y - 1), grad(perm[B + 1], x - 1, y - 1), u),
+    v
+  );
+}
+
+function fbm(x, y, octaves = 4) {
+  let value = 0;
+  let amplitude = 0.5;
+  let frequency = 1;
+  let maxValue = 0;
+  for (let i = 0; i < octaves; i++) {
+    value += amplitude * noise2D(x * frequency, y * frequency);
+    maxValue += amplitude;
+    amplitude *= 0.5;
+    frequency *= 2;
+  }
+  return value / maxValue;
+}
+
+// =============================================================
+// FLOW FIELD
+// =============================================================
+let fieldScale = 0.003;
+let fieldSpeed = 0.0003;
+let fieldTime = 0;
+
+function fieldAngle(x, y) {
+  const scale1 = fieldScale;
+  const scale2 = fieldScale * 0.5;
+  const n1 = fbm(x * scale1 + fieldTime, y * scale1, 4);
+  const n2 = fbm(x * scale2 - fieldTime * 0.7, y * scale2, 4);
+  
+  // Mouse turbulence
+  const dx = x - mouseX;
+  const dy = y - mouseY;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  const mouseInfluence = Math.max(0, 1 - dist / 280);
+  const mouseAngle = Math.atan2(dy, dx) + mouseInfluence * Math.PI;
+  
+  return (n1 + n2) * Math.PI * 2 + mouseAngle * mouseInfluence * 0.5;
+}
+
+// =============================================================
+// PARTICLE
+// =============================================================
+class Particle {
+  constructor() {
+    this.reset();
+  }
+  
+  reset() {
+    this.x = Math.random() * W;
+    this.y = Math.random() * H;
+    this.prevX = this.x;
+    this.prevY = this.y;
+    this.speed = 0.8 + Math.random() * 0.8;
+    this.life = Math.random() * 400 + 200;
+    this.maxLife = this.life;
+    this.alpha = 0.12 + Math.random() * 0.18;
+    this.hue = 210 + Math.random() * 30; // blue-slate range
+    this.sat = 15 + Math.random() * 20;
+    this.light = 35 + Math.random() * 20;
+    this.size = 0.8 + Math.random() * 1.2;
+    this.trail = [];
+    this.maxTrail = 18 + Math.floor(Math.random() * 14);
+  }
+  
+  update() {
+    this.prevX = this.x;
+    this.prevY = this.y;
+    
+    const angle = fieldAngle(this.x, this.y);
+    this.x += Math.cos(angle) * this.speed;
+    this.y += Math.sin(angle) * this.speed;
+    
+    this.life--;
+    
+    this.trail.push({ x: this.x, y: this.y });
+    if (this.trail.length > this.maxTrail) {
+      this.trail.shift();
+    }
+    
+    if (this.life <= 0 || this.x < -20 || this.x > W + 20 || this.y < -20 || this.y > H + 20) {
+      this.reset();
+    }
+  }
+  
+  draw() {
+    if (this.trail.length < 2) return;
+    
+    const lifeRatio = this.life / this.maxLife;
+    const fadeIn = Math.min(1, (this.maxLife - this.life) / 30);
+    const fadeOut = Math.min(1, this.life / 40);
+    const alpha = this.alpha * fadeIn * fadeOut;
+    
+    // Draw trail as a fading polyline
+    ctx.beginPath();
+    ctx.moveTo(this.trail[0].x, this.trail[0].y);
+    for (let i = 1; i < this.trail.length; i++) {
+      const t = i / this.trail.length;
+      ctx.lineTo(this.trail[i].x, this.trail[i].y);
+    }
+    ctx.lineTo(this.x, this.y);
+    
+    ctx.strokeStyle = `hsla(${this.hue}, ${this.sat}%, ${this.light}%, ${alpha})`;
+    ctx.lineWidth = this.size * (0.5 + lifeRatio * 0.5);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+    
+    // Bright head
+    if (lifeRatio > 0.3) {
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.size * 1.5, 0, Math.PI * 2);
+      ctx.fillStyle = `hsla(${this.hue + 20}, ${this.sat + 10}%, ${this.light + 20}%, ${alpha * 0.8})`;
+      ctx.fill();
+    }
+  }
+}
+
+// =============================================================
+// CONTOUR LINES — show the threshold boundaries in the noise field
+// =============================================================
+function drawContours() {
+  contourCanvas = document.createElement('canvas');
+  contourCanvas.width = W;
+  contourCanvas.height = H;
+  contourCtx = contourCanvas.getContext('2d');
+  
+  const cellW = W / CONTOUR_RESOLUTION;
+  const cellH = H / CONTOUR_RESOLUTION;
+  const field = [];
+  
+  // Sample the noise field
+  for (let j = 0; j <= CONTOUR_RESOLUTION; j++) {
+    field[j] = [];
+    for (let i = 0; i <= CONTOUR_RESOLUTION; i++) {
+      const x = i * cellW;
+      const y = j * cellH;
+      field[j][i] = fbm(x * fieldScale + fieldTime, y * fieldScale, 3);
+    }
+  }
+  
+  // Draw contour lines at threshold levels
+  const levels = [-0.1, 0.0, 0.1, 0.2, 0.3];
+  
+  contourCtx.strokeStyle = 'rgba(80, 90, 130, 0.06)';
+  contourCtx.lineWidth = 0.5;
+  
+  for (let levelIdx = 0; levelIdx < levels.length; levelIdx++) {
+    const level = levels[levelIdx];
+    const alpha = 0.04 + levelIdx * 0.015;
+    contourCtx.strokeStyle = `rgba(70, 85, 120, ${alpha})`;
+    
+    // March through grid cells
+    for (let j = 0; j < CONTOUR_RESOLUTION; j++) {
+      for (let i = 0; i < CONTOUR_RESOLUTION; i++) {
+        const v00 = field[j][i];
+        const v10 = field[j][i + 1];
+        const v01 = field[j + 1][i];
+        const v11 = field[j + 1][i + 1];
+        
+        // Marching squares — simplified edge cases
+        const x0 = i * cellW, y0 = j * cellH;
+        const x1 = x0 + cellW, y1 = y0 + cellH;
+        
+        // Find edge intersections
+        const edges = [];
+        
+        function interp(x1, y1, x2, y2, v1, v2) {
+          if (Math.abs(v2 - v1) < 0.001) return null;
+          const t = (level - v1) / (v2 - v1);
+          if (t < 0 || t > 1) return null;
+          return { x: x1 + t * (x2 - x1), y: y1 + t * (y2 - y1) };
+        }
+        
+        // Bottom edge
+        const b = interp(x0, y0, x1, y0, v00, v10);
+        // Top edge
+        const t = interp(x0, y1, x1, y1, v01, v11);
+        // Left edge
+        const l = interp(x0, y0, x0, y1, v00, v01);
+        // Right edge
+        const r = interp(x1, y0, x1, y1, v10, v11);
+        
+        if (b && l) { contourCtx.beginPath(); contourCtx.moveTo(b.x, b.y); contourCtx.lineTo(l.x, l.y); contourCtx.stroke(); }
+        if (b && r) { contourCtx.beginPath(); contourCtx.moveTo(b.x, b.y); contourCtx.lineTo(r.x, r.y); contourCtx.stroke(); }
+        if (t && l) { contourCtx.beginPath(); contourCtx.moveTo(t.x, t.y); contourCtx.lineTo(l.x, l.y); contourCtx.stroke(); }
+        if (t && r) { contourCtx.beginPath(); contourCtx.moveTo(t.x, t.y); contourCtx.lineTo(r.x, r.y); contourCtx.stroke(); }
+      }
+    }
+  }
+}
+
+// =============================================================
+// AMBIENT GLOW — threshold zones
+// =============================================================
+function drawAmbientZones() {
+  // Create subtle color zones based on noise
+  const ambientCanvas = document.createElement('canvas');
+  ambientCanvas.width = W;
+  ambientCanvas.height = H;
+  const ambientCtx = ambientCanvas.getContext('2d');
+  
+  const cellW = W / 40;
+  const cellH = H / 40;
+  
+  for (let j = 0; j < 40; j++) {
+    for (let i = 0; i < 40; i++) {
+      const x = i * cellW + cellW / 2;
+      const y = j * cellH + cellH / 2;
+      const n = fbm(x * fieldScale * 2 + fieldTime * 0.5, y * fieldScale * 2, 2);
+      const normalized = (n + 0.5) / 1.0; // 0-1
+      
+      // Create zones: warm (below threshold) vs cool (above)
+      const hue = 30 + normalized * 40; // amber to blue-slate
+      const sat = 10 + (1 - Math.abs(normalized - 0.5) * 2) * 20;
+      const light = 55 + normalized * 10;
+      const alpha = 0.025 + (1 - Math.abs(normalized - 0.5) * 2) * 0.02;
+      
+      ambientCtx.fillStyle = `hsla(${hue}, ${sat}%, ${light}%, ${alpha})`;
+      ambientCtx.fillRect(i * cellW, j * cellH, cellW + 1, cellH + 1);
+    }
+  }
+  
+  return ambientCanvas;
+}
+
+let ambientCanvas;
+
+// =============================================================
+// SETUP
+// =============================================================
+function resize() {
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W;
+  canvas.height = H;
+  
+  // Reinitialize particles on resize
+  particles = [];
+  for (let i = 0; i < NUM_PARTICLES; i++) {
+    const p = new Particle();
+    p.x = Math.random() * W;
+    p.y = Math.random() * H;
+    particles.push(p);
+  }
+  
+  drawContours();
+  ambientCanvas = drawAmbientZones();
+}
+
+window.addEventListener('resize', resize);
+resize();
+
+// Mouse tracking
+window.addEventListener('mousemove', (e) => {
+  targetMouseX = e.clientX;
+  targetMouseY = e.clientY;
+});
+
+// Touch support
+window.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  targetMouseX = e.touches[0].clientX;
+  targetMouseY = e.touches[0].clientY;
+}, { passive: false });
+
+window.addEventListener('touchstart', (e) => {
+  targetMouseX = e.touches[0].clientX;
+  targetMouseY = e.touches[0].clientY;
+});
+
+// =============================================================
+// ANIMATION
+// =============================================================
+let textVisible = false;
+let frameCount = 0;
+
+function animate() {
+  requestAnimationFrame(animate);
+  
+  frameCount++;
+  time += 0.008;
+  fieldTime += fieldSpeed;
+  
+  // Smooth mouse
+  mouseX += (targetMouseX - mouseX) * 0.08;
+  mouseY += (targetMouseY - mouseY) * 0.08;
+  
+  // Clear with subtle fade (creates trail effect on background)
+  ctx.fillStyle = 'rgba(242, 240, 235, 0.15)';
+  ctx.fillRect(0, 0, W, H);
+  
+  // Draw ambient color zones
+  if (frameCount % 3 === 0) {
+    ctx.drawImage(ambientCanvas, 0, 0);
+  }
+  
+  // Draw contour lines (redraw periodically since field is moving)
+  if (frameCount % 8 === 0) {
+    drawContours();
+  }
+  ctx.globalAlpha = 0.7;
+  ctx.drawImage(contourCanvas, 0, 0);
+  ctx.globalAlpha = 1;
+  
+  // Update and draw particles
+  for (const p of particles) {
+    p.update();
+    p.draw();
+  }
+  
+  // Show text after a delay
+  if (frameCount === 300 && !textVisible) {
+    document.getElementById('text').classList.add('visible');
+    textVisible = true;
+  }
+  
+  // Subtle vignette
+  const gradient = ctx.createRadialGradient(W/2, H/2, H * 0.3, W/2, H/2, H * 0.9);
+  gradient.addColorStop(0, 'rgba(242, 240, 235, 0)');
+  gradient.addColorStop(1, 'rgba(230, 225, 218, 0.3)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, W, H);
+  
+  // Update audio based on mouse position if active
+  if (soundOn && initialized && filter) {
+    const mouseNorm = Math.sqrt((mouseX - W/2)**2 + (mouseY - H/2)**2) / (H * 0.7);
+    filter.frequency.value = 400 + mouseNorm * 1200;
+  }
+}
+
+animate();
+</script>
+</body>
+</html>
