@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tether | the space between reaching</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #04040a;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    cursor: crosshair;
+  }
+  canvas { display: block; position: fixed; top: 0; left: 0; }
+  .overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 10;
+  }
+  .liminal-text {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    opacity: 0;
+    transition: opacity 7s ease;
+    width: 90%;
+    max-width: 700px;
+  }
+  .liminal-text.visible { opacity: 1; }
+  .line {
+    font-size: clamp(0.65rem, 1.3vw, 0.95rem);
+    color: rgba(130, 180, 220, 0.28);
+    letter-spacing: 0.38em;
+    line-height: 2.6;
+    text-transform: lowercase;
+  }
+  .line.accent {
+    color: rgba(80, 160, 210, 0.45);
+    letter-spacing: 0.48em;
+  }
+  .line.faint {
+    font-size: clamp(0.42rem, 0.8vw, 0.62rem);
+    color: rgba(100, 140, 180, 0.16);
+    letter-spacing: 0.55em;
+    margin-top: 2em;
+  }
+  #sound-btn {
+    position: fixed; top: 1.6rem; right: 1.6rem;
+    background: none;
+    border: 1px solid rgba(80, 160, 210, 0.15);
+    color: rgba(80, 160, 210, 0.3);
+    font-family: 'Courier New', monospace;
+    font-size: 0.58rem;
+    letter-spacing: 0.28em;
+    padding: 0.6rem 1rem;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: all 0.6s ease;
+    z-index: 20;
+    pointer-events: auto;
+  }
+  #sound-btn:hover { border-color: rgba(80,160,210,0.35); color: rgba(80,160,210,0.55); }
+  #sound-btn.active { background: rgba(80,160,210,0.06); border-color: rgba(80,160,210,0.32); }
+  .hint {
+    position: fixed; bottom: 1.6rem; right: 1.6rem;
+    font-size: 0.5rem;
+    letter-spacing: 0.22em;
+    color: rgba(80, 160, 210, 0.12);
+    text-transform: uppercase;
+    z-index: 20;
+    pointer-events: none;
+  }
+  #params {
+    position: fixed; top: 1.6rem; left: 1.6rem;
+    font-size: 0.48rem;
+    letter-spacing: 0.2em;
+    color: rgba(80, 160, 210, 0.15);
+    text-transform: uppercase;
+    line-height: 2;
+    z-index: 20;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="overlay">
+  <div class="liminal-text" id="text">
+    <div class="line">each branch</div>
+    <div class="line accent">reaches</div>
+    <div class="line">without knowing</div>
+    <div class="line faint">where the edge lies</div>
+    <div class="line faint">only the reaching remains</div>
+  </div>
+</div>
+<button id="sound-btn">sound</button>
+<div class="hint">move — the branches respond</div>
+<div id="params">
+  <div id="depth">depth: —</div>
+  <div id="branches">branches: —</div>
+</div>
+
+<script>
+(function() {
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const textEl = document.getElementById('text');
+const soundBtn = document.getElementById('sound-btn');
+const depthEl = document.getElementById('depth');
+const branchesEl = document.getElementById('branches');
+
+let W, H, cx, cy;
+let mx = 0, my = 0;
+let smoothedMx = 0, smoothedMy = 0;
+let time = 0;
+let branches = [];
+let branchIdCounter = 0;
+let particles = [];
+let glowParticles = [];
+let totalBranchCount = 0;
+let audioStarted = false;
+let audioCtx, masterGain, droneA, droneB, droneC;
+let lastMilestoneDepth = 0;
+
+// Resize
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  cx = W * 0.5;
+  cy = H * 0.88;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Perlin-like noise
+const perm = new Uint8Array(512);
+(function() {
+  const p = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) p[i] = i;
+  for (let i = 255; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [p[i], p[j]] = [p[j], p[i]];
+  }
+  for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
+})();
+
+function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+function lerp(a, b, t) { return a + t * (b - a); }
+function grad(hash, x, y) {
+  const h = hash & 3;
+  const u = h < 2 ? x : y;
+  const v = h < 2 ? y : x;
+  return ((h & 1) ? -u : u) + ((h & 2) ? -v : v);
+}
+function noise(x, y) {
+  const X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
+  x -= Math.floor(x); y -= Math.floor(y);
+  const u = fade(x), v = fade(y);
+  const A = perm[X] + Y, B = perm[X + 1] + Y;
+  return lerp(
+    lerp(grad(perm[A], x, y), grad(perm[B], x - 1, y), u),
+    lerp(grad(perm[A + 1], x, y - 1), grad(perm[B + 1], x - 1, y - 1), u),
+    v
+  );
+}
+function fbm(x, y, octaves) {
+  let val = 0, amp = 0.5, freq = 1;
+  for (let i = 0; i < octaves; i++) {
+    val += amp * noise(x * freq, y * freq);
+    amp *= 0.5; freq *= 2;
+  }
+  return val;
+}
+
+// Branch class
+class Branch {
+  constructor(x, y, angle, length, depth, parent) {
+    this.id = branchIdCounter++;
+    this.x = x; this.y = y;
+    this.angle = angle;
+    this.length = length;
+    this.depth = depth;
+    this.parent = parent;
+    this.children = [];
+    this.growing = true;
+    this.growProgress = 0;
+    this.growSpeed = (0.004 + Math.random() * 0.003) * (1 + depth * 0.08);
+    this.maxDepth = 9 + Math.floor(Math.random() * 3);
+    this.born = time;
+    this.life = 0;
+    this.maxLife = 600 + Math.random() * 400;
+    this.alpha = 0;
+    this.targetAlpha = 0.7 + Math.random() * 0.3;
+    this.thickness = Math.max(0.3, (this.maxDepth - depth) * 0.35);
+    this.hue = 190 + fbm(x * 0.003, y * 0.003, 3) * 40;
+    this.sat = 55 + fbm(x * 0.005 + 100, y * 0.005 + 100, 2) * 30;
+    this.brightness = 60 + Math.random() * 20;
+    this.noiseOffsetX = Math.random() * 1000;
+    this.noiseOffsetY = Math.random() * 1000;
+    this.swayOffset = Math.random() * Math.PI * 2;
+    this.swayAmount = 0.03 + Math.random() * 0.02;
+    this.tendrils = [];
+
+    // Spawn tendrils on some branches
+    if (depth > 2 && depth < this.maxDepth - 1 && Math.random() < 0.4) {
+      const tendrilCount = 1 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < tendrilCount; i++) {
+        this.tendrils.push({
+          offset: 0.3 + Math.random() * 0.5,
+          angle: (Math.random() - 0.5) * Math.PI * 0.8,
+          length: length * (0.15 + Math.random() * 0.2),
+          life: 0,
+          maxLife: 200 + Math.random() * 150,
+          alpha: 0,
+          growSpeed: 0.03 + Math.random() * 0.02,
+          growProgress: 0,
+          born: time + i * 30
+        });
+      }
+    }
+
+    if (parent) parent.children.push(this);
+    totalBranchCount++;
+  }
+
+  update() {
+    this.life++;
+    // Fade in
+    if (this.alpha < this.targetAlpha) {
+      this.alpha = Math.min(this.targetAlpha, this.alpha + 0.012);
+    }
+    // Fade out near death
+    if (this.life > this.maxLife - 120) {
+      const fadeT = (this.life - (this.maxLife - 120)) / 120;
+      this.alpha = this.targetAlpha * (1 - fadeT);
+    }
+
+    // Grow
+    if (this.growing) {
+      this.growProgress += this.growSpeed;
+      if (this.growProgress >= 1) {
+        this.growProgress = 1;
+        this.growing = false;
+        // Spawn children
+        if (this.depth < this.maxDepth) {
+          const spread = (0.35 + Math.random() * 0.25) * (1 + this.depth * 0.05);
+          const noiseVal = fbm(time * 0.0002 + this.noiseOffsetX, this.noiseOffsetY, 2);
+          const angleA = this.angle - spread + noiseVal * 0.15;
+          const angleB = this.angle + spread + noiseVal * 0.15;
+          const lenA = this.length * (0.68 + Math.random() * 0.08);
+          const lenB = this.length * (0.68 + Math.random() * 0.08);
+
+          const endX = this.x + Math.cos(this.angle) * this.length;
+          const endY = this.y + Math.sin(this.angle) * this.length;
+
+          new Branch(endX, endY, angleA, lenA, this.depth + 1, this);
+          new Branch(endX, endY, angleB, lenB, this.depth + 1, this);
+
+          if (this.depth > 2) {
+            const midAngle = this.angle + (Math.random() - 0.5) * spread * 0.5;
+            new Branch(
+              this.x + Math.cos(this.angle) * this.length * 0.5,
+              this.y + Math.sin(this.angle) * this.length * 0.5,
+              midAngle, lenA * 0.5, this.depth + 1, this
+            );
+          }
+        }
+      }
+    }
+
+    // Update tendrils
+    for (const t of this.tendrils) {
+      if (time < t.born) continue;
+      t.life++;
+      if (t.growProgress < 1) {
+        t.growProgress = Math.min(1, t.growProgress + t.growSpeed);
+      }
+      if (t.life > t.maxLife - 40) {
+        t.alpha = Math.max(0, t.alpha - 0.025);
+      } else if (t.alpha < 0.5) {
+        t.alpha = Math.min(0.5, t.alpha + 0.02);
+      }
+    }
+  }
+
+  draw() {
+    if (this.growProgress <= 0) return;
+
+    const sway = Math.sin(time * 0.0008 + this.swayOffset) * this.swayAmount;
+    const mxInfluence = (this.depth / this.maxDepth) * 0.015;
+    const mxSway = (smoothedMx / W - 0.5) * mxInfluence;
+    const mySway = (smoothedMy / H - 0.5) * mxInfluence;
+
+    const endX = this.x + Math.cos(this.angle + sway + mxSway) * this.length * this.growProgress;
+    const endY = this.y + Math.sin(this.angle + sway + mxSway) * this.length * this.growProgress;
+
+    // Main branch
+    ctx.beginPath();
+    ctx.moveTo(this.x, this.y);
+    ctx.lineTo(endX, endY);
+    ctx.strokeStyle = `hsla(${this.hue}, ${this.sat}%, ${this.brightness}%, ${this.alpha})`;
+    ctx.lineWidth = this.thickness;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    // Glow layer
+    ctx.beginPath();
+    ctx.moveTo(this.x, this.y);
+    ctx.lineTo(endX, endY);
+    ctx.strokeStyle = `hsla(${this.hue}, ${this.sat}%, ${this.brightness + 15}%, ${this.alpha * 0.25})`;
+    ctx.lineWidth = this.thickness * 3;
+    ctx.stroke();
+
+    // Draw tendrils
+    for (const t of this.tendrils) {
+      if (time < t.born || t.alpha <= 0) continue;
+      const tx = lerp(this.x, endX, t.offset);
+      const ty = lerp(this.y, endY, t.offset);
+      const txEnd = tx + Math.cos(this.angle + sway + t.angle + mxSway) * t.length * t.growProgress;
+      const tyEnd = ty + Math.sin(this.angle + sway + t.angle + mxSway) * t.length * t.growProgress;
+
+      ctx.beginPath();
+      ctx.moveTo(tx, ty);
+      ctx.lineTo(txEnd, tyEnd);
+      ctx.strokeStyle = `hsla(${this.hue + 20}, ${this.sat - 10}%, ${this.brightness + 10}%, ${t.alpha * 0.7})`;
+      ctx.lineWidth = this.thickness * 0.5;
+      ctx.stroke();
+    }
+
+    // Terminal bud glow
+    if (!this.growing && this.children.length === 0 && this.alpha > 0.1) {
+      const budGlow = Math.sin(time * 0.003 + this.id * 0.5) * 0.3 + 0.7;
+      const grad = ctx.createRadialGradient(endX, endY, 0, endX, endY, 4 + this.thickness);
+      grad.addColorStop(0, `hsla(${this.hue + 30}, ${this.sat}%, ${this.brightness + 30}%, ${this.alpha * budGlow * 0.6})`);
+      grad.addColorStop(1, `hsla(${this.hue}, ${this.sat}%, ${this.brightness}%, 0)`);
+      ctx.beginPath();
+      ctx.arc(endX, endY, 4 + this.thickness, 0, Math.PI * 2);
+      ctx.fillStyle = grad;
+      ctx.fill();
+    }
+  }
+
+  isDead() {
+    return this.life > this.maxLife && this.children.every(c => c.isDead());
+  }
+}
+
+// Particle class
+class Particle {
+  constructor(x, y, fromBranch) {
+    this.x = x;
+    this.y = y;
+    this.vx = (Math.random() - 0.5) * 0.4;
+    this.vy = -Math.random() * 0.6 - 0.1;
+    this.life = 0;
+    this.maxLife = 180 + Math.random() * 120;
+    this.size = 0.5 + Math.random() * 1.5;
+    this.alpha = 0;
+    this.hue = 190 + Math.random() * 50;
+    this.sat = 50 + Math.random() * 40;
+    this.fromBranch = fromBranch;
+    this.drift = Math.random() * Math.PI * 2;
+  }
+
+  update() {
+    this.life++;
+    this.drift += 0.02;
+    this.vx += Math.sin(this.drift) * 0.01;
+    this.vy *= 0.99;
+    this.x += this.vx;
+    this.y += this.vy;
+
+    if (this.alpha < 0.7) this.alpha = Math.min(0.7, this.alpha + 0.03);
+    if (this.life > this.maxLife - 40) {
+      this.alpha = Math.max(0, this.alpha - 0.018);
+    }
+    return this.life < this.maxLife;
+  }
+
+  draw() {
+    const fadeEdge = Math.max(0, 1 - this.life / this.maxLife);
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size * fadeEdge, 0, Math.PI * 2);
+    ctx.fillStyle = `hsla(${this.hue}, ${this.sat}%, 75%, ${this.alpha * fadeEdge})`;
+    ctx.fill();
+  }
+}
+
+// Glow particle
+class GlowParticle {
+  constructor() {
+    this.reset();
+  }
+  reset() {
+    this.x = Math.random() * W;
+    this.y = Math.random() * H;
+    this.vx = (Math.random() - 0.5) * 0.15;
+    this.vy = -Math.random() * 0.1 - 0.02;
+    this.size = 1 + Math.random() * 2;
+    this.alpha = Math.random() * 0.15;
+    this.life = Math.random() * 200;
+    this.maxLife = 150 + Math.random() * 200;
+    this.hue = 200 + Math.random() * 30;
+  }
+  update() {
+    this.life++;
+    this.x += this.vx + Math.sin(time * 0.0005 + this.life * 0.05) * 0.1;
+    this.y += this.vy;
+    if (this.life > this.maxLife) this.reset();
+  }
+  draw() {
+    const t = 1 - this.life / this.maxLife;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+    ctx.fillStyle = `hsla(${this.hue}, 60%, 70%, ${this.alpha * t})`;
+    ctx.fill();
+  }
+}
+
+// Initialize glow particles
+for (let i = 0; i < 60; i++) {
+  glowParticles.push(new GlowParticle());
+}
+
+// Spawn initial trunk
+function spawnTrunk() {
+  const angle = -Math.PI * 0.5 + (Math.random() - 0.5) * 0.15;
+  const trunk = new Branch(cx, cy, angle, H * 0.22, 0, null);
+  branches.push(trunk);
+}
+spawnTrunk();
+
+// Audio
+function initAudio() {
+  if (audioStarted) return;
+  audioStarted = true;
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = 0;
+    masterGain.connect(audioCtx.destination);
+
+    droneA = makeDrone(55, 0.08);
+    droneB = makeDrone(82.5, 0.06);
+    droneC = makeDrone(110, 0.04);
+
+    masterGain.gain.linearRampToValueAtTime(0.18, audioCtx.currentTime + 4);
+    textEl.classList.add('visible');
+  } catch(e) {}
+}
+
+function makeDrone(freq, vol) {
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  const filter = audioCtx.createBiquadFilter();
+  osc.type = 'sine';
+  osc.frequency.value = freq;
+  filter.type = 'lowpass';
+  filter.frequency.value = 400;
+  filter.Q.value = 1;
+  gain.gain.value = vol;
+  osc.connect(filter);
+  filter.connect(gain);
+  gain.connect(masterGain);
+  osc.start();
+  return { osc, gain, filter };
+}
+
+function updateAudio() {
+  if (!audioStarted || !droneA) return;
+  const alive = branches.filter(b => !b.growing && b.alpha > 0.1).length;
+  const depth = Math.max(0, ...branches.filter(b => !b.growing).map(b => b.depth));
+  const freqMod = 1 + (depth / 12) * 0.3;
+
+  droneA.filter.frequency.value = 300 + depth * 40;
+  droneB.filter.frequency.value = 300 + depth * 40;
+  droneC.filter.frequency.value = 300 + depth * 40;
+
+  droneA.osc.frequency.value = 55 * freqMod;
+  droneB.osc.frequency.value = 82.5 * freqMod;
+  droneC.osc.frequency.value = 110 * freqMod;
+
+  droneA.gain.gain.value = 0.06 + (depth / 12) * 0.04;
+  droneB.gain.gain.value = 0.04 + (depth / 12) * 0.03;
+}
+
+soundBtn.addEventListener('click', () => {
+  if (!audioStarted) {
+    initAudio();
+    soundBtn.classList.add('active');
+    soundBtn.textContent = 'sound on';
+  } else {
+    if (masterGain.gain.value > 0.01) {
+      masterGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 1);
+      soundBtn.classList.remove('active');
+      soundBtn.textContent = 'sound';
+    } else {
+      masterGain.gain.linearRampToValueAtTime(0.18, audioCtx.currentTime + 2);
+      soundBtn.classList.add('active');
+      soundBtn.textContent = 'sound on';
+    }
+  }
+});
+
+// Mouse tracking
+window.addEventListener('mousemove', e => {
+  mx = e.clientX;
+  my = e.clientY;
+});
+
+// Touch
+window.addEventListener('touchmove', e => {
+  mx = e.touches[0].clientX;
+  my = e.touches[0].clientY;
+}, { passive: true });
+
+// Spawn new trunk periodically
+let lastTrunkSpawn = time;
+const TRUNK_INTERVAL = 800;
+
+// Show text after a delay
+setTimeout(() => {
+  if (!audioStarted) textEl.classList.add('visible');
+}, 3000);
+
+// Animate
+let lastSpawn = 0;
+const SPAWN_INTERVAL = 120;
+
+function animate(ts) {
+  time = ts;
+  requestAnimationFrame(animate);
+
+  // Smooth mouse
+  smoothedMx += (mx - smoothedMx) * 0.08;
+  smoothedMy += (my - smoothedMy) * 0.08;
+
+  // Clear with slight trail
+  ctx.fillStyle = 'rgba(4, 4, 10, 0.18)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Occasional new trunk
+  if (time - lastTrunkSpawn > TRUNK_INTERVAL && totalBranchCount < 400) {
+    lastTrunkSpawn = time;
+    const angle = -Math.PI * 0.5 + (Math.random() - 0.5) * 0.3;
+    const nx = cx + (Math.random() - 0.5) * W * 0.3;
+    const trunk = new Branch(nx, H * 0.95, angle, H * (0.15 + Math.random() * 0.1), 0, null);
+    branches.push(trunk);
+  }
+
+  // Update & draw branches (oldest first)
+  for (const b of branches) b.update();
+  for (const b of branches) b.draw();
+
+  // Particles from branch tips
+  if (time - lastSpawn > SPAWN_INTERVAL) {
+    lastSpawn = time;
+    const tips = branches.filter(b => !b.growing && b.children.length === 0 && Math.random() < 0.15);
+    for (const tip of tips) {
+      const endX = tip.x + Math.cos(tip.angle) * tip.length;
+      const endY = tip.y + Math.sin(tip.angle) * tip.length;
+      for (let i = 0; i < 2; i++) {
+        particles.push(new Particle(endX, endY, tip));
+      }
+    }
+  }
+
+  // Update & draw particles
+  particles = particles.filter(p => p.update());
+  for (const p of particles) p.draw();
+
+  // Update & draw glow particles
+  for (const p of glowParticles) { p.update(); p.draw(); }
+
+  // Remove dead branches (with no living children)
+  branches = branches.filter(b => !(b.isDead() && b.children.length === 0));
+
+  // Update UI
+  const alive = branches.filter(b => !b.growing && b.alpha > 0.05);
+  const maxDepth = alive.length ? Math.max(...alive.map(b => b.depth)) : 0;
+  depthEl.textContent = `depth: ${maxDepth}`;
+  branchesEl.textContent = `branches: ${alive.length}`;
+
+  // Milestone text reveal
+  if (maxDepth > lastMilestoneDepth && maxDepth >= 5) {
+    lastMilestoneDepth = maxDepth;
+    textEl.classList.add('visible');
+    setTimeout(() => textEl.classList.remove('visible'), 8000);
+  }
+
+  updateAudio();
+}
+
+animate(0);
+})();
+</script>
+</body>
+</html>
