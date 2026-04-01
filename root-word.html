@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>root-word | the space between silence and speech</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #02010a;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    cursor: crosshair;
+  }
+  canvas { display: block; position: fixed; top: 0; left: 0; }
+  .overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 10;
+  }
+  .liminal-text {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    opacity: 0;
+    transition: opacity 8s ease;
+    width: 90%;
+    max-width: 700px;
+  }
+  .liminal-text.visible { opacity: 1; }
+  .line {
+    font-size: clamp(0.55rem, 1.1vw, 0.8rem);
+    color: rgba(180, 200, 220, 0.2);
+    letter-spacing: 0.42em;
+    line-height: 2.6;
+    text-transform: lowercase;
+  }
+  .line.accent {
+    color: rgba(120, 180, 220, 0.35);
+    letter-spacing: 0.52em;
+  }
+  .line.faint {
+    font-size: clamp(0.38rem, 0.75vw, 0.55rem);
+    color: rgba(150, 180, 210, 0.1);
+    letter-spacing: 0.6em;
+    margin-top: 2.5em;
+  }
+  #sound-btn {
+    position: fixed; top: 1.5rem; right: 1.5rem;
+    background: none; border: 1px solid rgba(120,180,220,0.15);
+    color: rgba(120,180,220,0.3); padding: 0.5rem 1rem;
+    font-family: 'Courier New', monospace; font-size: 0.65rem;
+    letter-spacing: 0.2em; cursor: pointer;
+    transition: all 0.4s ease;
+    z-index: 100;
+  }
+  #sound-btn:hover {
+    border-color: rgba(120,180,220,0.4);
+    color: rgba(120,180,220,0.6);
+  }
+  #info {
+    position: fixed; bottom: 1.5rem; left: 1.5rem;
+    color: rgba(120,180,220,0.15);
+    font-size: 0.6rem; letter-spacing: 0.15em;
+    z-index: 100;
+  }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div class="overlay">
+  <div class="liminal-text" id="liminal-text">
+    <div class="line faint">between silence and speech</div>
+    <div class="line accent">root-word</div>
+    <div class="line">the space where meaning takes root</div>
+    <div class="line">particles drift seeking something to become</div>
+    <div class="line faint">drift — touch — crystallize</div>
+    <div class="line">every branch a choice the wind did not make</div>
+    <div class="line faint">move to invite the roots</div>
+  </div>
+</div>
+<button id="sound-btn">sound: off</button>
+<div id="info">root-word — liminal edition</div>
+
+<script src="https://cdn.jsdelivr.net/npm/tone@14.7.77/build/Tone.min.js"></script>
+<script>
+(function() {
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  let W, H, cx, cy;
+  let particles = [];
+  let branches = [];
+  let mouseX = -1000, mouseY = -1000;
+  let textVisible = false;
+  let textTimer = 0;
+  let soundOn = false;
+  let lastTime = 0;
+  let branchCount = 0;
+  let particleCount = 0;
+
+  // Audio
+  let synth, reverb, delay, masterGain;
+  let notes = [55, 65.41, 73.42, 82.41, 98, 110, 130.81, 146.83, 164.81, 196, 220, 261.63, 293.66, 329.63, 392];
+  let lastNoteTime = 0;
+
+  function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+    cx = W / 2;
+    cy = H / 2;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  // --- DLA Particle System ---
+  const MAX_PARTICLES = 800;
+  const BRANCH_RADIUS = 2.8;
+  const ATTACH_DIST = 3.5;
+  const DRIFT_SPEED = 0.55;
+  const FOLLOW_SPEED = 0.018;
+
+  class Particle {
+    constructor(x, y) {
+      this.x = x !== undefined ? x : Math.random() * W;
+      this.y = y !== undefined ? y : Math.random() * H;
+      this.vx = (Math.random() - 0.5) * DRIFT_SPEED;
+      this.vy = (Math.random() - 0.5) * DRIFT_SPEED;
+      this.life = 1;
+      this.age = 0;
+      this.maxAge = 800 + Math.random() * 600;
+      this.trail = [];
+      this.trailLen = 4 + Math.floor(Math.random() * 6);
+      this.hue = 200 + Math.random() * 40;
+      this.sat = 60 + Math.random() * 30;
+      this.lum = 55 + Math.random() * 15;
+      this.size = 0.8 + Math.random() * 1.2;
+      this.stuck = false;
+    }
+
+    update(dt) {
+      if (this.stuck) return;
+      this.age++;
+      if (this.age > this.maxAge) {
+        this.life = 0;
+        return;
+      }
+
+      // Gentle downward drift + wandering
+      this.vx += (Math.random() - 0.5) * 0.04;
+      this.vy += (Math.random() - 0.5) * 0.04 + 0.006; // slight gravity
+
+      // Mouse attraction (gentle)
+      if (mouseX > 0 && mouseY > 0) {
+        const dx = mouseX - this.x;
+        const dy = mouseY - this.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 30 && dist < 300) {
+          this.vx += (dx / dist) * FOLLOW_SPEED;
+          this.vy += (dy / dist) * FOLLOW_SPEED;
+        }
+      }
+
+      // Spiral tendency at center (seeds fly outward if too central)
+      const dx = this.x - cx;
+      const dy = this.y - cy;
+      const dc = Math.sqrt(dx * dx + dy * dy);
+      if (dc < 60) {
+        this.vx += (dx / dc) * 0.02;
+        this.vy += (dy / dc) * 0.02;
+      }
+
+      // Damping
+      this.vx *= 0.96;
+      this.vy *= 0.96;
+
+      // Speed cap
+      const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+      if (speed > DRIFT_SPEED * 2.5) {
+        this.vx = (this.vx / speed) * DRIFT_SPEED * 2.5;
+        this.vy = (this.vy / speed) * DRIFT_SPEED * 2.5;
+      }
+
+      // Store trail
+      if (this.trail.length >= this.trailLen) this.trail.shift();
+      this.trail.push({ x: this.x, y: this.y });
+
+      this.x += this.vx;
+      this.y += this.vy;
+
+      // Wrap edges (spawn fresh from edges)
+      if (this.x < -10 || this.x > W + 10 || this.y < -10 || this.y > H + 10) {
+        this.respawn();
+      }
+
+      // Check attachment to branches
+      this.checkAttach();
+    }
+
+    respawn() {
+      const side = Math.floor(Math.random() * 4);
+      if (side === 0) { this.x = Math.random() * W; this.y = -10; }
+      else if (side === 1) { this.x = W + 10; this.y = Math.random() * H; }
+      else if (side === 2) { this.x = Math.random() * W; this.y = H + 10; }
+      else { this.x = -10; this.y = Math.random() * H; }
+      this.vx = (Math.random() - 0.5) * DRIFT_SPEED;
+      this.vy = (Math.random() - 0.5) * DRIFT_SPEED;
+      this.trail = [];
+      this.age = 0;
+    }
+
+    checkAttach() {
+      for (let i = 0; i < branches.length; i++) {
+        const b = branches[i];
+        const dx = this.x - b.x;
+        const dy = this.y - b.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < ATTACH_DIST) {
+          this.stuck = true;
+          this.x = b.x + (Math.random() - 0.5) * 2;
+          this.y = b.y + (Math.random() - 0.5) * 2;
+          branches.push({ x: this.x, y: this.y, hue: this.hue, sat: this.sat, lum: this.lum, age: 0 });
+          branchCount++;
+          if (soundOn) playAttachSound(b);
+          if (branchCount % 8 === 0) showText();
+          return;
+        }
+      }
+    }
+
+    draw() {
+      if (this.stuck) return;
+      const alpha = Math.min(1, this.age / 30) * 0.6;
+      if (this.trail.length > 1) {
+        ctx.beginPath();
+        ctx.moveTo(this.trail[0].x, this.trail[0].y);
+        for (let i = 1; i < this.trail.length; i++) {
+          ctx.lineTo(this.trail[i].x, this.trail[i].y);
+        }
+        ctx.lineTo(this.x, this.y);
+        ctx.strokeStyle = `hsla(${this.hue},${this.sat}%,${this.lum}%,${alpha * 0.3})`;
+        ctx.lineWidth = this.size * 0.6;
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+      ctx.fillStyle = `hsla(${this.hue},${this.sat}%,${this.lum}%,${alpha})`;
+      ctx.fill();
+    }
+  }
+
+  // Seed branches at center
+  function seedCenter() {
+    const numSeeds = 12;
+    for (let i = 0; i < numSeeds; i++) {
+      const angle = (i / numSeeds) * Math.PI * 2;
+      const r = 5 + Math.random() * 8;
+      branches.push({
+        x: cx + Math.cos(angle) * r,
+        y: cy + Math.sin(angle) * r,
+        hue: 200 + Math.random() * 40,
+        sat: 60 + Math.random() * 30,
+        lum: 50 + Math.random() * 20,
+        age: 0
+      });
+    }
+    branchCount = numSeeds;
+  }
+
+  // Spawn initial particles from edges
+  function spawnParticles() {
+    while (particles.length < MAX_PARTICLES) {
+      const side = Math.floor(Math.random() * 4);
+      let x, y;
+      if (side === 0) { x = Math.random() * W; y = -10; }
+      else if (side === 1) { x = W + 10; y = Math.random() * H; }
+      else if (side === 2) { x = Math.random() * W; y = H + 10; }
+      else { x = -10; y = Math.random() * H; }
+      particles.push(new Particle(x, y));
+    }
+  }
+
+  // --- Drawing ---
+  function drawBranches() {
+    for (let i = 0; i < branches.length; i++) {
+      const b = branches[i];
+      b.age++;
+      const ageFade = Math.max(0, 1 - b.age / 300);
+      const glow = 0.5 + ageFade * 0.5;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, BRANCH_RADIUS * glow, 0, Math.PI * 2);
+      ctx.fillStyle = `hsla(${b.hue},${b.sat}%,${b.lum}%,${0.6 + ageFade * 0.4})`;
+      ctx.fill();
+      // Outer glow
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, BRANCH_RADIUS * glow * 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = `hsla(${b.hue},${b.sat}%,${b.lum}%,${0.15 * ageFade})`;
+      ctx.fill();
+    }
+  }
+
+  // Draw connections between nearby branches
+  function drawConnections() {
+    const maxDist = 18;
+    for (let i = 0; i < branches.length; i++) {
+      for (let j = i + 1; j < branches.length; j++) {
+        const dx = branches[i].x - branches[j].x;
+        const dy = branches[i].y - branches[j].y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < maxDist) {
+          const alpha = (1 - dist / maxDist) * 0.12;
+          ctx.beginPath();
+          ctx.moveTo(branches[i].x, branches[i].y);
+          ctx.lineTo(branches[j].x, branches[j].y);
+          ctx.strokeStyle = `hsla(200,60%,60%,${alpha})`;
+          ctx.lineWidth = 0.5;
+          ctx.stroke();
+        }
+      }
+    }
+  }
+
+  // Background with subtle gradient and glow at center
+  function drawBackground() {
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H) * 0.7);
+    grad.addColorStop(0, '#06050f');
+    grad.addColorStop(0.5, '#03020a');
+    grad.addColorStop(1, '#010108');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Central glow
+    const glowGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, 120);
+    glowGrad.addColorStop(0, 'rgba(100,160,220,0.04)');
+    glowGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = glowGrad;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // --- Audio ---
+  function initAudio() {
+    Tone.start();
+    masterGain = new Tone.Gain(0.15).toDestination();
+    reverb = new Tone.Reverb({ decay: 4, wet: 0.7 }).connect(masterGain);
+    delay = new Tone.FeedbackDelay({ delayTime: '8n', feedback: 0.3, wet: 0.4 }).connect(reverb);
+    synth = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: 'sine' },
+      envelope: { attack: 2, decay: 1, sustain: 0.5, release: 4 },
+      volume: -20
+    }).connect(delay);
+  }
+
+  function playAttachSound(branch) {
+    if (!soundOn || !synth) return;
+    const now = Tone.now();
+    if (now - lastNoteTime < 0.08) return;
+    lastNoteTime = now;
+    const freq = notes[branchCount % notes.length];
+    const nextFreq = notes[(branchCount + 1) % notes.length];
+    synth.triggerAttackRelease(freq, '8n', now);
+    if (branchCount % 3 === 0) {
+      setTimeout(() => {
+        if (soundOn && synth) synth.triggerAttackRelease(nextFreq * 1.5, '16n', Tone.now());
+      }, 50);
+    }
+  }
+
+  // --- Text overlay ---
+  function showText() {
+    const el = document.getElementById('liminal-text');
+    el.classList.add('visible');
+    textVisible = true;
+    textTimer = 0;
+  }
+
+  // --- Main Loop ---
+  function animate(time) {
+    const dt = Math.min(32, time - lastTime);
+    lastTime = time;
+
+    drawBackground();
+    drawConnections();
+    drawBranches();
+
+    // Update and filter particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+      particles[i].update(dt);
+      particles[i].draw();
+      if (particles[i].life <= 0) {
+        particles.splice(i, 1);
+      }
+    }
+
+    // Respawn dead particles
+    while (particles.length < MAX_PARTICLES) {
+      particles.push(new Particle());
+    }
+
+    // Text fade in/out
+    if (textVisible) {
+      textTimer += dt;
+      if (textTimer > 8000) {
+        document.getElementById('liminal-text').classList.remove('visible');
+        textVisible = false;
+      }
+    }
+
+    // Auto-show text after delay
+    if (!textVisible && branchCount > 30 && branchCount < 35) {
+      showText();
+    }
+
+    requestAnimationFrame(animate);
+  }
+
+  // --- Events ---
+  canvas.addEventListener('mousemove', e => {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+  });
+  canvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    mouseX = e.touches[0].clientX;
+    mouseY = e.touches[0].clientY;
+  }, { passive: false });
+  canvas.addEventListener('mouseleave', () => {
+    mouseX = -1000;
+    mouseY = -1000;
+  });
+
+  document.getElementById('sound-btn').addEventListener('click', async () => {
+    if (!soundOn) {
+      await initAudio();
+      soundOn = true;
+      document.getElementById('sound-btn').textContent = 'sound: on';
+      document.getElementById('sound-btn').style.borderColor = 'rgba(120,180,220,0.4)';
+      document.getElementById('sound-btn').style.color = 'rgba(120,180,220,0.6)';
+    } else {
+      soundOn = false;
+      if (synth) synth.dispose();
+      document.getElementById('sound-btn').textContent = 'sound: off';
+    }
+  });
+
+  // --- Init ---
+  seedCenter();
+  spawnParticles();
+  requestAnimationFrame(animate);
+
+  // Auto text at start
+  setTimeout(showText, 2000);
+})();
+</script>
+</body>
+</html>
