@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>flux | the space between states</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #f5f0e8;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    cursor: crosshair;
+  }
+  canvas { display: block; position: fixed; top: 0; left: 0; }
+  .overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 10;
+  }
+  .liminal-text {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    opacity: 0;
+    transition: opacity 7s ease;
+    width: 90%;
+    max-width: 700px;
+  }
+  .liminal-text.visible { opacity: 1; }
+  .line {
+    font-size: clamp(0.6rem, 1.1vw, 0.82rem);
+    color: rgba(45, 55, 80, 0.28);
+    letter-spacing: 0.38em;
+    line-height: 2.5;
+    text-transform: lowercase;
+  }
+  .line.accent {
+    color: rgba(80, 70, 120, 0.38);
+    letter-spacing: 0.5em;
+  }
+  .line.faint {
+    font-size: clamp(0.4rem, 0.75vw, 0.56rem);
+    color: rgba(60, 55, 85, 0.15);
+    letter-spacing: 0.55em;
+    margin-top: 2em;
+  }
+  #sound-btn {
+    position: fixed; top: 1.5rem; right: 1.5rem;
+    background: none;
+    border: 1px solid rgba(60,55,85,0.15);
+    color: rgba(60,55,85,0.3);
+    font-family: 'Courier New', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.25em;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    text-transform: lowercase;
+    transition: all 0.4s ease;
+    z-index: 20;
+    pointer-events: auto;
+  }
+  #sound-btn:hover {
+    border-color: rgba(60,55,85,0.4);
+    color: rgba(60,55,85,0.6);
+  }
+  #hint {
+    position: fixed; bottom: 1.5rem; left: 1.5rem;
+    font-size: 0.52rem;
+    letter-spacing: 0.28em;
+    color: rgba(60,55,85,0.12);
+    text-transform: lowercase;
+    z-index: 20;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="overlay">
+  <div class="liminal-text" id="text">
+    <div class="line accent">neither one thing</div>
+    <div class="line">nor the other</div>
+    <div class="line">but the space between</div>
+    <div class="line faint">where patterns emerge</div>
+    <div class="line faint">and dissolve again</div>
+  </div>
+</div>
+<button id="sound-btn">sound</button>
+<div id="hint">disturb the chemical balance</div>
+
+<script>
+// ================================================================
+// FLUX — Reaction-Diffusion System (Gray-Scott Model)
+// Liminality: the space between states where patterns emerge and fade
+// Mouse creates chemical disturbances that ripple through the system
+// ================================================================
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const text = document.getElementById('text');
+
+let W, H;
+let gridA, gridB, nextA, nextB;
+let scale = 4; // Cell size — lower = finer detail, higher = more performance
+let cols, rows;
+let mouseX = -9999, mouseY = -9999;
+let time = 0;
+let audioStarted = false;
+let audioCtx = null;
+
+// Gray-Scott parameters (exploring the "liminal zone" of pattern formation)
+const dA = 1.0;    // Diffusion rate of chemical A
+const dB = 0.5;    // Diffusion rate of chemical B
+const feed = 0.055;  // Feed rate (how fast A is added)
+const kill = 0.062; // Kill rate (how fast B is removed)
+
+// These parameters create the "liminal" regime — between spots, stripes, and chaos
+// The feed/kill ratio determines what patterns emerge
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  initGrid();
+}
+window.addEventListener('resize', resize);
+
+// Initialize the chemical grids
+function initGrid() {
+  cols = Math.ceil(W / scale);
+  rows = Math.ceil(H / scale);
+  
+  gridA = new Float32Array(cols * rows);
+  gridB = new Float32Array(cols * rows);
+  nextA = new Float32Array(cols * rows);
+  nextB = new Float32Array(cols * rows);
+  
+  // Initialize with chemical A everywhere
+  for (let i = 0; i < cols * rows; i++) {
+    gridA[i] = 1;
+    gridB[i] = 0;
+  }
+  
+  // Seed with chemical B in the center (creates the initial pattern seed)
+  const centerX = Math.floor(cols / 2);
+  const centerY = Math.floor(rows / 2);
+  const seedRadius = Math.floor(Math.min(cols, rows) * 0.08);
+  
+  for (let y = centerY - seedRadius; y <= centerY + seedRadius; y++) {
+    for (let x = centerX - seedRadius; x <= centerX + seedRadius; x++) {
+      if (x >= 0 && x < cols && y >= 0 && y < rows) {
+        const dx = x - centerX;
+        const dy = y - centerY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < seedRadius) {
+          const idx = y * cols + x;
+          gridA[idx] = 0.5;
+          gridB[idx] = 0.25 + Math.random() * 0.1;
+        }
+      }
+    }
+  }
+  
+  // Add a few more seed points randomly
+  for (let s = 0; s < 5; s++) {
+    const sx = Math.floor(Math.random() * cols);
+    const sy = Math.floor(Math.random() * rows);
+    const sr = Math.floor(3 + Math.random() * 5);
+    for (let y = sy - sr; y <= sy + sr; y++) {
+      for (let x = sx - sr; x <= sx + sr; x++) {
+        if (x >= 0 && x < cols && y >= 0 && y < rows) {
+          const dx = x - sx;
+          const dy = y - sy;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < sr) {
+            const idx = y * cols + x;
+            gridA[idx] = 0.5;
+            gridB[idx] = 0.25;
+          }
+        }
+      }
+    }
+  }
+}
+
+// Laplacian calculation for diffusion
+function laplaceA(x, y) {
+  let sum = 0;
+  const x0 = Math.max(0, x - 1);
+  const x1 = Math.min(cols - 1, x + 1);
+  const y0 = Math.max(0, y - 1);
+  const y1 = Math.min(rows - 1, y + 1);
+  
+  sum += gridA[y * cols + x] * -1;
+  sum += gridA[y0 * cols + x] * 0.2;
+  sum += gridA[y1 * cols + x] * 0.2;
+  sum += gridA[y * cols + x0] * 0.2;
+  sum += gridA[y * cols + x1] * 0.2;
+  sum += gridA[y0 * cols + x0] * 0.05;
+  sum += gridA[y0 * cols + x1] * 0.05;
+  sum += gridA[y1 * cols + x0] * 0.05;
+  sum += gridA[y1 * cols + x1] * 0.05;
+  
+  return sum;
+}
+
+function laplaceB(x, y) {
+  let sum = 0;
+  const x0 = Math.max(0, x - 1);
+  const x1 = Math.min(cols - 1, x + 1);
+  const y0 = Math.max(0, y - 1);
+  const y1 = Math.min(rows - 1, y + 1);
+  
+  sum += gridB[y * cols + x] * -1;
+  sum += gridB[y0 * cols + x] * 0.2;
+  sum += gridB[y1 * cols + x] * 0.2;
+  sum += gridB[y * cols + x0] * 0.2;
+  sum += gridB[y * cols + x1] * 0.2;
+  sum += gridB[y0 * cols + x0] * 0.05;
+  sum += gridB[y0 * cols + x1] * 0.05;
+  sum += gridB[y1 * cols + x0] * 0.05;
+  sum += gridB[y1 * cols + x1] * 0.05;
+  
+  return sum;
+}
+
+// Mouse disturbance — creates a chemical splash
+function addDisturbance(mx, my, radius, amount) {
+  const cellX = Math.floor(mx / scale);
+  const cellY = Math.floor(my / scale);
+  const cellR = Math.floor(radius / scale);
+  
+  for (let dy = -cellR; dy <= cellR; dy++) {
+    for (let dx = -cellR; dx <= cellR; dx++) {
+      const x = cellX + dx;
+      const y = cellY + dy;
+      if (x >= 0 && x < cols && y >= 0 && y < rows) {
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < cellR) {
+          const idx = y * cols + x;
+          const falloff = 1 - dist / cellR;
+          gridA[idx] = 1 - (1 - gridA[idx]) * (1 - falloff * amount);
+          gridB[idx] = gridB[idx] * (1 - falloff * amount * 0.5);
+        }
+      }
+    }
+  }
+}
+
+// Simulation step
+function step() {
+  // Slowly vary feed/kill to explore different pattern regimes
+  const feedMod = Math.sin(time * 0.0003) * 0.003;
+  const killMod = Math.cos(time * 0.0002) * 0.002;
+  const f = feed + feedMod;
+  const k = kill + killMod;
+  
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const idx = y * cols + x;
+      const a = gridA[idx];
+      const b = gridB[idx];
+      
+      // Chemical reaction: A + 2B → 3B (autocatalysis)
+      const reaction = a * b * b;
+      
+      // Update next state
+      const newA = a + dA * laplaceA(x, y) - reaction + f * (1 - a);
+      const newB = b + dB * laplaceB(x, y) + reaction - (k + f) * b;
+      
+      nextA[idx] = Math.max(0, Math.min(1, newA));
+      nextB[idx] = Math.max(0, Math.min(1, newB));
+    }
+  }
+  
+  // Swap buffers
+  const tempA = gridA;
+  const tempB = gridB;
+  gridA = nextA;
+  gridB = nextB;
+  nextA = tempA;
+  nextB = tempB;
+  
+  // Apply mouse disturbance
+  if (mouseX > 0 && mouseY > 0) {
+    addDisturbance(mouseX, mouseY, 30, 0.3);
+  }
+}
+
+// Draw the reaction-diffusion pattern
+function draw() {
+  time++;
+  
+  // Run multiple simulation steps per frame for faster pattern growth
+  for (let s = 0; s < 3; s++) {
+    step();
+  }
+  
+  // Create image data
+  const imageData = ctx.createImageData(W, H);
+  const data = imageData.data;
+  
+  for (let y = 0; y < H; y += 2) {
+    for (let x = 0; x < W; x += 2) {
+      const cellX = Math.floor(x / scale);
+      const cellY = Math.floor(y / scale);
+      
+      if (cellX < cols && cellY < rows) {
+        const idx = cellY * cols + cellX;
+        const a = gridA[idx];
+        const b = gridB[idx];
+        
+        // Map chemical B to color
+        // When b is high, we get organic patterns
+        const intensity = Math.min(255, Math.floor(b * 600));
+        
+        // Color palette: warm ambers, deep blues, and soft lavenders
+        // Based on the ratio and intensity of chemicals
+        const hueShift = (a - b) * 60; // Shifts based on chemical balance
+        const baseHue = 35 + hueShift; // 35 = warm amber, shifts toward blue
+        const sat = 40 + intensity * 0.3;
+        const light = 20 + intensity * 0.4;
+        
+        // Soft organic colors
+        let r, g, bl;
+        if (intensity < 20) {
+          // Background — warm cream with subtle variation
+          const noise = Math.sin(x * 0.02 + time * 0.01) * Math.cos(y * 0.02 - time * 0.008) * 5;
+          r = 245 + noise;
+          g = 240 + noise;
+          bl = 232 + noise;
+        } else if (intensity < 60) {
+          // Transition — soft warm tones
+          const t = intensity / 60;
+          r = 245 - t * 40;
+          g = 230 - t * 50;
+          bl = 210 - t * 30;
+        } else {
+          // High concentration — rich organic colors
+          const t = Math.min(1, (intensity - 60) / 140);
+          // Blend between warm amber and deep blue-purple
+          const warmR = 180, warmG = 100, warmB = 60;
+          const coolR = 80, coolG = 70, coolB = 140;
+          const coolBlend = (b - 0.1) * 2; // More blue when B is higher
+          r = warmR * (1 - coolBlend) + coolR * coolBlend - t * 30;
+          g = warmG * (1 - coolBlend) + coolG * coolBlend - t * 20;
+          bl = warmB * (1 - coolBlend) + coolB * coolBlend + t * 40;
+        }
+        
+        // Fill 2x2 block for performance
+        for (let dy = 0; dy < 2 && y + dy < H; dy++) {
+          for (let dx = 0; dx < 2 && x + dx < W; dx++) {
+            const pixelIdx = ((y + dy) * W + (x + dx)) * 4;
+            data[pixelIdx] = Math.max(0, Math.min(255, r));
+            data[pixelIdx + 1] = Math.max(0, Math.min(255, g));
+            data[pixelIdx + 2] = Math.max(0, Math.min(255, bl));
+            data[pixelIdx + 3] = 255;
+          }
+        }
+      }
+    }
+  }
+  
+  ctx.putImageData(imageData, 0, 0);
+  
+  // Draw subtle vignette
+  const vignette = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.7);
+  vignette.addColorStop(0, 'rgba(245, 240, 232, 0)');
+  vignette.addColorStop(1, 'rgba(245, 240, 232, 0.15)');
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, W, H);
+  
+  // Mouse glow indicator
+  if (mouseX > 0 && mouseY > 0) {
+    const glow = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, 80);
+    glow.addColorStop(0, 'rgba(100, 80, 140, 0.08)');
+    glow.addColorStop(1, 'rgba(100, 80, 140, 0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(mouseX, mouseY, 80, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  
+  requestAnimationFrame(draw);
+}
+
+// Text reveal
+function revealText() {
+  setTimeout(() => text.classList.add('visible'), 1200);
+}
+
+// Audio — ambient generative tones that respond to the pattern
+function initAudio() {
+  if (audioStarted) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  audioStarted = true;
+  
+  // Create a subtle ambient drone
+  const masterGain = audioCtx.createGain();
+  masterGain.gain.value = 0;
+  masterGain.connect(audioCtx.destination);
+  
+  // Fade in
+  masterGain.gain.linearRampToValueAtTime(0.08, audioCtx.currentTime + 3);
+  
+  // Multiple detuned oscillators for rich drone
+  const freqs = [55, 82.5, 110, 165]; // A1, E2, A2, E3
+  
+  freqs.forEach((f, i) => {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    const filter = audioCtx.createBiquadFilter();
+    
+    osc.type = i % 2 === 0 ? 'sine' : 'triangle';
+    osc.frequency.value = f;
+    osc.detune.value = (i - 1.5) * 8; // Slight detuning for richness
+    
+    filter.type = 'lowpass';
+    filter.frequency.value = 400 + i * 50;
+    filter.Q.value = 0.8;
+    
+    gain.gain.value = 0.15 - i * 0.02;
+    
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(masterGain);
+    osc.start();
+  });
+  
+  // Slow LFO modulation
+  const lfo = audioCtx.createOscillator();
+  const lfoGain = audioCtx.createGain();
+  lfo.frequency.value = 0.05; // Very slow
+  lfoGain.gain.value = 3;
+  lfo.connect(lfoGain);
+  lfoGain.connect(masterGain);
+  lfo.start();
+}
+
+document.getElementById('sound-btn').addEventListener('click', () => {
+  initAudio();
+  const btn = document.getElementById('sound-btn');
+  if (audioCtx.state === 'running') {
+    btn.textContent = 'sound';
+  } else {
+    btn.textContent = 'sound on';
+  }
+});
+
+// Mouse tracking
+window.addEventListener('mousemove', e => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+});
+window.addEventListener('touchmove', e => {
+  mouseX = e.touches[0].clientX;
+  mouseY = e.touches[0].clientY;
+}, { passive: true });
+window.addEventListener('mouseleave', () => {
+  mouseX = -9999;
+  mouseY = -9999;
+});
+
+// Boot
+resize();
+revealText();
+draw();
+</script>
+</body>
+</html>
