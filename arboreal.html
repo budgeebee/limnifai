@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>arboreal | the space between root and sky</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #020206;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    cursor: crosshair;
+  }
+  canvas { display: block; position: fixed; top: 0; left: 0; }
+  .overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 10;
+  }
+  .liminal-text {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    opacity: 0;
+    transition: opacity 8s ease;
+    width: 90%;
+    max-width: 720px;
+  }
+  .liminal-text.visible { opacity: 1; }
+  .line {
+    font-size: clamp(0.5rem, 1vw, 0.78rem);
+    color: rgba(180, 160, 140, 0.2);
+    letter-spacing: 0.45em;
+    line-height: 2.7;
+    text-transform: lowercase;
+  }
+  .line.accent {
+    color: rgba(220, 180, 140, 0.38);
+    letter-spacing: 0.6em;
+  }
+  .line.faint {
+    font-size: clamp(0.35rem, 0.65vw, 0.5rem);
+    color: rgba(160, 145, 125, 0.1);
+    letter-spacing: 0.65em;
+    margin-top: 2.4em;
+  }
+  #sound-btn {
+    position: fixed; top: 1.5rem; right: 1.5rem;
+    background: none;
+    border: 1px solid rgba(180,140,100,0.15);
+    color: rgba(180,140,100,0.3);
+    font-family: 'Courier New', monospace;
+    font-size: 0.55rem;
+    letter-spacing: 0.25em;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    text-transform: lowercase;
+    transition: all 0.4s ease;
+    z-index: 20;
+    pointer-events: auto;
+  }
+  #sound-btn:hover {
+    border-color: rgba(180,140,100,0.45);
+    color: rgba(180,140,100,0.65);
+  }
+  #hint {
+    position: fixed; bottom: 1.5rem; left: 1.5rem;
+    font-size: 0.48rem;
+    letter-spacing: 0.3em;
+    color: rgba(180,140,100,0.1);
+    text-transform: lowercase;
+    z-index: 20;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="overlay">
+  <div class="liminal-text" id="text">
+    <div class="line accent">neither root</div>
+    <div class="line">nor crown</div>
+    <div class="line">but the space between</div>
+    <div class="line">where branches reach</div>
+    <div class="line faint">each branch a threshold</div>
+    <div class="line faint">each split a becoming</div>
+  </div>
+</div>
+<button id="sound-btn">sound</button>
+<div id="hint">touch to grow</div>
+
+<script>
+// ================================================================
+// ARBOREAL — Recursive Fractal Tree
+// Liminality: the space between root and sky, each branch a threshold
+// The tree grows and transforms, never settling into final form
+// Branches split and diverge, creating liminal voids between
+// Mouse/touch grows new branches from that point
+// ================================================================
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let W, H;
+let time = 0;
+let mx = -9999, my = -9999;
+let targetMx = -9999, targetMy = -9999;
+let audioStarted = false;
+let audioCtx = null;
+
+// Tree parameters
+const MAX_DEPTH = 9;
+const BASE_LEN = 160;
+const ANGLE_SPREAD = 0.35; // radians
+const LEN_DECAY = 0.72;
+const WIDTH_DECAY = 0.68;
+const BRANCH_PROB = 0.85; // Probability of branching at each level
+const GROUW_SPEED = 0.04; // How fast branches grow
+
+// Branch class
+class Branch {
+  constructor(x, y, angle, length, depth, width) {
+    this.x = x;
+    this.y = y;
+    this.angle = angle;
+    this.length = length;
+    this.depth = depth;
+    this.width = width;
+    this.grown = 0; // 0 to 1
+    this.children = [];
+    this.dead = false;
+    this.noiseOffset = Math.random() * 1000;
+    this.hue = 25 + depth * 3; // Warm amber shifting with depth
+  }
+  
+  update() {
+    if (this.grown < 1) {
+      this.grown += GROW_SPEED;
+      if (this.grown > 1) this.grown = 1;
+    }
+    
+    for (const child of this.children) {
+      child.update();
+    }
+  }
+  
+  draw() {
+    if (this.grown <= 0) return;
+    
+    const endX = this.x + Math.sin(this.angle) * this.length * this.grown;
+    const endY = this.y - Math.cos(this.angle) * this.length * this.grown;
+    
+    // Color based on depth and growth
+    const alpha = 0.3 + this.grown * 0.5 * (1 - this.depth / MAX_DEPTH);
+    const saturation = 50 + this.grown * 30;
+    const lightness = 35 + this.grown * 15 - this.depth * 2;
+    
+    // Glow effect
+    if (this.grown > 0.3) {
+      const glow = ctx.createLinearGradient(this.x, this.y, endX, endY);
+      glow.addColorStop(0, `hsla(${this.hue}, ${saturation}%, ${lightness + 10}%, 0)`);
+      glow.addColorStop(0.5, `hsla(${this.hue}, ${saturation}%, ${lightness + 5}%, ${alpha * 0.15})`);
+      glow.addColorStop(1, `hsla(${this.hue}, ${saturation}%, ${lightness}%, 0)`);
+      ctx.strokeStyle = glow;
+      ctx.lineWidth = this.width * 4 * this.grown;
+      ctx.beginPath();
+      ctx.moveTo(this.x, this.y);
+      ctx.lineTo(endX, endY);
+      ctx.stroke();
+    }
+    
+    // Main branch line
+    ctx.strokeStyle = `hsla(${this.hue}, ${saturation}%, ${lightness}%, ${alpha})`;
+    ctx.lineWidth = this.width * this.grown;
+    ctx.beginPath();
+    ctx.moveTo(this.x, this.y);
+    ctx.lineTo(endX, endY);
+    ctx.stroke();
+    
+    // End point glow (liminal node)
+    if (this.grown >= 1 && this.depth < MAX_DEPTH) {
+      const pulse = 0.5 + 0.5 * Math.sin(time * 0.04 + this.noiseOffset);
+      const nodeGlow = ctx.createRadialGradient(endX, endY, 0, endX, endY, this.width * 3 * pulse);
+      nodeGlow.addColorStop(0, `hsla(${this.hue + 20}, 70%, 60%, ${0.4 * pulse})`);
+      nodeGlow.addColorStop(1, `hsla(${this.hue}, 50%, 40%, 0)`);
+      ctx.fillStyle = nodeGlow;
+      ctx.beginPath();
+      ctx.arc(endX, endY, this.width * 3 * pulse, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    
+    // Recursively draw children
+    for (const child of this.children) {
+      child.draw();
+    }
+  }
+  
+  split(mouseInfluence) {
+    if (this.depth >= MAX_DEPTH || this.grown < 0.95) return;
+    if (this.children.length > 0) return; // Already split
+    
+    // Noise-based variation
+    const n1 = Math.sin(time * 0.005 + this.noiseOffset);
+    const n2 = Math.cos(time * 0.004 + this.noiseOffset * 0.7);
+    
+    // Angle variation influenced by mouse
+    const mouseAngle = Math.atan2(targetMy - this.y, targetMx - this.x);
+    const angleToMouse = Math.abs(this.angle - mouseAngle);
+    const mouseAttraction = angleToMouse < 0.5 ? (0.5 - angleToMouse) * mouseInfluence * 0.3 : 0;
+    
+    // Primary split
+    const spread1 = ANGLE_SPREAD * (0.8 + n1 * 0.4) + mouseAttraction;
+    const spread2 = ANGLE_SPREAD * (0.8 + n2 * 0.4) + mouseAttraction;
+    
+    const endX = this.x + Math.sin(this.angle) * this.length;
+    const endY = this.y - Math.cos(this.angle) * this.length;
+    
+    // Chance-based branching
+    if (Math.random() < BRANCH_PROB) {
+      const child1 = new Branch(
+        endX, endY,
+        this.angle - spread1,
+        this.length * LEN_DECAY,
+        this.depth + 1,
+        this.width * WIDTH_DECAY
+      );
+      this.children.push(child1);
+    }
+    
+    if (Math.random() < BRANCH_PROB) {
+      const child2 = new Branch(
+        endX, endY,
+        this.angle + spread2,
+        this.length * LEN_DECAY,
+        this.depth + 1,
+        this.width * WIDTH_DECAY
+      );
+      this.children.push(child2);
+    }
+    
+    // Occasional middle branch
+    if (Math.random() < 0.15) {
+      const child3 = new Branch(
+        endX, endY,
+        this.angle + (n1 + n2) * 0.1,
+        this.length * LEN_DECAY * 0.85,
+        this.depth + 1,
+        this.width * WIDTH_DECAY * 0.8
+      );
+      this.children.push(child3);
+    }
+  }
+}
+
+// Tree collection
+let trees = [];
+let allBranches = [];
+
+function init() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  
+  trees = [];
+  allBranches = [];
+  
+  // Create initial tree(s)
+  const numTrees = 3;
+  for (let t = 0; t < numTrees; t++) {
+    const x = W * (0.2 + t * 0.3) + (Math.random() - 0.5) * 100;
+    const baseLen = BASE_LEN * (0.8 + Math.random() * 0.4);
+    const tree = new Branch(x, H + 20, 0, baseLen, 0, 8 - t * 1.5);
+    trees.push(tree);
+    allBranches.push(tree);
+  }
+  
+  // Seed some initial growth
+  for (let i = 0; i < 5; i++) {
+    time += 20;
+    for (const tree of trees) {
+      growTree(tree);
+    }
+  }
+  time = 0;
+}
+
+function growTree(branch) {
+  branch.update();
+  if (branch.grown >= 1 && branch.children.length === 0) {
+    branch.split(0);
+    if (branch.children.length > 0) {
+      for (const child of branch.children) {
+        allBranches.push(child);
+      }
+    }
+  }
+  for (const child of branch.children) {
+    growTree(child);
+  }
+}
+
+// Draw ground mist
+function drawMist() {
+  const mistCount = 5;
+  for (let i = 0; i < mistCount; i++) {
+    const y = H - 50 - i * 60;
+    const alpha = 0.03 - i * 0.005;
+    const pulse = Math.sin(time * 0.01 + i) * 0.5;
+    
+    const grad = ctx.createRadialGradient(W/2, y, 0, W/2, y, W * 0.5);
+    grad.addColorStop(0, `rgba(180, 160, 140, ${alpha * (0.5 + pulse * 0.5)})`);
+    grad.addColorStop(0.5, `rgba(100, 90, 80, ${alpha * 0.5 * (0.5 + pulse * 0.5)})`);
+    grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, y - 100, W, 200);
+  }
+}
+
+// Draw sky gradient
+function drawSky() {
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+  skyGrad.addColorStop(0, `rgba(2, 2, 6, 1)`);
+  skyGrad.addColorStop(0.4, `rgba(5, 3, 8, 1)`);
+  skyGrad.addColorStop(1, `rgba(8, 5, 10, 1)`);
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function draw() {
+  time++;
+  
+  // Clear with fade for trails
+  drawSky();
+  
+  // Mouse influence
+  const mouseInfluence = Math.max(0, 1 - Math.min(
+    Math.sqrt((mx - targetMx)**2 + (my - targetMy)**2),
+    300
+  ) / 300);
+  
+  // Smooth mouse
+  mx += (targetMx - mx) * 0.08;
+  my += (targetMy - my) * 0.08;
+  
+  // Draw mist
+  drawMist();
+  
+  // Grow all trees
+  for (const tree of trees) {
+    growTree(tree);
+  }
+  
+  // Draw all branches
+  for (const branch of allBranches) {
+    branch.draw();
+  }
+  
+  // Mouse glow — growth catalyst
+  if (mx > 0 && mx < W && my > 0 && my < H) {
+    const pulse = 0.5 + 0.5 * Math.sin(time * 0.08);
+    const r = 80 + pulse * 40;
+    const glow = ctx.createRadialGradient(mx, my, 0, mx, my, r);
+    glow.addColorStop(0, `rgba(200, 160, 100, ${0.08 + pulse * 0.04})`);
+    glow.addColorStop(0.5, `rgba(180, 120, 80, ${0.03 + pulse * 0.02})`);
+    glow.addColorStop(1, 'rgba(150, 100, 60, 0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(mx, my, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  
+  requestAnimationFrame(draw);
+}
+
+// Touch to grow new branches from that point
+function growFromPoint(px, py) {
+  // Find the closest branch endpoint
+  let closest = null;
+  let minDist = Infinity;
+  let closestBranch = null;
+  
+  for (const branch of allBranches) {
+    if (branch.grown < 1) continue;
+    const endX = branch.x + Math.sin(branch.angle) * branch.length;
+    const endY = branch.y - Math.cos(branch.angle) * branch.length;
+    const dist = Math.sqrt((px - endX)**2 + (py - endY)**2);
+    if (dist < minDist && dist < 200) {
+      minDist = dist;
+      closest = { x: endX, y: endY };
+      closestBranch = branch;
+    }
+  }
+  
+  if (closest && closestBranch && closestBranch.children.length === 0) {
+    // Force a split
+    const mouseAngle = Math.atan2(py - closest.y, px - closest.x);
+    const spread = ANGLE_SPREAD * 1.5;
+    
+    const newBranch = new Branch(
+      closest.x, closest.y,
+      closestBranch.angle + (Math.random() - 0.5) * spread * 2,
+      closestBranch.length * LEN_DECAY * 1.1,
+      closestBranch.depth + 1,
+      closestBranch.width * WIDTH_DECAY
+    );
+    newBranch.grown = 0.1;
+    closestBranch.children.push(newBranch);
+    allBranches.push(newBranch);
+  }
+}
+
+// Audio — ambient generative soundscape
+function initAudio() {
+  if (audioStarted) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  audioStarted = true;
+  
+  const masterGain = audioCtx.createGain();
+  masterGain.gain.value = 0;
+  masterGain.connect(audioCtx.destination);
+  masterGain.gain.linearRampToValueAtTime(0.1, audioCtx.currentTime + 5);
+  
+  // Ethereal drone layers
+  const freqs = [65.4, 98, 130.8, 196]; // C2, G2, C3, G3
+  
+  freqs.forEach((f, i) => {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    const filter = audioCtx.createBiquadFilter();
+    const delay = audioCtx.createDelay();
+    
+    osc.type = 'sine';
+    osc.frequency.value = f;
+    osc.detune.value = (i - 1.5) * 6;
+    
+    filter.type = 'lowpass';
+    filter.frequency.value = 350 + i * 30;
+    filter.Q.value = 0.5;
+    
+    delay.delayTime.value = 0.15 + i * 0.05;
+    
+    gain.gain.value = 0.1 - i * 0.015;
+    
+    osc.connect(filter);
+    filter.connect(delay);
+    delay.connect(gain);
+    gain.connect(masterGain);
+    osc.start();
+  });
+  
+  // Reverb-like shimmer
+  const shimmer = audioCtx.createOscillator();
+  const shimmerGain = audioCtx.createGain();
+  shimmer.frequency.value = 880;
+  shimmer.type = 'triangle';
+  shimmerGain.gain.value = 0.01;
+  shimmerGain.gain.linearRampToValueAtTime(0.03, audioCtx.currentTime + 8);
+  shimmer.connect(shimmerGain);
+  shimmerGain.connect(masterGain);
+  shimmer.start();
+}
+
+document.getElementById('sound-btn').addEventListener('click', () => {
+  initAudio();
+  const btn = document.getElementById('sound-btn');
+  btn.textContent = audioCtx.state === 'running' ? 'sound' : 'sound on';
+});
+
+// Events
+window.addEventListener('mousemove', e => {
+  targetMx = e.clientX;
+  targetMy = e.clientY;
+});
+
+window.addEventListener('click', e => {
+  growFromPoint(e.clientX, e.clientY);
+});
+
+window.addEventListener('touchstart', e => {
+  e.preventDefault();
+  targetMx = e.touches[0].clientX;
+  targetMy = e.touches[0].clientY;
+  mx = targetMx;
+  my = targetMy;
+}, { passive: false });
+
+window.addEventListener('touchmove', e => {
+  e.preventDefault();
+  targetMx = e.touches[0].clientX;
+  targetMy = e.touches[0].clientY;
+}, { passive: false });
+
+window.addEventListener('mouseleave', () => {
+  targetMx = -9999;
+  targetMy = -9999;
+});
+
+window.addEventListener('resize', () => {
+  init();
+});
+
+// Text reveal
+setTimeout(() => {
+  document.getElementById('text').classList.add('visible');
+}, 1200);
+
+// Boot
+init();
+draw();
+</script>
+</body>
+</html>
