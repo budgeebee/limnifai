@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>word-fugue | the space between meaning</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #f8f4ee;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    cursor: crosshair;
+  }
+  canvas { display: block; position: fixed; top: 0; left: 0; }
+  .overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 10;
+  }
+  .liminal-text {
+    position: absolute;
+    bottom: 8%; left: 8%;
+    width: 84%;
+    opacity: 0;
+    transition: opacity 7s ease;
+  }
+  .liminal-text.visible { opacity: 1; }
+  .line {
+    font-size: clamp(0.55rem, 1.1vw, 0.85rem);
+    color: rgba(60, 50, 40, 0.18);
+    letter-spacing: 0.35em;
+    line-height: 2.2;
+    text-transform: lowercase;
+  }
+  .line.accent {
+    color: rgba(100, 70, 50, 0.28);
+    letter-spacing: 0.5em;
+  }
+  .line.faint {
+    font-size: clamp(0.4rem, 0.72vw, 0.55rem);
+    color: rgba(80, 65, 50, 0.1);
+    letter-spacing: 0.55em;
+    margin-top: 1.5em;
+  }
+  #hint {
+    position: fixed; top: 1.5rem; right: 1.5rem;
+    font-size: 0.48rem;
+    letter-spacing: 0.28em;
+    color: rgba(80,65,50,0.12);
+    text-transform: lowercase;
+    z-index: 20;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="overlay">
+  <div class="liminal-text" id="text">
+    <div class="line accent">word</div>
+    <div class="line accent">between</div>
+    <div class="line accent">word</div>
+    <div class="line faint">the liminal space where meaning forms</div>
+  </div>
+</div>
+<div id="hint">move to disturb</div>
+
+<script>
+// ================================================================
+// WORD-FUGUE — Generative Typographic Art
+// Liminality: text at the threshold between legibility and dissolution
+// Words drift, overlap, fade, and reform — meaning emerges and retreats
+// Mouse creates ripples that disturb the text field
+// A meditation on language as threshold experience
+// ================================================================
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let W, H;
+let time = 0;
+let mx = -9999, my = -9999;
+let targetMx = -9999, targetMy = -9999;
+let words = [];
+let letters = [];
+
+// Word pool — words that explore liminality
+const wordPool = [
+  'between', 'threshold', 'liminal', 'becoming', 'edge',
+  'passage', 'boundary', 'dissolve', 'form', 'void',
+  'neither', 'nor', 'almost', 'nearly', 'about',
+  'between', 'within', 'without', 'through', 'beyond',
+  'here', 'there', 'where', 'when', 'what',
+  'silence', 'sound', 'wave', 'rest', 'motion',
+  'fade', 'form', 'grow', 'shrink', 'shift',
+  'threshold', 'edge', 'border', 'margin', 'zone'
+];
+
+class Word {
+  constructor() {
+    this.reset();
+  }
+  
+  reset() {
+    this.x = Math.random() * W;
+    this.y = Math.random() * H;
+    this.word = wordPool[Math.floor(Math.random() * wordPool.length)];
+    this.vx = (Math.random() - 0.5) * 0.4;
+    this.vy = (Math.random() - 0.5) * 0.3;
+    this.size = 14 + Math.random() * 22;
+    this.alpha = 0.05 + Math.random() * 0.12;
+    this.rotation = (Math.random() - 0.5) * 0.3;
+    this.rotSpeed = (Math.random() - 0.5) * 0.002;
+    this.life = 200 + Math.random() * 400;
+    this.maxLife = this.life;
+    // Hue variation: sepia/brown/warm tones
+    this.hue = 25 + Math.random() * 20;
+    this.sat = 20 + Math.random() * 25;
+  }
+  
+  update() {
+    // Movement
+    this.x += this.vx;
+    this.y += this.vy;
+    this.rotation += this.rotSpeed;
+    this.life--;
+    
+    // Mouse repulsion
+    const dx = this.x - targetMx;
+    const dy = this.y - targetMy;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 200 && dist > 0) {
+      const force = (200 - dist) / 200 * 1.5;
+      this.vx += (dx / dist) * force * 0.05;
+      this.vy += (dy / dist) * force * 0.05;
+    }
+    
+    // Damping
+    this.vx *= 0.98;
+    this.vy *= 0.98;
+    
+    // Wrap around edges with margin
+    const margin = 100;
+    if (this.x < -margin) this.x = W + margin;
+    if (this.x > W + margin) this.x = -margin;
+    if (this.y < -margin) this.y = H + margin;
+    if (this.y > H + margin) this.y = -margin;
+    
+    // Reset when dead
+    if (this.life <= 0) {
+      this.reset();
+    }
+  }
+  
+  draw() {
+    const lifeRatio = this.life / this.maxLife;
+    // Fade in at start, fade out at end
+    let alphaMod = 1;
+    if (lifeRatio > 0.8) {
+      alphaMod = (1 - lifeRatio) / 0.2;
+    } else if (lifeRatio < 0.2) {
+      alphaMod = lifeRatio / 0.2;
+    }
+    
+    // Also react to mouse proximity
+    const dx = this.x - targetMx;
+    const dy = this.y - targetMy;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    let mouseMod = 1;
+    if (dist < 150) {
+      mouseMod = 0.3 + (dist / 150) * 0.7;
+    }
+    
+    const finalAlpha = this.alpha * alphaMod * mouseMod;
+    if (finalAlpha < 0.01) return;
+    
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.rotation);
+    
+    // Text shadow for depth
+    ctx.shadowColor = `hsla(${this.hue}, ${this.sat}%, 40%, ${finalAlpha * 0.5})`;
+    ctx.shadowBlur = 8;
+    
+    ctx.font = `${this.size}px 'Courier New', monospace`;
+    ctx.fillStyle = `hsla(${this.hue}, ${this.sat}%, 35%, ${finalAlpha})`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(this.word, 0, 0);
+    
+    ctx.restore();
+  }
+}
+
+class Letter {
+  constructor() {
+    this.reset();
+  }
+  
+  reset() {
+    this.x = Math.random() * W;
+    this.y = Math.random() * H;
+    this.letter = String.fromCharCode(65 + Math.floor(Math.random() * 26));
+    this.vx = (Math.random() - 0.5) * 0.6;
+    this.vy = (Math.random() - 0.5) * 0.6;
+    this.size = 8 + Math.random() * 14;
+    this.alpha = 0.03 + Math.random() * 0.08;
+    this.life = 100 + Math.random() * 200;
+    this.maxLife = this.life;
+    this.hue = 35 + Math.random() * 15;
+    this.sat = 15 + Math.random() * 20;
+  }
+  
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.vx *= 0.99;
+    this.vy *= 0.99;
+    this.life--;
+    
+    // Mouse attraction when close
+    const dx = targetMx - this.x;
+    const dy = targetMy - this.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 100 && dist > 0) {
+      const force = (100 - dist) / 100 * 0.3;
+      this.vx += (dx / dist) * force;
+      this.vy += (dy / dist) * force;
+    }
+    
+    if (this.life <= 0) this.reset();
+    if (this.x < 0 || this.x > W || this.y < 0 || this.y > H) this.reset();
+  }
+  
+  draw() {
+    const lifeRatio = this.life / this.maxLife;
+    let alphaMod = lifeRatio > 0.8 ? (1 - lifeRatio) / 0.2 : lifeRatio < 0.2 ? lifeRatio / 0.2 : 1;
+    
+    const dx = this.x - targetMx;
+    const dy = this.y - targetMy;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    let mouseMod = dist < 100 ? 0.2 + (dist / 100) * 0.8 : 1;
+    
+    const finalAlpha = this.alpha * alphaMod * mouseMod;
+    if (finalAlpha < 0.005) return;
+    
+    ctx.save();
+    ctx.font = `${this.size}px 'Courier New', monospace`;
+    ctx.fillStyle = `hsla(${this.hue}, ${this.sat}%, 45%, ${finalAlpha})`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(this.letter, this.x, this.y);
+    ctx.restore();
+  }
+}
+
+// Connection lines between nearby words
+function drawConnections() {
+  for (let i = 0; i < words.length; i++) {
+    for (let j = i + 1; j < words.length; j++) {
+      const dx = words[i].x - words[j].x;
+      const dy = words[i].y - words[j].y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      
+      if (dist < 200) {
+        const alpha = (1 - dist / 200) * 0.06;
+        ctx.strokeStyle = `hsla(35, 25%, 40%, ${alpha})`;
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(words[i].x, words[i].y);
+        ctx.lineTo(words[j].x, words[j].y);
+        ctx.stroke();
+      }
+    }
+  }
+}
+
+// Mouse ripple effect
+function drawMouseRipple() {
+  if (mx < 0 || mx > W || my < 0 || my > H) return;
+  
+  const pulse = 0.5 + 0.5 * Math.sin(time * 0.06);
+  const r = 60 + pulse * 30;
+  
+  ctx.strokeStyle = `rgba(100, 70, 50, ${0.04 + pulse * 0.02})`;
+  ctx.lineWidth = 0.5;
+  ctx.beginPath();
+  ctx.arc(mx, my, r, 0, Math.PI * 2);
+  ctx.stroke();
+  
+  // Inner ring
+  ctx.strokeStyle = `rgba(100, 70, 50, ${0.06 + pulse * 0.03})`;
+  ctx.beginPath();
+  ctx.arc(mx, my, r * 0.5, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+function init() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  
+  // Create words
+  const wordCount = Math.floor(W * H / 40000);
+  words = [];
+  for (let i = 0; i < wordCount; i++) {
+    const w = new Word();
+    w.x = Math.random() * W;
+    w.y = Math.random() * H;
+    words.push(w);
+  }
+  
+  // Create individual letters
+  const letterCount = Math.floor(W * H / 25000);
+  letters = [];
+  for (let i = 0; i < letterCount; i++) {
+    const l = new Letter();
+    l.x = Math.random() * W;
+    l.y = Math.random() * H;
+    letters.push(l);
+  }
+}
+
+function draw() {
+  time++;
+  
+  // Slow fade effect for background
+  ctx.fillStyle = 'rgba(248, 244, 238, 0.08)';
+  ctx.fillRect(0, 0, W, H);
+  
+  // Smooth mouse
+  mx += (targetMx - mx) * 0.06;
+  my += (targetMy - my) * 0.06;
+  
+  // Draw connections
+  drawConnections();
+  
+  // Draw letters
+  for (const l of letters) {
+    l.update();
+    l.draw();
+  }
+  
+  // Draw words
+  for (const w of words) {
+    w.update();
+    w.draw();
+  }
+  
+  // Mouse ripple
+  drawMouseRipple();
+  
+  // Vignette
+  const vig = ctx.createRadialGradient(W/2, H/2, H*0.3, W/2, H/2, H*0.9);
+  vig.addColorStop(0, 'rgba(248, 244, 238, 0)');
+  vig.addColorStop(1, 'rgba(248, 244, 238, 0.35)');
+  ctx.fillStyle = vig;
+  ctx.fillRect(0, 0, W, H);
+  
+  requestAnimationFrame(draw);
+}
+
+// Events
+window.addEventListener('mousemove', e => {
+  targetMx = e.clientX;
+  targetMy = e.clientY;
+});
+
+window.addEventListener('touchmove', e => {
+  e.preventDefault();
+  targetMx = e.touches[0].clientX;
+  targetMy = e.touches[0].clientY;
+  mx = targetMx;
+  my = targetMy;
+}, { passive: false });
+
+window.addEventListener('mouseleave', () => {
+  targetMx = -9999;
+  targetMy = -9999;
+});
+
+window.addEventListener('resize', () => {
+  init();
+});
+
+// Text reveal
+setTimeout(() => {
+  document.getElementById('text').classList.add('visible');
+}, 1500);
+
+// Boot
+init();
+draw();
+</script>
+</body>
+</html>
