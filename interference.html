@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>interference</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0c0c10;overflow:hidden;font-family:'Courier New',monospace;cursor:crosshair}
+canvas{display:block;position:fixed;top:0;left:0}
+.overlay{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10}
+.liminal-text{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;opacity:0;transition:opacity 8s;width:90%;max-width:700px}
+.liminal-text.visible{opacity:1}
+.line{font-size:clamp(0.5rem,1vw,0.75rem);color:rgba(140,160,200,0.2);letter-spacing:0.4em;line-height:2.5;text-transform:lowercase}
+.line.accent{color:rgba(100,180,220,0.35);letter-spacing:0.55em}
+.line.faint{font-size:clamp(0.38rem,0.65vw,0.52rem);color:rgba(100,160,200,0.1);letter-spacing:0.6em;margin-top:1.8em}
+#hint{position:fixed;bottom:1.5rem;left:1.5rem;font-size:0.48rem;letter-spacing:0.28em;color:rgba(100,160,200,0.1);text-transform:lowercase;z-index:20;pointer-events:none}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="overlay">
+  <div class="liminal-text" id="text">
+    <div class="line accent">where waves</div>
+    <div class="line accent">cross</div>
+    <div class="line">there</div>
+    <div class="line">a threshold forms</div>
+    <div class="line faint">between what was</div>
+    <div class="line faint">and what becomes</div>
+  </div>
+</div>
+<div id="hint">disturb the field</div>
+<script>
+(function(){
+var canvas=document.getElementById("c");
+var ctx=canvas.getContext("2d");
+var W,H,time=0,mx=-9999,my=-9999,tmx=-9999,tmy=-9999,ripples=[];
+var GRID=40,AMP=30,FREQ=0.015,MA=60;
+
+function Ripple(x,y){
+  this.x=x;this.y=y;this.r=0;
+  this.maxR=Math.max(W,H)*0.8;
+  this.speed=3+Math.random()*2;
+  this.alpha=0.6;
+  this.hue=180+Math.random()*60;
+}
+Ripple.prototype.update=function(){this.r+=this.speed;this.alpha=0.6*(1-this.r/this.maxR);};
+Ripple.prototype.isDead=function(){return this.r>this.maxR;};
+Ripple.prototype.inf=function(px,py){
+  var dx=px-this.x,dy=py-this.y,d=Math.sqrt(dx*dx+dy*dy);
+  return Math.sin(d*0.03-this.r*0.05)*this.alpha*Math.max(0,1-d/200);
+};
+
+function init(){
+  W=canvas.width=window.innerWidth;
+  H=canvas.height=window.innerHeight;
+  ripples=[];
+}
+function draw(){
+  time++;
+  ctx.fillStyle='rgba(12,12,16,0.18)';
+  ctx.fillRect(0,0,W,H);
+  mx+=(tmx-mx)*0.08;my+=(tmy-my)*0.08;
+  if(mx>0&&mx<W&&my>0&&my<H&&time%15===0)ripples.push(new Ripple(mx,my));
+  ripples=ripples.filter(function(r){r.update();return !r.isDead()});
+  var cols=Math.ceil(W/GRID)+1,rows=Math.ceil(H/GRID)+1;
+  var pts=[];
+  for(var iy=0;iy<rows;iy++){
+    pts[iy]=[];
+    for(var ix=0;ix<cols;ix++){
+      var x=ix*GRID,y=iy*GRID;
+      var w1=Math.sin(x*FREQ+time*0.03)*AMP;
+      var w2=Math.sin(y*FREQ+time*0.025)*AMP;
+      var w3=Math.sin((x+y)*FREQ*0.7+time*0.02)*AMP*0.5;
+      var mi=0;
+      for(var i=0;i<ripples.length;i++)mi+=ripples[i].inf(x,y)*MA;
+      var ty=y+w1+w2+w3+mi;
+      pts[iy][ix]={x:x,y:ty};
+      var c=(w1+w2+w3+mi)/(AMP*2.5),n=(c+1)/2;
+      var h,s,l,a;
+      if(n>0.6){h=180+n*40;s=60+n*30;l=60+n*25;a=(n-0.6)/0.4*0.8;}
+      else if(n<0.4){h=220+(0.4-n)*50;s=50+(0.4-n)*30;l=20+(0.4-n)*30;a=(0.4-n)/0.4*0.7;}
+      else{h=200+(n-0.5)*40;s=30+Math.abs(n-0.5)*40;l=40+Math.abs(n-0.5)*20;a=0.2+Math.abs(n-0.5)*0.3;}
+      if(a>0.05){
+        ctx.fillStyle='hsla('+h+','+s+'%,'+l+'%,'+a+')';
+        ctx.beginPath();ctx.arc(x,ty,1.5+a*1.5,0,Math.PI*2);ctx.fill();
+      }
+    }
+  }
+  ctx.lineWidth=0.3;
+  for(var iy=0;iy<rows;iy++){
+    for(var ix=0;ix<cols;ix++){
+      var p=pts[iy][ix];
+      if(ix<cols-1){
+        var pn=pts[iy][ix+1];
+        ctx.strokeStyle='rgba(100,180,220,0.07)';
+        ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(pn.x,pn.y);ctx.stroke();
+      }
+      if(iy<rows-1){
+        var pn=pts[iy+1][ix];
+        ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(pn.x,pn.y);ctx.stroke();
+      }
+    }
+  }
+  for(var i=0;i<ripples.length;i++){
+    var r=ripples[i];
+    ctx.strokeStyle='hsla('+r.hue+',60%,50%,'+(r.alpha*0.4)+')';
+    ctx.lineWidth=1;ctx.beginPath();ctx.arc(r.x,r.y,r.r,0,Math.PI*2);ctx.stroke();
+    ctx.strokeStyle='hsla('+(r.hue+20)+',70%,60%,'+(r.alpha*0.2)+')';
+    ctx.lineWidth=2;ctx.beginPath();ctx.arc(r.x,r.y,r.r*0.6,0,Math.PI*2);ctx.stroke();
+  }
+  var vig=ctx.createRadialGradient(W/2,H/2,H*0.2,W/2,H/2,H*0.9);
+  vig.addColorStop(0,'rgba(12,12,16,0)');vig.addColorStop(1,'rgba(12,12,16,0.5)');
+  ctx.fillStyle=vig;ctx.fillRect(0,0,W,H);
+  requestAnimationFrame(draw);
+}
+window.addEventListener('mousemove',function(e){tmx=e.clientX;tmy=e.clientY;});
+window.addEventListener('click',function(e){ripples.push(new Ripple(e.clientX,e.clientY));});
+window.addEventListener('touchstart',function(e){e.preventDefault();tmx=e.touches[0].clientX;tmy=e.touches[0].clientY;mx=tmx;my=tmy;ripples.push(new Ripple(tmx,tmy));},{passive:false});
+window.addEventListener('touchmove',function(e){e.preventDefault();tmx=e.touches[0].clientX;tmy=e.touches[0].clientY;},{passive:false});
+window.addEventListener('mouseleave',function(){tmx=-9999;tmy=-9999;});
+window.addEventListener('resize',init);
+setTimeout(function(){document.getElementById('text').classList.add('visible');},1200);
+init();draw();
+})();
+</script>
+</body>
+</html>
