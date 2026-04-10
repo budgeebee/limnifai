@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>liminal frequency</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#080810;overflow:hidden;font-family:'Courier New',monospace;cursor:crosshair}
+canvas{display:block;position:fixed;top:0;left:0}
+#overlay{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:rgba(8,8,16,0.9);z-index:20;cursor:pointer;transition:opacity 0.8s}
+#overlay.hidden{opacity:0;pointer-events:none}
+#overlay-text{text-align:center;color:rgba(160,140,200,0.6);font-size:clamp(0.5rem,1.2vw,0.72rem);letter-spacing:0.35em;line-height:2.4;text-transform:lowercase}
+#overlay-text span{display:block}
+#overlay-text .big{font-size:clamp(0.65rem,1.5vw,0.9rem);color:rgba(200,180,255,0.4);letter-spacing:0.5em}
+.liminal-text{position:fixed;bottom:0;left:0;width:100%;text-align:center;padding:0 0 2rem;pointer-events:none;z-index:10;opacity:0;transition:opacity 4s}
+.liminal-text.visible{opacity:1}
+.liminal-text p{font-size:clamp(0.4rem,0.8vw,0.56rem);color:rgba(140,120,180,0.25);letter-spacing:0.4em;text-transform:lowercase;line-height:2.2}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="overlay">
+  <div id="overlay-text">
+    <span>cross</span>
+    <span>the</span>
+    <span>threshold</span>
+    <span class="big">click</span>
+    <span>to</span>
+    <span>enter</span>
+  </div>
+</div>
+<div class="liminal-text" id="text">
+  <p>between</p>
+  <p>two</p>
+  <p>states</p>
+  <p>something</p>
+  <p>becomes</p>
+</div>
+<script>
+(function(){
+var canvas=document.getElementById("c");
+var ctx=canvas.getContext("2d");
+var W,H;
+var audioCtx=null;
+var oscillators=[];
+var masterGain=null;
+var mouseX=-999,mouseY=-999,clickX=-999,clickY=-999;
+var ripples=[];
+var particles=[];
+var started=false;
+var time=0;
+var thresholdY=0;
+var THRESHOLD_COUNT=4;
+var thresholds=[];
+var NOTE_FREQS=[130.81,164.81,196.00,220.00,261.63,293.66,329.63,392.00,440.00,523.25,587.33,659.25];
+
+function initAudio(){
+  audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+  masterGain=audioCtx.createGain();
+  masterGain.gain.value=0;
+  masterGain.connect(audioCtx.destination);
+  masterGain.gain.linearRampToValueAtTime(0.35,audioCtx.currentTime+2);
+}
+
+function playTone(freq,vol,dur){
+  if(!audioCtx)return;
+  var osc=audioCtx.createOscillator();
+  var g=audioCtx.createGain();
+  var filt=audioCtx.createBiquadFilter();
+  filt.type="lowpass";
+  filt.frequency.value=800+freq*1.5;
+  osc.type="sine";
+  osc.frequency.value=freq;
+  g.gain.value=0;
+  g.gain.linearRampToValueAtTime(vol,audioCtx.currentTime+0.02);
+  g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+  osc.connect(filt);
+  filt.connect(g);
+  g.connect(masterGain);
+  osc.start(audioCtx.currentTime);
+  osc.stop(audioCtx.currentTime+dur);
+}
+
+function playChord(indices,vol){
+  for(var i=0;i<indices.length;i++){
+    playTone(NOTE_FREQS[indices[i]%NOTE_FREQS.length],vol*(0.7+i*0.15),1.2+Math.random()*0.8);
+  }
+}
+
+function init(){
+  W=canvas.width=window.innerWidth;
+  H=canvas.height=window.innerHeight;
+  thresholdY=H*0.5;
+  thresholds=[];
+  for(var i=0;i<THRESHOLD_COUNT;i++){
+    thresholds.push({
+      y:thresholdY+(i-THRESHOLD_COUNT/2)*H*0.12,
+      alpha:0,
+      pulse:0
+    });
+  }
+  particles=[];
+  for(var i=0;i<90;i++){
+    particles.push(createParticle());
+  }
+}
+
+function createParticle(x,y){
+  var p={};
+  if(x!==undefined){
+    p.x=x;p.y=y;
+  } else {
+    p.x=Math.random()*W;
+    p.y=Math.random()*H;
+  }
+  p.vx=(Math.random()-0.5)*0.8;
+  p.vy=(Math.random()-0.5)*0.8;
+  p.size=1+Math.random()*2;
+  p.phase=Math.random()*Math.PI*2;
+  p.freqIndex=Math.floor(Math.random()*NOTE_FREQS.length);
+  p.state="above";
+  p.prevY=p.y;
+  p.crossed=false;
+  p.alpha=0.3+Math.random()*0.5;
+  p.hue=220+Math.random()*60;
+  return p;
+}
+
+function drawThreshold(t,i){
+  t.pulse*=0.96;
+  var baseAlpha=0.04+t.pulse*0.3;
+  ctx.strokeStyle="hsla("+(200+i*15)+",50%,"+(50+i*5)+"%,"+baseAlpha+")";
+  ctx.lineWidth=1+t.pulse*2;
+  ctx.setLineDash([4,12]);
+  ctx.beginPath();
+  ctx.moveTo(0,t.y);
+  ctx.lineTo(W,t.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  if(t.pulse>0.05){
+    ctx.strokeStyle="hsla("+(200+i*15)+",60%,"+(60+i*5)+"%,"+(t.pulse*0.15)+")";
+    ctx.lineWidth=8;
+    ctx.beginPath();
+    ctx.moveTo(0,t.y);
+    ctx.lineTo(W,t.y);
+    ctx.stroke();
+  }
+}
+
+function draw(){
+  if(!started)return;
+  time++;
+  ctx.fillStyle="rgba(8,8,16,0.12)";
+  ctx.fillRect(0,0,W,H);
+  mx=mouseX;my=mouseY;
+  if(clickX>=0){
+    ripples.push({x:clickX,y:clickY,r:0,alpha:0.6});
+    clickX=-999;
+  }
+  for(var i=ripples.length-1;i>=0;i--){
+    var r=ripples[i];
+    r.r+=2.5;
+    r.alpha*=0.985;
+    for(var j=0;j<particles.length;j++){
+      var p=particles[j];
+      var dx=p.x-r.x,dy=p.y-r.y;
+      var dist=Math.sqrt(dx*dx+dy*dy);
+      if(dist<1)dist=1;
+      var force=(1-dist/r.r)*0.5;
+      if(force>0){
+        p.vx+=force*(dx/dist)*0.3;
+        p.vy+=force*(dy/dist)*0.3;
+      }
+    }
+    if(r.r>Math.max(W,H)*1.2)ripples.splice(i,1);
+  }
+  for(var i=0;i<thresholds.length;i++){
+    drawThreshold(thresholds[i],i);
+  }
+  for(var i=0;i<particles.length;i++){
+    var p=particles[i];
+    p.prevY=p.y;
+    var angle=noise(p.x*0.003,p.y*0.003,time*0.008)*Math.PI*2;
+    p.vx+=Math.cos(angle)*0.04;
+    p.vy+=Math.sin(angle)*0.04;
+    p.vx*=0.92;
+    p.vy*=0.92;
+    var speed=Math.sqrt(p.vx*p.vx+p.vy*p.vy);
+    if(speed>2){
+      p.vx=p.vx*2/speed;
+      p.vy=p.vy*2/speed;
+    }
+    p.x+=p.vx;
+    p.y+=p.vy;
+    if(p.x<0)p.x=W;
+    if(p.x>W)p.x=0;
+    if(p.y<0)p.y=H;
+    if(p.y>H)p.y=0;
+    var crossing=-1;
+    for(var ti=0;ti<thresholds.length;ti++){
+      var t=thresholds[ti];
+      if((p.prevY<t.y&&p.y>=t.y)||(p.prevY>t.y&&p.y<=t.y)){
+        crossing=ti;
+        break;
+      }
+    }
+    if(crossing>=0&&!p.crossed){
+      p.crossed=true;
+      thresholds[crossing].pulse=1;
+      var chord=[p.freqIndex,(p.freqIndex+3)%12,(p.freqIndex+7)%12,(p.freqIndex+10)%12];
+      playChord(chord,0.08+p.alpha*0.06);
+      for(var j=0;j<3;j++){
+        var q={};
+        q.x=p.x;q.y=p.y;
+        q.vx=(Math.random()-0.5)*3;
+        q.vy=(Math.random()-0.5)*3;
+        q.size=p.size*0.5;
+        q.alpha=0.8;
+        q.decay=0.04;
+        q.hue=p.hue;
+        particles.push(q);
+      }
+    } else if(crossing<0) {
+      p.crossed=false;
+    }
+    var nearMouse=Math.sqrt((p.x-mx)*(p.x-mx)+(p.y-my)*(p.y-my))<80;
+    var a=p.alpha*(nearMouse?0.9:0.6);
+    ctx.fillStyle="hsla("+p.hue+",50%,"+(50+p.alpha*30)+"%,"+a+")";
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,p.size*(nearMouse?1.5:1),0,Math.PI*2);
+    ctx.fill();
+  }
+  for(var i=particles.length-1;i>=0;i--){
+    var p=particles[i];
+    if(p.decay){
+      p.x+=p.vx;p.y+=p.vy;
+      p.vx*=0.92;p.vy*=0.92;
+      p.alpha-=p.decay;
+      if(p.alpha<=0){particles.splice(i,1);continue;}
+      ctx.fillStyle="hsla("+p.hue+",60%,"+(60+p.alpha*30)+"%,"+p.alpha+")";
+      ctx.beginPath();
+      ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
+      ctx.fill();
+    }
+  }
+  var vig=ctx.createRadialGradient(W/2,H/2,H*0.15,W/2,H/2,H*0.85);
+  vig.addColorStop(0,"rgba(8,8,16,0)");
+  vig.addColorStop(1,"rgba(8,8,16,0.45)");
+  ctx.fillStyle=vig;
+  ctx.fillRect(0,0,W,H);
+  if(time%180===1){
+    for(var i=0;i<thresholds.length;i++){
+      if(thresholds[i].pulse<0.01){
+        thresholds[i].y=thresholdY+(Math.random()-0.5)*H*0.4;
+      }
+    }
+  }
+  requestAnimationFrame(draw);
+}
+
+function noise(x,y,z){
+  return(
+    Math.sin(x*1.0+y*1.3+z*0.7)*0.5+
+    Math.sin(x*1.5+y*0.8+z*1.2)*0.3+
+    Math.sin(x*0.7+y*1.7+z*1.5)*0.2
+  );
+}
+
+document.getElementById("overlay").addEventListener("click",function(){
+  if(started)return;
+  started=true;
+  initAudio();
+  init();
+  draw();
+  this.classList.add("hidden");
+  setTimeout(function(){
+    document.getElementById("text").classList.add("visible");
+  },1500);
+});
+
+document.addEventListener("mousemove",function(e){
+  mouseX=e.clientX;
+  mouseY=e.clientY;
+});
+
+document.addEventListener("click",function(e){
+  clickX=e.clientX;
+  clickY=e.clientY;
+});
+
+document.addEventListener("touchstart",function(e){
+  e.preventDefault();
+  if(!started){
+    started=true;
+    initAudio();
+    init();
+    draw();
+    document.getElementById("overlay").classList.add("hidden");
+    setTimeout(function(){
+      document.getElementById("text").classList.add("visible");
+    },1500);
+  }
+  clickX=e.touches[0].clientX;
+  clickY=e.touches[0].clientY;
+  mouseX=clickX;
+  mouseY=clickY;
+},{passive:false});
+
+window.addEventListener("resize",function(){
+  W=canvas.width=window.innerWidth;
+  H=canvas.height=window.innerHeight;
+  thresholdY=H*0.5;
+});
+
+})();
+</script>
+</body>
+</html>
