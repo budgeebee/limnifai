@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>laminal flow</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#06060e;overflow:hidden;font-family:'Courier New',monospace;cursor:crosshair}
+canvas{display:block;position:fixed;top:0;left:0}
+.txt{position:fixed;bottom:8%;left:50%;transform:translateX(-50%);text-align:center;opacity:0;transition:opacity 8s;pointer-events:none;z-index:10}
+.txt.visible{opacity:1}
+.txt p{font-size:clamp(0.35rem,0.8vw,0.5rem);color:rgba(160,200,220,0.18);letter-spacing:0.6em;text-transform:lowercase;line-height:2.6}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="txt" id="t">
+  <p>between</p>
+  <p>laminar</p>
+  <p>and</p>
+  <p>turbulent</p>
+  <p>the</p>
+  <p>shear</p>
+  <p>line</p>
+</div>
+<script>
+(function(){
+var canvas=document.getElementById("c");
+var ctx=canvas.getContext("2d");
+var W,H;
+var mx=0,my=0;
+var time=0;
+var phase=0;
+var laminarY=0;
+var streamlines=[];
+var turbulenceParticles=[];
+var ambientPhase=0;
+
+W=canvas.width=window.innerWidth;
+H=canvas.height=window.innerHeight;
+laminarY=H*0.42;
+
+function init(){
+  streamlines=[];
+  for(var i=0;i<28;i++){
+    streamlines.push({
+      y:50+i*(H-100)/28,
+      amp:20+Math.random()*60,
+      freq:0.003+Math.random()*0.005,
+      speed:0.4+Math.random()*0.8,
+      phase:Math.random()*Math.PI*2,
+      width:0.5+Math.random()*1.5,
+      alpha:0.04+Math.random()*0.12,
+      hue:190+Math.random()*50
+    });
+  }
+  turbulenceParticles=[];
+  for(var i=0;i<180;i++){
+    turbulenceParticles.push(newTP());
+  }
+  setTimeout(function(){
+    document.getElementById("t").classList.add("visible');
+  },1500);
+}
+
+function newTP(){
+  return {
+    x:Math.random()*W,
+    y:Math.random()*H,
+    vx:(Math.random()-0.5)*0.8,
+    vy:(Math.random()-0.5)*0.8,
+    size:1+Math.random()*2.5,
+    life:0,
+    maxLife:80+Math.random()*200,
+    hue:180+Math.random()*80,
+    crossed:false
+  };
+}
+
+function draw(){
+  time++;
+  phase+=0.003;
+  ambientPhase+=0.008;
+  ctx.fillStyle="rgba(6,6,14,0.18)";
+  ctx.fillRect(0,0,W,H);
+  var shearY=laminarY+Math.sin(phase*0.7)*20;
+  var mx01=mx/W;
+  var chaosFactor=0.3+mx01*0.7;
+  for(var i=0;i<streamlines.length;i++){
+    var s=streamlines[i];
+    var aboveShear=s.y<shearY;
+    var wave=Math.sin(s.y*s.freq+time*s.speed*0.05+phase+s.phase);
+    var lateral=wave*s.amp*(aboveShear?0.4:chaosFactor*1.8);
+    var cx=W/2+lateral;
+    var sideDisp=Math.sin(time*0.02+s.phase)*s.amp*0.3*(aboveShear?0:1);
+    ctx.save();
+    var grad=ctx.createLinearGradient(cx-sideDisp-2,0,cx+sideDisp+2,0);
+    grad.addColorStop(0,"transparent");
+    grad.addColorStop(0.3,"hsla("+s.hue+",40%,"+(aboveShear?55:35)+"%,"+s.alpha+")");
+    grad.addColorStop(0.5,"hsla("+s.hue+",50%,"+(aboveShear?65:45)+"%,"+(aboveShear?s.alpha:s.alpha*1.8)+")");
+    grad.addColorStop(0.7,"hsla("+s.hue+",40%,"+(aboveShear?55:35)+"%,"+s.alpha+")");
+    grad.addColorStop(1,"transparent");
+    ctx.strokeStyle=grad;
+    ctx.lineWidth=s.width*(aboveShear?1:1.5);
+    ctx.beginPath();
+    for(var px=Math.max(0,cx-sideDisp-200);px<Math.min(W,cx+sideDisp+200);px+=3){
+      var relX=(px-cx)/100;
+      var wy=Math.sin(px*s.freq*0.5+time*s.speed*0.05+phase+s.phase);
+      var turb=aboveShear?0:Math.sin(px*0.04+time*0.08)*chaosFactor*40;
+      var py=s.y+wy*s.amp*0.3+turb;
+      if(px===Math.max(0,cx-sideDisp-200))ctx.moveTo(px,py);else ctx.lineTo(px,py);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+  ctx.save();
+  var lineNoise=0;
+  for(var i=0;i<60;i++){
+    lineNoise+=Math.sin(i*0.3+time*0.05)*chaosFactor*2;
+  }
+  var edgeGrad=ctx.createLinearGradient(0,shearY-35+lineNoise,0,shearY+35+lineNoise);
+  edgeGrad.addColorStop(0,"transparent");
+  edgeGrad.addColorStop(0.3,"hsla(200,30%,"+(30+Math.sin(phase)*10)+"%,0.08)");
+  edgeGrad.addColorStop(0.5,"hsla(210,40%,"+(40+Math.sin(phase*1.3)*15)+"%,0.25)");
+  edgeGrad.addColorStop(0.7,"hsla(200,30%,"+(30+Math.sin(phase)*10)+"%,0.08)");
+  edgeGrad.addColorStop(1,"transparent");
+  ctx.fillStyle=edgeGrad;
+  ctx.fillRect(0,shearY-35+lineNoise,W,70);
+  for(var i=0;i<18;i++){
+    var ex=(i/18)*W+Math.sin(i*0.7+time*0.06)*20;
+    var ey=shearY+Math.sin(ex*0.03+time*0.04)*15+lineNoise;
+    var es=1+Math.sin(time*0.1+i)*1.5;
+    ctx.fillStyle="hsla(205,50%,75%,"+(0.2+Math.sin(time*0.08+i)*0.15)+")";
+    ctx.beginPath();
+    ctx.arc(ex,ey,es,0,Math.PI*2);
+    ctx.fill();
+  }
+  ctx.restore();
+  ctx.save();
+  for(var i=0;i<turbulenceParticles.length;i++){
+    var p=turbulenceParticles[i];
+    p.life++;
+    if(p.y>shearY){
+      p.vx+=(Math.random()-0.5)*chaosFactor*0.3;
+      p.vy+=(Math.random()-0.5)*chaosFactor*0.3;
+      var sp=Math.sqrt(p.vx*p.vx+p.vy*p.vy);
+      if(sp>2){p.vx=p.vx*2/sp;p.vy=p.vy*2/sp;}
+    }
+    p.x+=p.vx;
+    p.y+=p.vy;
+    p.vx*=0.97;
+    p.vy*=0.97;
+    if(p.x<0)p.x=W;
+    if(p.x>W)p.x=0;
+    if(p.y<0)p.y=H;
+    if(p.y>H)p.y=0;
+    if(p.life>p.maxLife){
+      var wasAbove=p.y<shearY;
+      Object.assign(p,newTP());
+      p.y=wasAbove?Math.random()*shearY:shearY+Math.random()*(H-shearY);
+    }
+    var above=p.y<shearY;
+    var brightness=above?55:35+chaosFactor*25;
+    var a=above?0.3:0.5+chaosFactor*0.3;
+    a*=(1-p.life/p.maxLife)*0.8+0.2;
+    ctx.fillStyle="hsla("+p.hue+",40%,"+brightness+"%,"+a+")";
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,p.size*(above?1:1.3),0,Math.PI*2);
+    ctx.fill();
+  }
+  ctx.restore();
+  ctx.save();
+  if(mx>0){
+    var mouseZone=my<shearY?"order":"chaos";
+    for(var i=0;i<8;i++){
+      var ang=(i/8)*Math.PI*2+time*0.02;
+      var dist=40+i*12;
+      var px=mx+Math.cos(ang)*dist;
+      var py=my+Math.sin(ang)*dist;
+      var ps=3-i*0.3;
+      ctx.fillStyle="hsla("+(my<shearY?200:260)+",50%,"+(my<shearY?70:60)+"%,"+(0.15-i*0.015)+")";
+      ctx.beginPath();
+      ctx.arc(px,py,ps,0,Math.PI*2);
+      ctx.fill();
+    }
+    ctx.strokeStyle="hsla("+(my<shearY?200:260)+",40%,"+(my<shearY?50:40)+"%,"+(0.1+Math.sin(time*0.1)*0.05)+")";
+    ctx.lineWidth=0.5;
+    ctx.beginPath();
+    ctx.arc(mx,my,100,0,Math.PI*2);
+    ctx.stroke();
+  }
+  ctx.restore();
+  var vig=ctx.createRadialGradient(W/2,H/2,H*0.05,W/2,H/2,H*0.9);
+  vig.addColorStop(0,"rgba(6,6,14,0)");
+  vig.addColorStop(1,"rgba(6,6,14,0.5)");
+  ctx.fillStyle=vig;
+  ctx.fillRect(0,0,W,H);
+  requestAnimationFrame(draw);
+}
+
+window.addEventListener("mousemove",function(e){mx=e.clientX;my=e.clientY;});
+window.addEventListener("click",function(e){
+  mx=e.clientX;my=e.clientY;
+  for(var i=0;i<8;i++){
+    var p=newTP();
+    p.x=e.clientX;p.y=e.clientY;
+    p.vx=(Math.random()-0.5)*3;
+    p.vy=(Math.random()-0.5)*3;
+    p.maxLife=120;
+    p.size=2+Math.random()*2;
+    p.hue=180+Math.random()*80;
+    turbulenceParticles.push(p);
+  }
+  if(turbulenceParticles.length>350){
+    turbulenceParticles.splice(0,8);
+  }
+});
+window.addEventListener("touchmove",function(e){
+  e.preventDefault();
+  mx=e.touches[0].clientX;
+  my=e.touches[0].clientY;
+},{passive:false});
+window.addEventListener("touchstart",function(e){
+  e.preventDefault();
+  mx=e.touches[0].clientX;
+  my=e.touches[0].clientY;
+  var p=newTP();
+  p.x=mx;p.y=my;
+  p.vx=(Math.random()-0.5)*3;
+  p.vy=(Math.random()-0.5)*3;
+  p.maxLife=120;
+  turbulenceParticles.push(p);
+},{passive:false});
+window.addEventListener("resize",function(){
+  W=canvas.width=window.innerWidth;
+  H=canvas.height=window.innerHeight;
+  laminarY=H*0.42;
+  streamlines=[];
+  init();
+});
+init();draw();
+})();
+</script>
+</body>
+</html>
