@@ -154,5 +154,13 @@
   {
     "file": "laminal-flow.html",
     "title": "Laminal Flow"
+  },
+  {
+    "file": "precipitate.html",
+    "title": "Precipitate"
+  },
+  {
+    "file": "threshold-frequency.html",
+    "title": "Threshold Frequency"
   }
 ]
