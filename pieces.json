@@ -162,5 +162,9 @@
   {
     "file": "threshold-frequency.html",
     "title": "Threshold Frequency"
+  },
+  {
+    "file": "dissolving-boundary.html",
+    "title": "Dissolving Boundary"
   }
 ]

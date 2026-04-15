@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dissolving Boundary</title>
+    <script src="https://cdn.jsdelivr.net/npm/tone@14.8.49/build/Tone.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0a0a0f;
+            overflow: hidden;
+            font-family: 'Georgia', serif;
+            cursor: crosshair;
+        }
+        canvas {
+            display: block;
+            position: fixed;
+            top: 0;
+            left: 0;
+        }
+        #overlay {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: rgba(200, 180, 220, 0.7);
+            pointer-events: none;
+            z-index: 10;
+            transition: opacity 3s ease;
+        }
+        #overlay h1 {
+            font-size: 2.5rem;
+            font-weight: 300;
+            letter-spacing: 0.3em;
+            margin-bottom: 1rem;
+            text-transform: lowercase;
+        }
+        #overlay p {
+            font-size: 1rem;
+            font-style: italic;
+            line-height: 1.8;
+            max-width: 500px;
+            opacity: 0.8;
+        }
+        #overlay.fade { opacity: 0; }
+        #start {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(20, 20, 35, 0.9);
+            border: 1px solid rgba(150, 120, 180, 0.3);
+            color: rgba(200, 180, 220, 0.9);
+            padding: 2rem 3rem;
+            font-size: 1rem;
+            letter-spacing: 0.2em;
+            cursor: pointer;
+            z-index: 20;
+            transition: all 0.5s ease;
+            text-transform: lowercase;
+        }
+        #start:hover {
+            background: rgba(30, 30, 50, 0.95);
+            border-color: rgba(180, 150, 210, 0.5);
+        }
+        #start.hidden { opacity: 0; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <div id="overlay">
+        <h1>Dissolving Boundary</h1>
+        <p>where skin becomes air<br>where you end and i begin<br>is a question the wind asks<br>as it passes through</p>
+    </div>
+    <button id="start">touch to dissolve</button>
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const overlay = document.getElementById('overlay');
+        const startBtn = document.getElementById('start');
+        
+        let width, height;
+        let mouse = { x: -1000, y: -1000, active: false };
+        let particles = [];
+        let membranes = [];
+        let audioStarted = false;
+        let time = 0;
+        
+        // Audio components
+        let ambientSynth, membraneSynth, windSynth;
+        let ambientLoop, membraneLoop;
+        
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        }
+        resize();
+        window.addEventListener('resize', resize);
+        
+        // Particle class - represents the dissolving self
+        class Particle {
+            constructor(x, y, isCore = false) {
+                this.x = x;
+                this.y = y;
+                this.originX = x;
+                this.originY = y;
+                this.vx = (Math.random() - 0.5) * 0.5;
+                this.vy = (Math.random() - 0.5) * 0.5;
+                this.size = isCore ? Math.random() * 2 + 2 : Math.random() * 1.5 + 0.5;
+                this.isCore = isCore;
+                this.life = 1;
+                this.maxLife = Math.random() * 300 + 200;
+                this.hue = isCore ? 280 + Math.random() * 40 : 200 + Math.random() * 60;
+                this.dissolving = false;
+                this.dissolveRate = 0;
+            }
+            
+            update() {
+                // Mouse interaction - dissolution
+                const dx = mouse.x - this.x;
+                const dy = mouse.y - this.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const interactionRadius = 150;
+                
+                if (dist < interactionRadius && mouse.active) {
+                    this.dissolving = true;
+                    this.dissolveRate = Math.max(this.dissolveRate, (interactionRadius - dist) / interactionRadius * 0.03);
+                    
+                    // Push away from mouse
+                    const force = (interactionRadius - dist) / interactionRadius * 2;
+                    this.vx -= (dx / dist) * force * 0.1;
+                    this.vy -= (dy / dist) * force * 0.1;
+                    
+                    // Audio feedback
+                    if (audioStarted && Math.random() < 0.01) {
+                        playDissolveNote();
+                    }
+                }
+                
+                if (this.dissolving) {
+                    this.life -= this.dissolveRate;
+                    this.size *= 0.995;
+                    this.hue += 1; // Shift color as dissolving
+                }
+                
+                // Return to origin if not dissolving
+                if (!this.dissolving && this.life < 1) {
+                    this.life += 0.01;
+                    const returnForce = 0.02;
+                    this.vx += (this.originX - this.x) * returnForce;
+                    this.vy += (this.originY - this.y) * returnForce;
+                }
+                
+                // Apply velocity with damping
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vx *= 0.98;
+                this.vy *= 0.98;
+                
+                // Gentle drift
+                this.x += Math.sin(time * 0.001 + this.originY * 0.01) * 0.2;
+                this.y += Math.cos(time * 0.001 + this.originX * 0.01) * 0.2;
+                
+                // Respawn if fully dissolved
+                if (this.life <= 0) {
+                    this.respawn();
+                }
+            }
+            
+            respawn() {
+                this.x = this.originX + (Math.random() - 0.5) * 50;
+                this.y = this.originY + (Math.random() - 0.5) * 50;
+                this.life = 0;
+                this.size = this.isCore ? Math.random() * 2 + 2 : Math.random() * 1.5 + 0.5;
+                this.dissolving = false;
+                this.dissolveRate = 0;
+                this.hue = this.isCore ? 280 + Math.random() * 40 : 200 + Math.random() * 60;
+                
+                // Fade in
+                const fadeIn = setInterval(() => {
+                    this.life += 0.05;
+                    if (this.life >= 1) {
+                        this.life = 1;
+                        clearInterval(fadeIn);
+                    }
+                }, 50);
+            }
+            
+            draw() {
+                const alpha = this.life * (this.isCore ? 0.8 : 0.4);
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fillStyle = `hsla(${this.hue}, 70%, ${this.isCore ? 60 : 70}%, ${alpha})`;
+                ctx.fill();
+                
+                // Glow for core particles
+                if (this.isCore) {
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.size * 3, 0, Math.PI * 2);
+                    ctx.fillStyle = `hsla(${this.hue}, 70%, 60%, ${alpha * 0.2})`;
+                    ctx.fill();
+                }
+            }
+        }
+        
+        // Membrane class - the boundary that breathes
+        class Membrane {
+            constructor(centerX, centerY, radius, phase) {
+                this.centerX = centerX;
+                this.centerY = centerY;
+                this.baseRadius = radius;
+                this.radius = radius;
+                this.phase = phase;
+                this.points = [];
+                this.numPoints = 60;
+                
+                for (let i = 0; i < this.numPoints; i++) {
+                    const angle = (i / this.numPoints) * Math.PI * 2;
+                    this.points.push({
+                        angle: angle,
+                        offset: Math.random() * 20,
+                        speed: 0.001 + Math.random() * 0.002
+                    });
+                }
+            }
+            
+            update() {
+                // Breathing effect
+                this.radius = this.baseRadius + Math.sin(time * 0.001 + this.phase) * 20;
+                
+                // Mouse interaction - membrane weakens
+                const dx = mouse.x - this.centerX;
+                const dy = mouse.y - this.centerY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                
+                if (dist < this.radius + 100 && mouse.active) {
+                    this.radius += (dist - this.radius) * 0.1;
+                }
+                
+                // Update points
+                this.points.forEach((point, i) => {
+                    point.offset = Math.sin(time * point.speed + i * 0.5) * 15;
+                });
+            }
+            
+            draw() {
+                ctx.beginPath();
+                
+                for (let i = 0; i <= this.numPoints; i++) {
+                    const idx = i % this.numPoints;
+                    const point = this.points[idx];
+                    const r = this.radius + point.offset;
+                    const x = this.centerX + Math.cos(point.angle) * r;
+                    const y = this.centerY + Math.sin(point.angle) * r;
+                    
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        // Smooth curve
+                        const prevIdx = (idx - 1 + this.numPoints) % this.numPoints;
+                        const prevPoint = this.points[prevIdx];
+                        const prevR = this.radius + prevPoint.offset;
+                        const prevX = this.centerX + Math.cos(prevPoint.angle) * prevR;
+                        const prevY = this.centerY + Math.sin(prevPoint.angle) * prevR;
+                        
+                        const cpX = (prevX + x) / 2;
+                        const cpY = (prevY + y) / 2;
+                        ctx.quadraticCurveTo(prevX, prevY, cpX, cpY);
+                    }
+                }
+                
+                ctx.closePath();
+                
+                // Gradient stroke
+                const gradient = ctx.createRadialGradient(
+                    this.centerX, this.centerY, 0,
+                    this.centerX, this.centerY, this.radius
+                );
+                gradient.addColorStop(0, 'rgba(150, 100, 200, 0.1)');
+                gradient.addColorStop(0.5, 'rgba(180, 120, 220, 0.3)');
+                gradient.addColorStop(1, 'rgba(200, 150, 240, 0.1)');
+                
+                ctx.strokeStyle = gradient;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.fillStyle = 'rgba(100, 50, 150, 0.05)';
+                ctx.fill();
+            }
+        }
+        
+        // Initialize particles in a cloud formation
+        function initParticles() {
+            particles = [];
+            const centerX = width / 2;
+            const centerY = height / 2;
+            
+            // Core cluster
+            for (let i = 0; i < 80; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const r = Math.random() * 100;
+                const x = centerX + Math.cos(angle) * r;
+                const y = centerY + Math.sin(angle) * r;
+                particles.push(new Particle(x, y, true));
+            }
+            
+            // Outer cloud
+            for (let i = 0; i < 200; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const r = 100 + Math.random() * 200;
+                const x = centerX + Math.cos(angle) * r;
+                const y = centerY + Math.sin(angle) * r;
+                particles.push(new Particle(x, y, false));
+            }
+        }
+        
+        // Initialize membranes
+        function initMembranes() {
+            membranes = [];
+            const centerX = width / 2;
+            const centerY = height / 2;
+            
+            membranes.push(new Membrane(centerX, centerY, 150, 0));
+            membranes.push(new Membrane(centerX, centerY, 250, Math.PI / 2));
+            membranes.push(new Membrane(centerX, centerY, 350, Math.PI));
+        }
+        
+        // Audio setup
+        function initAudio() {
+            // Ambient drone
+            ambientSynth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: 'sine' },
+                envelope: { attack: 2, decay: 1, sustain: 0.8, release: 4 }
+            }).toDestination();
+            ambientSynth.volume.value = -20;
+            
+            // Membrane resonance
+            membraneSynth = new Tone.MembraneSynth({
+                pitchDecay: 0.05,
+                octaves: 4,
+                oscillator: { type: 'sine' },
+                envelope: { attack: 0.001, decay: 0.4, sustain: 0.01, release: 1.4 }
+            }).toDestination();
+            membraneSynth.volume.value = -25;
+            
+            // Wind/dissolution sound
+            windSynth = new Tone.NoiseSynth({
+                noise: { type: 'pink' },
+                envelope: { attack: 1, decay: 0.1, sustain: 0, release: 2 }
+            }).toDestination();
+            windSynth.volume.value = -30;
+            
+            // Reverb for space
+            const reverb = new Tone.Reverb({ decay: 5, wet: 0.5 }).toDestination();
+            ambientSynth.connect(reverb);
+            membraneSynth.connect(reverb);
+            windSynth.connect(reverb);
+        }
+        
+        function playAmbientChord() {
+            if (!audioStarted) return;
+            const chords = [
+                ['C3', 'E3', 'G3', 'B3'],
+                ['A2', 'C3', 'E3', 'G3'],
+                ['F2', 'A2', 'C3', 'E3'],
+                ['G2', 'B2', 'D3', 'F3']
+            ];
+            const chord = chords[Math.floor(Math.random() * chords.length)];
+            ambientSynth.triggerAttackRelease(chord, '4n');
+        }
+        
+        function playDissolveNote() {
+            if (!audioStarted) return;
+            const notes = ['C4', 'D4', 'E4', 'G4', 'A4', 'C5'];
+            const note = notes[Math.floor(Math.random() * notes.length)];
+            membraneSynth.triggerAttackRelease(note, '8n');
+            
+            if (Math.random() < 0.3) {
+                windSynth.triggerAttackRelease('2n');
+            }
+        }
+        
+        // Start audio
+        async function startAudio() {
+            await Tone.start();
+            initAudio();
+            audioStarted = true;
+            
+            // Ambient loop
+            ambientLoop = new Tone.Loop(() => {
+                playAmbientChord();
+            }, '4n').start(0);
+            
+            Tone.Transport.bpm.value = 60;
+            Tone.Transport.start();
+            
+            // Fade out overlay
+            setTimeout(() => {
+                overlay.classList.add('fade');
+            }, 2000);
+        }
+        
+        // Mouse/touch events
+        canvas.addEventListener('mousemove', (e) => {
+            mouse.x = e.clientX;
+            mouse.y = e.clientY;
+            mouse.active = true;
+        });
+        
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            mouse.x = e.touches[0].clientX;
+            mouse.y = e.touches[0].clientY;
+            mouse.active = true;
+        });
+        
+        canvas.addEventListener('mouseleave', () => {
+            mouse.active = false;
+        });
+        
+        canvas.addEventListener('touchend', () => {
+            mouse.active = false;
+        });
+        
+        // Start button
+        startBtn.addEventListener('click', () => {
+            startBtn.classList.add('hidden');
+            startAudio();
+        });
+        
+        // Animation loop
+        function animate() {
+            time++;
+            
+            // Clear with trail
+            ctx.fillStyle = 'rgba(10, 10, 15, 0.15)';
+            ctx.fillRect(0, 0, width, height);
+            
+            // Update and draw membranes
+            membranes.forEach(membrane => {
+                membrane.update();
+                membrane.draw();
+            });
+            
+            // Update and draw particles
+            particles.forEach(particle => {
+                particle.update();
+                particle.draw();
+            });
+            
+            // Connect nearby particles with faint lines
+            ctx.strokeStyle = 'rgba(150, 120, 180, 0.05)';
+            ctx.lineWidth = 0.5;
+            
+            for (let i = 0; i < particles.length; i++) {
+                for (let j = i + 1; j < particles.length; j++) {
+                    const dx = particles[i].x - particles[j].x;
+                    const dy = particles[i].y - particles[j].y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < 60) {
+                        ctx.beginPath();
+                        ctx.moveTo(particles[i].x, particles[i].y);
+                        ctx.lineTo(particles[j].x, particles[j].y);
+                        ctx.stroke();
+                    }
+                }
+            }
+            
+            requestAnimationFrame(animate);
+        }
+        
+        // Initialize
+        initParticles();
+        initMembranes();
+        animate();
+    </script>
+</body>
+</html>
