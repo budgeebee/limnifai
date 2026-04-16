@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Metamorphosis</title>
+    <script src="https://cdn.jsdelivr.net/npm/tone@14.8.49/build/Tone.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0a0a0f;
+            overflow: hidden;
+            font-family: 'Georgia', serif;
+        }
+        canvas {
+            display: block;
+            cursor: crosshair;
+        }
+        #poem {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: rgba(200, 180, 220, 0.7);
+            pointer-events: none;
+            z-index: 10;
+            transition: opacity 2s ease;
+        }
+        #poem h1 {
+            font-size: 2.5rem;
+            font-weight: 300;
+            letter-spacing: 0.3em;
+            margin-bottom: 1rem;
+            text-transform: uppercase;
+            color: rgba(255, 200, 150, 0.9);
+            text-shadow: 0 0 30px rgba(255, 150, 100, 0.5);
+        }
+        #poem p {
+            font-size: 1.1rem;
+            line-height: 2;
+            font-style: italic;
+            opacity: 0.8;
+        }
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 20;
+            text-align: center;
+        }
+        button {
+            background: rgba(255, 150, 100, 0.2);
+            border: 1px solid rgba(255, 150, 100, 0.5);
+            color: rgba(255, 200, 150, 0.9);
+            padding: 10px 25px;
+            font-family: 'Georgia', serif;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.2em;
+        }
+        button:hover {
+            background: rgba(255, 150, 100, 0.4);
+            box-shadow: 0 0 20px rgba(255, 150, 100, 0.3);
+        }
+        #stage-indicator {
+            position: absolute;
+            top: 30px;
+            right: 30px;
+            color: rgba(200, 180, 220, 0.5);
+            font-size: 0.8rem;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+        }
+    </style>
+</head>
+<body>
+    <div id="poem">
+        <h1>Metamorphosis</h1>
+        <p>
+            between what was<br>
+            and what will be<br>
+            the chrysalis holds its breath<br>
+            <br>
+            touch to hasten the becoming
+        </p>
+    </div>
+    <div id="stage-indicator">caterpillar</div>
+    <div id="controls">
+        <button id="audioBtn">Begin Sound</button>
+    </div>
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const stageIndicator = document.getElementById('stage-indicator');
+        
+        let width, height;
+        let mouse = { x: 0, y: 0, active: false };
+        let audioStarted = false;
+        let metamorphosisStage = 0; // 0: caterpillar, 1: chrysalis, 2: butterfly
+        let stageProgress = 0;
+        
+        // Audio components
+        let droneSynth, shimmerSynth, chimeSynth;
+        let baseFreq = 110; // A2
+        
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        }
+        resize();
+        window.addEventListener('resize', resize);
+        
+        // Mouse tracking
+        canvas.addEventListener('mousemove', (e) => {
+            mouse.x = e.clientX;
+            mouse.y = e.clientY;
+            mouse.active = true;
+        });
+        canvas.addEventListener('touchmove', (e) => {
+            mouse.x = e.touches[0].clientX;
+            mouse.y = e.touches[0].clientY;
+            mouse.active = true;
+        });
+        canvas.addEventListener('mousedown', () => {
+            mouse.active = true;
+            accelerateMetamorphosis();
+        });
+        canvas.addEventListener('touchstart', () => {
+            mouse.active = true;
+            accelerateMetamorphosis();
+        });
+        
+        function accelerateMetamorphosis() {
+            stageProgress += 0.15;
+            if (stageProgress >= 1) {
+                stageProgress = 0;
+                metamorphosisStage = (metamorphosisStage + 1) % 3;
+                updateStageIndicator();
+                playStageTransitionSound();
+            }
+            updateAudio();
+        }
+        
+        function updateStageIndicator() {
+            const stages = ['caterpillar', 'chrysalis', 'butterfly'];
+            stageIndicator.textContent = stages[metamorphosisStage];
+        }
+        
+        // Particle system representing transformation states
+        class Particle {
+            constructor() {
+                this.reset();
+            }
+            
+            reset() {
+                this.x = Math.random() * width;
+                this.y = Math.random() * height;
+                this.vx = (Math.random() - 0.5) * 2;
+                this.vy = (Math.random() - 0.5) * 2;
+                this.life = Math.random() * 100 + 50;
+                this.maxLife = this.life;
+                this.size = Math.random() * 3 + 1;
+                this.hue = Math.random() * 60 + 100; // green to blue
+            }
+            
+            update() {
+                // Stage-specific behavior
+                if (metamorphosisStage === 0) {
+                    // Caterpillar: crawling, segmented, earthbound
+                    this.vy += 0.05; // gravity
+                    this.vx *= 0.98;
+                    this.vy *= 0.98;
+                    this.hue = 60 + Math.random() * 40; // green-yellow
+                    
+                    // Mouse attraction (food seeking)
+                    if (mouse.active) {
+                        const dx = mouse.x - this.x;
+                        const dy = mouse.y - this.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        if (dist < 200) {
+                            this.vx += dx * 0.0005;
+                            this.vy += dy * 0.0005;
+                        }
+                    }
+                    
+                } else if (metamorphosisStage === 1) {
+                    // Chrysalis: suspended, pulsing, contained
+                    this.vx *= 0.95;
+                    this.vy *= 0.95;
+                    const centerX = width / 2;
+                    const centerY = height / 2;
+                    const dx = centerX - this.x;
+                    const dy = centerY - this.y;
+                    this.vx += dx * 0.001;
+                    this.vy += dy * 0.001;
+                    this.hue = 280 + Math.sin(Date.now() * 0.001) * 40; // purple pulsing
+                    
+                } else {
+                    // Butterfly: floating, emergent, ascending
+                    this.vy -= 0.02; // lift
+                    this.vx += Math.sin(Date.now() * 0.001 + this.y * 0.01) * 0.1;
+                    this.hue = 320 + Math.random() * 60; // pink-orange
+                    
+                    // Mouse repulsion (free flight)
+                    if (mouse.active) {
+                        const dx = mouse.x - this.x;
+                        const dy = mouse.y - this.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        if (dist < 150) {
+                            this.vx -= dx * 0.002;
+                            this.vy -= dy * 0.002;
+                        }
+                    }
+                }
+                
+                this.x += this.vx;
+                this.y += this.vy;
+                this.life--;
+                
+                // Boundary handling
+                if (this.x < 0 || this.x > width) this.vx *= -1;
+                if (this.y < 0 || this.y > height) this.vy *= -1;
+                
+                if (this.life <= 0) this.reset();
+            }
+            
+            draw() {
+                const alpha = (this.life / this.maxLife) * 0.8;
+                const size = this.size * (1 + Math.sin(Date.now() * 0.003) * 0.3);
+                
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, size, 0, Math.PI * 2);
+                ctx.fillStyle = `hsla(${this.hue}, 70%, 60%, ${alpha})`;
+                ctx.fill();
+                
+                // Glow effect
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, size * 3, 0, Math.PI * 2);
+                ctx.fillStyle = `hsla(${this.hue}, 70%, 60%, ${alpha * 0.2})`;
+                ctx.fill();
+            }
+        }
+        
+        // Web/vein connections between particles
+        function drawConnections(particles) {
+            const maxDist = metamorphosisStage === 1 ? 150 : 100;
+            const maxConnections = 3;
+            
+            for (let i = 0; i < particles.length; i++) {
+                let connections = 0;
+                for (let j = i + 1; j < particles.length && connections < maxConnections; j++) {
+                    const dx = particles[i].x - particles[j].x;
+                    const dy = particles[i].y - particles[j].y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < maxDist) {
+                        const alpha = (1 - dist / maxDist) * 0.3;
+                        ctx.beginPath();
+                        ctx.moveTo(particles[i].x, particles[i].y);
+                        ctx.lineTo(particles[j].x, particles[j].y);
+                        ctx.strokeStyle = metamorphosisStage === 1 
+                            ? `hsla(280, 50%, 50%, ${alpha})` // chrysalis web
+                            : `hsla(${particles[i].hue}, 50%, 50%, ${alpha})`;
+                        ctx.lineWidth = metamorphosisStage === 1 ? 2 : 0.5;
+                        ctx.stroke();
+                        connections++;
+                    }
+                }
+            }
+        }
+        
+        // Central chrysalis form
+        function drawChrysalis() {
+            if (metamorphosisStage !== 1) return;
+            
+            const centerX = width / 2;
+            const centerY = height / 2;
+            const time = Date.now() * 0.001;
+            
+            // Pulsing egg shape
+            const pulse = 1 + Math.sin(time * 2) * 0.1 * (1 + stageProgress);
+            const w = 120 * pulse;
+            const h = 180 * pulse;
+            
+            // Outer glow
+            const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, h);
+            gradient.addColorStop(0, `hsla(280, 60%, 40%, ${0.3 + stageProgress * 0.2})`);
+            gradient.addColorStop(0.5, `hsla(260, 50%, 30%, ${0.2 + stageProgress * 0.1})`);
+            gradient.addColorStop(1, 'transparent');
+            
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.ellipse(centerX, centerY, w, h, 0, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Inner form
+            ctx.strokeStyle = `hsla(300, 70%, 60%, ${0.5 + Math.sin(time * 3) * 0.2})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.ellipse(centerX, centerY, w * 0.7, h * 0.8, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            // Transformation energy lines
+            for (let i = 0; i < 8; i++) {
+                const angle = (i / 8) * Math.PI * 2 + time * 0.5;
+                const r1 = 30;
+                const r2 = w * 0.6;
+                ctx.beginPath();
+                ctx.moveTo(centerX + Math.cos(angle) * r1, centerY + Math.sin(angle) * r1);
+                ctx.lineTo(centerX + Math.cos(angle) * r2, centerY + Math.sin(angle) * r2);
+                ctx.strokeStyle = `hsla(${280 + i * 10}, 70%, 60%, ${0.3 + stageProgress * 0.3})`;
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            }
+        }
+        
+        // Butterfly wings when emerged
+        function drawButterflyWings() {
+            if (metamorphosisStage !== 2) return;
+            
+            const centerX = width / 2;
+            const centerY = height / 2;
+            const time = Date.now() * 0.002;
+            
+            // Wing flutter
+            const flutter = Math.sin(time * 10) * 0.1 + 0.9;
+            
+            // Draw wings
+            for (let side = -1; side <= 1; side += 2) {
+                // Upper wing
+                ctx.save();
+                ctx.translate(centerX, centerY);
+                ctx.scale(side * flutter, 1);
+                
+                const wingGradient = ctx.createRadialGradient(0, -50, 0, 0, -50, 150);
+                wingGradient.addColorStop(0, 'hsla(320, 80%, 50%, 0.4)');
+                wingGradient.addColorStop(0.5, 'hsla(10, 70%, 50%, 0.3)');
+                wingGradient.addColorStop(1, 'hsla(40, 60%, 50%, 0.1)');
+                
+                ctx.fillStyle = wingGradient;
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.bezierCurveTo(50, -100, 150, -150, 180, -80);
+                ctx.bezierCurveTo(200, -20, 150, 20, 100, 0);
+                ctx.closePath();
+                ctx.fill();
+                ctx.strokeStyle = 'hsla(20, 70%, 60%, 0.5)';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                
+                // Lower wing
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.bezierCurveTo(30, 50, 80, 100, 60, 120);
+                ctx.bezierCurveTo(40, 140, 10, 100, 0, 80);
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+                
+                ctx.restore();
+            }
+            
+            // Body
+            ctx.fillStyle = 'hsla(30, 40%, 30%, 0.8)';
+            ctx.beginPath();
+            ctx.ellipse(centerX, centerY, 8, 40, 0, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        
+        // Initialize particles
+        const particles = [];
+        for (let i = 0; i < 80; i++) {
+            particles.push(new Particle());
+        }
+        
+        // Audio setup
+        async function initAudio() {
+            await Tone.start();
+            
+            // Drone for base atmosphere
+            droneSynth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: "sine" },
+                envelope: { attack: 2, decay: 1, sustain: 1, release: 3 }
+            }).toDestination();
+            droneSynth.volume.value = -20;
+            
+            // Shimmer for transformation
+            shimmerSynth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: "triangle" },
+                envelope: { attack: 0.5, decay: 2, sustain: 0.3, release: 4 }
+            }).toDestination();
+            shimmerSynth.volume.value = -25;
+            
+            // Chimes for transitions
+            chimeSynth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: "sine" },
+                envelope: { attack: 0.01, decay: 1, sustain: 0, release: 2 }
+            }).toDestination();
+            chimeSynth.volume.value = -15;
+            
+            // Add reverb
+            const reverb = new Tone.Reverb({ decay: 5, wet: 0.4 }).toDestination();
+            droneSynth.connect(reverb);
+            shimmerSynth.connect(reverb);
+            chimeSynth.connect(reverb);
+            
+            audioStarted = true;
+            document.getElementById('audioBtn').textContent = 'Sound Active';
+            updateAudio();
+        }
+        
+        function updateAudio() {
+            if (!audioStarted) return;
+            
+            const chords = [
+                ['A2', 'E3', 'C4'], // caterpillar - grounded
+                ['C3', 'G3', 'E4', 'B4'], // chrysalis - suspended, questioning
+                ['D3', 'A3', 'F#4', 'D5'] // butterfly - emergence, resolution
+            ];
+            
+            const currentChord = chords[metamorphosisStage];
+            droneSynth.triggerAttackRelease(currentChord, "4n");
+            
+            // Add shimmer based on stage progress
+            if (stageProgress > 0.3) {
+                const shimmerNotes = metamorphosisStage === 1 
+                    ? ['E5', 'G5', 'B5'] 
+                    : ['F#5', 'A5', 'D6'];
+                shimmerSynth.triggerAttackRelease(shimmerNotes, "2n");
+            }
+        }
+        
+        function playStageTransitionSound() {
+            if (!audioStarted) return;
+            
+            const transitionChords = [
+                ['C4', 'E4', 'G4', 'C5'], // to chrysalis
+                ['D4', 'F#4', 'A4', 'D5'], // to butterfly
+                ['A3', 'E4', 'C5', 'E5'] // back to caterpillar
+            ];
+            
+            chimeSynth.triggerAttackRelease(transitionChords[metamorphosisStage], "1n");
+        }
+        
+        document.getElementById('audioBtn').addEventListener('click', initAudio);
+        
+        // Auto-advance metamorphosis slowly
+        setInterval(() => {
+            if (!mouse.active) {
+                stageProgress += 0.002;
+                if (stageProgress >= 1) {
+                    stageProgress = 0;
+                    metamorphosisStage = (metamorphosisStage + 1) % 3;
+                    updateStageIndicator();
+                    playStageTransitionSound();
+                }
+                updateAudio();
+            }
+        }, 100);
+        
+        // Animation loop
+        function animate() {
+            // Fade trail based on stage
+            const trailAlpha = metamorphosisStage === 1 ? 0.15 : 0.05;
+            ctx.fillStyle = `rgba(10, 10, 15, ${trailAlpha})`;
+            ctx.fillRect(0, 0, width, height);
+            
+            // Draw connections first (behind particles)
+            drawConnections(particles);
+            
+            // Draw stage-specific forms
+            drawChrysalis();
+            drawButterflyWings();
+            
+            // Update and draw particles
+            particles.forEach(p => {
+                p.update();
+                p.draw();
+            });
+            
+            // Progress indicator
+            const indicatorY = height - 50;
+            ctx.fillStyle = 'rgba(200, 180, 220, 0.3)';
+            ctx.fillRect(width / 2 - 100, indicatorY, 200, 4);
+            ctx.fillStyle = `hsla(${280 + metamorphosisStage * 40}, 70%, 60%, 0.8)`;
+            ctx.fillRect(width / 2 - 100, indicatorY, 200 * stageProgress, 4);
+            
+            requestAnimationFrame(animate);
+        }
+        
+        animate();
+    </script>
+</body>
+</html>
