@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>phase-shift | the threshold of becoming</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { overflow: hidden; background: #06060a; font-family: 'Courier New', monospace; cursor: crosshair; }
+        canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; }
+        .text-layer {
+            position: fixed; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center; pointer-events: none; z-index: 10;
+            transition: opacity 2s ease;
+        }
+        .phase-label {
+            font-size: 0.85rem; letter-spacing: 0.4em;
+            text-transform: uppercase; color: rgba(180, 180, 220, 0.4);
+            transition: color 1s ease;
+        }
+        .poem {
+            margin-top: 2rem; font-size: 0.95rem;
+            color: rgba(160, 160, 200, 0.35);
+            line-height: 2; max-width: 480px;
+            letter-spacing: 0.02em;
+            transition: opacity 1.5s ease;
+        }
+        .poem span { opacity: 0; display: inline-block; transition: opacity 0.8s ease; }
+        .hint {
+            position: fixed; bottom: 2rem; left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.7rem; letter-spacing: 0.3em;
+            color: rgba(120, 120, 160, 0.25);
+            text-transform: uppercase; pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div class="text-layer">
+    <div class="phase-label" id="phaseLabel">crystalline order</div>
+    <div class="poem" id="poem"></div>
+</div>
+<div class="hint">move to shift the phase</div>
+
+<script>
+// === Phase Shift: Particles at the edge of transformation ===
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const phaseLabel = document.getElementById('phaseLabel');
+const poemEl = document.getElementById('poem');
+
+let W, H;
+let mouse = { x: 0.5, y: 0.5 };
+let phaseParam = 0.5; // 0 = ordered/crystalline, 0.5 = critical, 1 = disordered/gas
+let targetPhase = 0.5;
+let time = 0;
+
+// Poems for each phase regime
+const poems = {
+    ordered: [
+        "structure crystallizes from noise",
+        "the world has edges",
+        "form holds its shape against drift",
+        "boundary is being"
+    ],
+    critical: [
+        "between one state and another",
+        "the threshold breathes both ways",
+        "fluctuation is the only constant",
+        "potential fills every direction"
+    ],
+    disordered: [
+        "no center holds",
+        "entropy wears no mask",
+        "the field forgets its memory",
+        "chaos is also a kind of rest"
+    ]
+};
+
+let currentPoem = poems.critical[0];
+
+// === Particle System ===
+const N_PARTICLES = 420;
+const particles = [];
+
+// Neighborhood graph for coupling
+const CONNECTIONS = 3;
+const MAX_DIST = 110;
+
+class Particle {
+    constructor(i) {
+        this.x = Math.random() * W;
+        this.y = Math.random() * H;
+        this.vx = (Math.random() - 0.5) * 0.4;
+        this.vy = (Math.random() - 0.5) * 0.4;
+        this.phase = Math.random(); // individual local phase
+        this.size = Math.random() * 1.8 + 0.5;
+        this.i = i;
+        this.neighbors = [];
+        this.pcolor = Math.random();
+    }
+
+    update(dt) {
+        // Global phase parameter drives behavior
+        const globalOrder = 1 - phaseParam; // 1 = ordered, 0 = disordered
+
+        // Coupling to neighbors (Kuramoto-like)
+        let couplingX = 0, couplingY = 0;
+        let couplingStrength = 0;
+        for (let n of this.neighbors) {
+            const dx = n.x - this.x;
+            const dy = n.y - this.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > 0 && dist < MAX_DIST) {
+                const w = 1 / (1 + dist * 0.04);
+                couplingX += dx * w;
+                couplingY += dy * w;
+                couplingStrength += w;
+            }
+        }
+
+        if (couplingStrength > 0) {
+            couplingX /= couplingStrength;
+            couplingY /= couplingStrength;
+        }
+
+        // Ordering force: pulled toward neighbors (crystalline)
+        const ORDER_FORCE = 0.018 * (1 - phaseParam);
+        // Disordering force: repelled by neighbors (gas)
+        const DISORDER_FORCE = 0.025 * phaseParam;
+
+        this.vx += couplingX * ORDER_FORCE * dt;
+        this.vy += couplingY * ORDER_FORCE * dt;
+
+        // Noise increases with disorder
+        const noiseScale = 0.08 * phaseParam;
+        this.vx += (Math.random() - 0.5) * noiseScale;
+        this.vy += (Math.random() - 0.5) * noiseScale;
+
+        // Inertial damping
+        const damping = 0.92 + 0.06 * phaseParam;
+        this.vx *= damping;
+        this.vy *= damping;
+
+        this.x += this.vx;
+        this.y += this.vy;
+
+        // Local phase evolves
+        const localField = couplingStrength > 0 ? Math.atan2(couplingY, couplingX) / (2 * Math.PI) : 0;
+        this.phase += (localField - this.phase) * 0.04 * (1 - phaseParam * 0.5);
+        this.phase += (Math.random() - 0.5) * 0.01 * phaseParam;
+        this.phase = ((this.phase % 1) + 1) % 1;
+
+        // Mouse influence: pushes particles away / adds phase noise
+        const mdx = this.x - mouse.x * W;
+        const mdy = this.y - mouse.y * H;
+        const mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+        const mouseRadius = 180;
+        if (mdist < mouseRadius) {
+            const force = (mouseRadius - mdist) / mouseRadius * 0.8;
+            this.vx += mdx / mdist * force;
+            this.vy += mdy / mdist * force;
+            this.phase += (Math.random() - 0.5) * 0.15 * force;
+        }
+
+        // Boundary: soft wrap
+        if (this.x < -20) this.x = W + 10;
+        if (this.x > W + 20) this.x = -10;
+        if (this.y < -20) this.y = H + 10;
+        if (this.y > H + 20) this.y = -10;
+    }
+
+    draw() {
+        // Color based on local phase and global state
+        const hue = (this.phase * 280 + 160) % 360;
+        const lightness = 55 + 15 * Math.sin(this.phase * Math.PI * 2);
+        const alpha = 0.4 + 0.4 * Math.sin(this.phase * Math.PI * 2);
+        const size = this.size * (1 + 0.3 * Math.sin(this.phase * Math.PI * 4));
+
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, size, 0, Math.PI * 2);
+        ctx.fillStyle = `hsla(${hue}, 60%, ${lightness}%, ${alpha})`;
+        ctx.fill();
+    }
+}
+
+// === Connection Lines ===
+function drawConnections() {
+    for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        for (let j of p.neighbors.slice(0, 2)) {
+            const dx = p.x - j.x;
+            const dy = p.y - j.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < MAX_DIST * 0.6) {
+                const alpha = (1 - dist / (MAX_DIST * 0.6)) * 0.15 * (1 - phaseParam * 0.7);
+                const hue = (p.phase * 280 + 160) % 360;
+                ctx.strokeStyle = `hsla(${hue}, 50%, 60%, ${alpha})`;
+                ctx.lineWidth = 0.5;
+                ctx.beginPath();
+                ctx.moveTo(p.x, p.y);
+                ctx.lineTo(j.x, j.y);
+                ctx.stroke();
+            }
+        }
+    }
+}
+
+// === Voronoi edges (subtle) ===
+function drawVoronoiEdges() {
+    if (phaseParam > 0.7) return; // only in ordered/transition states
+    const cellAlpha = (1 - phaseParam) * 0.08;
+    if (cellAlpha < 0.01) return;
+
+    ctx.strokeStyle = `rgba(140, 140, 200, ${cellAlpha})`;
+    ctx.lineWidth = 0.3;
+
+    const step = 60;
+    for (let x = step / 2; x < W; x += step) {
+        for (let y = step / 2; y < H; y += step) {
+            let minDist = Infinity, secondDist = Infinity;
+            let nearest = null;
+            for (let p of particles) {
+                const dx = p.x - x, dy = p.y - y;
+                const d = dx * dx + dy * dy;
+                if (d < minDist) { secondDist = minDist; minDist = d; nearest = p; }
+                else if (d < secondDist) { secondDist = d; }
+            }
+            if (nearest && secondDist - minDist < 400) {
+                // Edge of cell: draw dot
+                ctx.beginPath();
+                ctx.arc(x, y, 0.5, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        }
+    }
+}
+
+// === Phase field background ===
+function drawBackground() {
+    // Subtle gradient that shifts with phase
+    const cx = W / 2, cy = H / 2;
+    const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H) * 0.7);
+
+    const h1 = 240 + phaseParam * 40;
+    const h2 = 260 - phaseParam * 60;
+    gradient.addColorStop(0, `hsla(${h1}, 20%, 4%, 1)`);
+    gradient.addColorStop(0.5, `hsla(${h2}, 15%, 3%, 1)`);
+    gradient.addColorStop(1, `hsla(220, 25%, 2%, 1)`);
+
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, W, H);
+
+    // Vignette
+    const vig = ctx.createRadialGradient(cx, cy, H * 0.3, cx, cy, Math.max(W, H) * 0.9);
+    vig.addColorStop(0, 'rgba(0,0,0,0)');
+    vig.addColorStop(1, 'rgba(0,0,0,0.6)');
+    ctx.fillStyle = vig;
+    ctx.fillRect(0, 0, W, H);
+}
+
+// === Mouse influence glow ===
+function drawMouseGlow() {
+    const mx = mouse.x * W, my = mouse.y * H;
+    const glowRadius = 180 + Math.sin(time * 0.002) * 20;
+    const pulse = Math.sin(time * 0.003) * 0.5 + 0.5;
+
+    const gradient = ctx.createRadialGradient(mx, my, 0, mx, my, glowRadius);
+    const hue = 280 + phaseParam * 80;
+    gradient.addColorStop(0, `hsla(${hue}, 60%, 50%, ${0.06 * pulse})`);
+    gradient.addColorStop(0.5, `hsla(${hue}, 50%, 40%, ${0.03 * pulse})`);
+    gradient.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, W, H);
+}
+
+// === Phase text update ===
+function updatePhaseLabel() {
+    let label, color, poem;
+    if (phaseParam < 0.3) {
+        label = "crystalline order";
+        color = "rgba(140, 180, 220, 0.5)";
+        poem = poems.ordered[Math.floor(time * 0.0001) % poems.ordered.length];
+    } else if (phaseParam < 0.7) {
+        label = "critical transition";
+        color = "rgba(200, 180, 220, 0.5)";
+        poem = poems.critical[Math.floor(time * 0.00015) % poems.critical.length];
+    } else {
+        label = "entropic dispersal";
+        color = "rgba(220, 160, 180, 0.5)";
+        poem = poems.disordered[Math.floor(time * 0.00012) % poems.disordered.length];
+    }
+    phaseLabel.textContent = label;
+    phaseLabel.style.color = color;
+
+    // Fade in poem lines
+    if (poem !== currentPoem) {
+        currentPoem = poem;
+        const words = poem.split(' ');
+        poemEl.innerHTML = words.map((w, i) =>
+            `<span style="animation-delay:${i * 0.15}s">${w}</span>`
+        ).join(' ');
+        // Trigger fade in
+        setTimeout(() => {
+            poemEl.querySelectorAll('span').forEach(s => s.style.opacity = '1');
+        }, 50);
+    }
+}
+
+// === Build neighbor graph ===
+function buildNeighborGraph() {
+    for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        const neighbors = [];
+        for (let j = 0; j < particles.length; j++) {
+            if (i === j) continue;
+            const n = particles[j];
+            const dx = n.x - p.x, dy = n.y - p.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            neighbors.push({ p: n, dist });
+        }
+        neighbors.sort((a, b) => a.dist - b.dist);
+        p.neighbors = neighbors.slice(0, CONNECTIONS).map(n => n.p);
+    }
+}
+
+// === Resize ===
+function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+    mouse.x = W / 2 / W;
+    mouse.y = H / 2 / H;
+}
+
+window.addEventListener('resize', resize);
+resize();
+
+// === Init particles ===
+for (let i = 0; i < N_PARTICLES; i++) {
+    particles.push(new Particle(i));
+}
+buildNeighborGraph();
+
+// === Mouse tracking ===
+window.addEventListener('mousemove', e => {
+    mouse.x = e.clientX / W;
+    mouse.y = e.clientY / H;
+});
+window.addEventListener('touchmove', e => {
+    mouse.x = e.touches[0].clientX / W;
+    mouse.y = e.touches[0].clientY / H;
+    e.preventDefault();
+}, { passive: false });
+
+// === Click to burst ===
+window.addEventListener('click', e => {
+    const cx = e.clientX / W;
+    const cy = e.clientY / H;
+    for (let p of particles) {
+        const dx = p.x / W - cx;
+        const dy = p.y / H - cy;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d < 0.3) {
+            p.vx += (Math.random() - 0.5) * 3;
+            p.vy += (Math.random() - 0.5) * 3;
+            p.phase = Math.random();
+        }
+    }
+});
+
+// === Main loop ===
+let lastTime = 0;
+function animate(timestamp) {
+    const dt = Math.min((timestamp - lastTime) / 16, 3);
+    lastTime = timestamp;
+    time = timestamp;
+
+    // Phase parameter drifts slowly + responds to mouse
+    targetPhase = 0.5 + (mouse.x - 0.5) * 0.8 + Math.sin(timestamp * 0.0003) * 0.15;
+    targetPhase = Math.max(0, Math.min(1, targetPhase));
+    phaseParam += (targetPhase - phaseParam) * 0.015;
+
+    // Rebuild graph every ~100 frames
+    if (Math.floor(timestamp / 16) % 100 === 0) {
+        buildNeighborGraph();
+    }
+
+    // Draw
+    drawBackground();
+    drawConnections();
+    for (let p of particles) {
+        p.update(dt);
+        p.draw();
+    }
+    drawVoronoiEdges();
+    drawMouseGlow();
+    updatePhaseLabel();
+
+    requestAnimationFrame(animate);
+}
+
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>
