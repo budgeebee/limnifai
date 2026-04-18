@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>tide-ghost | the line between</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { overflow: hidden; background: #030508; cursor: crosshair; }
+        canvas { position: fixed; top: 0; left: 0; }
+        .overlay {
+            position: fixed; bottom: 0; left: 0; right: 0;
+            padding: 2.5rem 3rem;
+            pointer-events: none;
+            z-index: 10;
+        }
+        .overlay p {
+            font-family: 'Courier New', monospace;
+            font-size: 0.8rem;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: rgba(140, 200, 220, 0.35);
+            line-height: 2.2;
+        }
+        .title {
+            position: fixed; top: 2.2rem; left: 3rem;
+            font-family: 'Courier New', monospace;
+            font-size: 0.65rem;
+            letter-spacing: 0.35em;
+            text-transform: uppercase;
+            color: rgba(100, 160, 180, 0.25);
+            pointer-events: none;
+            z-index: 10;
+        }
+        .click-hint {
+            position: fixed; bottom: 6.5rem; right: 3rem;
+            font-family: 'Courier New', monospace;
+            font-size: 0.6rem;
+            letter-spacing: 0.2em;
+            color: rgba(100, 160, 180, 0.2);
+            pointer-events: none;
+            z-index: 10;
+            transition: opacity 3s ease;
+        }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div class="title">tide-ghost — the line between</div>
+<div class="click-hint">click to mark the water's reach</div>
+<div class="overlay"><p id="poetry">the water remembers<br>every shore it ever touched</p></div>
+
+<script>
+// ─── TIDE-GHOST ─────────────────────────────────────────────────────────────
+// Particles trace the ghost-lines of water — the liminal marks left at the
+// threshold between presence and absence. Mouse clicks create new water that
+// rises and falls, leaving tidemarks that slowly fade into memory.
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const poetry = document.getElementById('poetry');
+const clickHint = document.getElementById('click-hint');
+
+let W, H;
+let tides = [];
+let ripples = [];
+let particles = [];
+let ghosts = [];
+let mouse = { x: 0, y: 0, pressed: false };
+let time = 0;
+let lastClick = 0;
+
+const POETRY_LINES = [
+    "the water remembers<br>every shore it ever touched",
+    "where touch becomes<br>and then is not",
+    "the ghost of a wave<br>still reaching for what it lost",
+    "i am the mark<br>between here and almost",
+    "the water came<br>and in coming left its trace",
+    "what remains when<br>the tide withdraws",
+    "the shore remembers<br>every name the water gave it",
+    "i stand in the space<br>where reaching becomes letting go"
+];
+
+function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ─── GHOST LINES (tidemarks) ────────────────────────────────────────────────
+class TideLine {
+    constructor(y, amplitude, wavelength, phase, alpha) {
+        this.y = y;
+        this.amplitude = amplitude;
+        this.wavelength = wavelength;
+        this.phase = phase;
+        this.alpha = alpha;
+        this.maxAlpha = alpha;
+        this.points = [];
+        this.generatePoints();
+        this.decayRate = 0.00008 + Math.random() * 0.00004;
+    }
+
+    generatePoints() {
+        this.points = [];
+        const step = 3;
+        for (let x = -10; x <= W + 10; x += step) {
+            const waveY = Math.sin((x / this.wavelength) + this.phase) * this.amplitude;
+            this.points.push({ x, y: this.y + waveY });
+        }
+    }
+
+    update() {
+        this.phase += 0.008;
+        this.alpha -= this.decayRate;
+        this.amplitude *= 0.9997;
+        this.generatePoints();
+    }
+
+    draw() {
+        if (this.alpha <= 0 || this.points.length < 2) return;
+        ctx.beginPath();
+        ctx.moveTo(this.points[0].x, this.points[0].y);
+        for (let i = 1; i < this.points.length; i++) {
+            const p = this.points[i];
+            const pp = this.points[i - 1];
+            const cpx = (p.x + pp.x) / 2;
+            const cpy = (p.y + pp.y) / 2;
+            ctx.quadraticCurveTo(pp.x, pp.y, cpx, cpy);
+        }
+        ctx.strokeStyle = `rgba(80, 160, 190, ${Math.max(0, this.alpha * 0.5)})`;
+        ctx.lineWidth = 0.6;
+        ctx.stroke();
+
+        // Draw ghost particles along the line
+        for (let i = 0; i < this.points.length; i += 8) {
+            const p = this.points[i];
+            const a = this.alpha * Math.random() * 0.3;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 0.8 + Math.random() * 1.2, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(120, 200, 220, ${Math.max(0, a)})`;
+            ctx.fill();
+        }
+    }
+
+    isDead() { return this.alpha <= 0; }
+}
+
+// ─── RIPPLES ────────────────────────────────────────────────────────────────
+class Ripple {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.r = 2;
+        this.maxR = 80 + Math.random() * 120;
+        this.alpha = 0.6 + Math.random() * 0.3;
+        this.lineWidth = 1.5;
+        this.speed = 1.2 + Math.random() * 0.8;
+    }
+
+    update() {
+        this.r += this.speed;
+        this.alpha -= 0.004;
+        this.lineWidth *= 0.992;
+    }
+
+    draw() {
+        if (this.alpha <= 0) return;
+        ctx.beginPath();
+        ctx.ellipse(this.x, this.y, this.r, this.r * 0.35, 0, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(100, 180, 210, ${Math.max(0, this.alpha)})`;
+        ctx.lineWidth = this.lineWidth;
+        ctx.stroke();
+
+        // Inner glow
+        ctx.beginPath();
+        ctx.ellipse(this.x, this.y, this.r * 0.7, this.r * 0.25, 0, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(160, 220, 240, ${Math.max(0, this.alpha * 0.4)})`;
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+    }
+
+    isDead() { return this.alpha <= 0 || this.r > this.maxR; }
+}
+
+// ─── WATER PARTICLES ─────────────────────────────────────────────────────────
+class WaterParticle {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.vx = (Math.random() - 0.5) * 1.5;
+        this.vy = -1 - Math.random() * 3;
+        this.size = 1 + Math.random() * 2;
+        this.alpha = 0.5 + Math.random() * 0.4;
+        this.gravity = 0.04 + Math.random() * 0.03;
+        this.drag = 0.98;
+        this.life = 1;
+        this.decay = 0.003 + Math.random() * 0.003;
+        this.trail = [];
+        this.trailLen = 6 + Math.floor(Math.random() * 8);
+    }
+
+    update() {
+        this.trail.push({ x: this.x, y: this.y, alpha: this.alpha });
+        if (this.trail.length > this.trailLen) this.trail.shift();
+
+        this.vy += this.gravity;
+        this.vx *= this.drag;
+        this.vy *= this.drag;
+        this.x += this.vx;
+        this.y += this.vy;
+        this.life -= this.decay;
+        this.alpha = this.life * 0.6;
+
+        // Floor collision — create splash
+        if (this.y > H - 10) {
+            this.y = H - 10;
+            this.vy *= -0.3;
+            this.vx *= 0.8;
+            if (Math.abs(this.vy) < 0.5) {
+                this.life = 0;
+            }
+        }
+
+        // Side walls
+        if (this.x < 0 || this.x > W) {
+            this.vx *= -0.5;
+            this.x = Math.max(0, Math.min(W, this.x));
+        }
+    }
+
+    draw() {
+        // Draw trail
+        for (let i = 0; i < this.trail.length; i++) {
+            const t = this.trail[i];
+            const frac = i / this.trail.length;
+            ctx.beginPath();
+            ctx.arc(t.x, t.y, this.size * frac * 0.7, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(80, 170, 210, ${t.alpha * frac * 0.4})`;
+            ctx.fill();
+        }
+
+        // Draw particle
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(120, 200, 230, ${Math.max(0, this.alpha)})`;
+        ctx.fill();
+
+        // Glow
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size * 2, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(140, 210, 240, ${Math.max(0, this.alpha * 0.15)})`;
+        ctx.fill();
+    }
+
+    isDead() { return this.life <= 0; }
+}
+
+// ─── FOAM PARTICLES ──────────────────────────────────────────────────────────
+class FoamParticle {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.vx = (Math.random() - 0.5) * 2;
+        this.vy = -0.5 - Math.random() * 1.5;
+        this.size = 0.5 + Math.random() * 1.5;
+        this.alpha = 0.3 + Math.random() * 0.4;
+        this.life = 1;
+        this.decay = 0.008 + Math.random() * 0.008;
+    }
+
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.vy += 0.01;
+        this.vx *= 0.99;
+        this.life -= this.decay;
+        this.alpha = this.life * 0.4;
+    }
+
+    draw() {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(200, 235, 245, ${Math.max(0, this.alpha)})`;
+        ctx.fill();
+    }
+
+    isDead() { return this.life <= 0; }
+}
+
+// ─── DRIFT PARTICLES (background atmosphere) ─────────────────────────────────
+class DriftParticle {
+    constructor() {
+        this.reset();
+    }
+
+    reset() {
+        this.x = Math.random() * W;
+        this.y = Math.random() * H;
+        this.size = 0.3 + Math.random() * 1.2;
+        this.alpha = 0.05 + Math.random() * 0.15;
+        this.vx = (Math.random() - 0.5) * 0.15;
+        this.vy = -0.02 - Math.random() * 0.08;
+        this.pulse = Math.random() * Math.PI * 2;
+        this.pulseSpeed = 0.005 + Math.random() * 0.01;
+    }
+
+    update() {
+        this.x += this.vx + Math.sin(time * 0.001 + this.pulse) * 0.05;
+        this.y += this.vy;
+        this.pulse += this.pulseSpeed;
+        this.alpha = (0.05 + Math.random() * 0.02) * (0.7 + 0.3 * Math.sin(this.pulse));
+
+        if (this.y < -10 || this.x < -10 || this.x > W + 10) {
+            this.reset();
+            this.y = H + 10;
+        }
+    }
+
+    draw() {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(100, 170, 200, ${this.alpha})`;
+        ctx.fill();
+    }
+}
+
+// ─── BACKGROUND WATER BODY ───────────────────────────────────────────────────
+class WaterBody {
+    constructor() {
+        this.segments = 60;
+        this.points = [];
+        for (let i = 0; i <= this.segments; i++) {
+            this.points.push({ y: H, vy: 0 });
+        }
+        this.baseY = H - 20;
+    }
+
+    update(mouseY) {
+        for (let i = 0; i <= this.segments; i++) {
+            const x = (i / this.segments) * W;
+            const wave1 = Math.sin(time * 0.0008 + i * 0.3) * 12;
+            const wave2 = Math.sin(time * 0.0012 + i * 0.15) * 6;
+            const mouseInfluence = mouse.pressed
+                ? Math.max(0, 1 - Math.abs(x - mouse.x) / 300) * 30
+                : 0;
+            const targetY = this.baseY + wave1 + wave2 - mouseInfluence;
+            this.points[i].y += (targetY - this.points[i].y) * 0.05;
+        }
+    }
+
+    draw() {
+        // Water fill
+        ctx.beginPath();
+        ctx.moveTo(0, H);
+        for (let i = 0; i <= this.segments; i++) {
+            ctx.lineTo((i / this.segments) * W, this.points[i].y);
+        }
+        ctx.lineTo(W, H);
+        ctx.closePath();
+
+        const grad = ctx.createLinearGradient(0, this.baseY - 30, 0, H);
+        grad.addColorStop(0, 'rgba(10, 50, 80, 0.0)');
+        grad.addColorStop(0.3, 'rgba(8, 40, 65, 0.85)');
+        grad.addColorStop(1, 'rgba(5, 25, 45, 0.97)');
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        // Surface line glow
+        ctx.beginPath();
+        ctx.moveTo(0, this.points[0].y);
+        for (let i = 1; i <= this.segments; i++) {
+            ctx.lineTo((i / this.segments) * W, this.points[i].y);
+        }
+        ctx.strokeStyle = 'rgba(60, 140, 180, 0.25)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+    }
+}
+
+// ─── INIT ───────────────────────────────────────────────────────────────────
+const waterBody = new WaterBody();
+const driftParticles = Array.from({ length: 80 }, () => new DriftParticle());
+
+// Create initial ambient tidemarks
+for (let i = 0; i < 5; i++) {
+    const y = H * (0.5 + Math.random() * 0.35);
+    const tide = new TideLine(
+        y,
+        5 + Math.random() * 20,
+        80 + Math.random() * 200,
+        Math.random() * Math.PI * 2,
+        0.08 + Math.random() * 0.1
+    );
+    tides.push(tide);
+}
+
+// Create initial drift particles in water
+for (let i = 0; i < 60; i++) {
+    const p = new WaterParticle(Math.random() * W, H - Math.random() * 40);
+    p.life = Math.random();
+    particles.push(p);
+}
+
+let foamParticles = [];
+
+// ─── MOUSE / TOUCH ───────────────────────────────────────────────────────────
+canvas.addEventListener('mousedown', (e) => {
+    mouse.pressed = true;
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
+    handleInteraction(e.clientX, e.clientY);
+    clickHint.style.opacity = '0';
+});
+
+canvas.addEventListener('mousemove', (e) => {
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
+    if (mouse.pressed && time - lastClick > 150) {
+        handleInteraction(e.clientX, e.clientY);
+    }
+});
+
+canvas.addEventListener('mouseup', () => {
+    mouse.pressed = false;
+});
+
+canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const t = e.touches[0];
+    mouse.pressed = true;
+    mouse.x = t.clientX;
+    mouse.y = t.clientY;
+    handleInteraction(t.clientX, t.clientY);
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    const t = e.touches[0];
+    mouse.x = t.clientX;
+    mouse.y = t.clientY;
+}, { passive: false });
+
+canvas.addEventListener('touchend', () => {
+    mouse.pressed = false;
+});
+
+function handleInteraction(x, y) {
+    lastClick = time;
+
+    // Create ripples
+    for (let i = 0; i < 3; i++) {
+        ripples.push(new Ripple(x + (Math.random() - 0.5) * 20, y + (Math.random() - 0.5) * 10));
+    }
+
+    // Create splash particles
+    for (let i = 0; i < 20; i++) {
+        const p = new WaterParticle(x + (Math.random() - 0.5) * 30, y + (Math.random() - 0.5) * 10);
+        p.vy = -2 - Math.random() * 4;
+        p.vx = (Math.random() - 0.5) * 5;
+        particles.push(p);
+    }
+
+    // Create foam
+    for (let i = 0; i < 15; i++) {
+        foamParticles.push(new FoamParticle(
+            x + (Math.random() - 0.5) * 50,
+            y + (Math.random() - 0.5) * 15
+        ));
+    }
+
+    // Create a tidemark at the interaction level
+    const tideY = y + 5 + Math.random() * 25;
+    const tide = new TideLine(
+        tideY,
+        3 + Math.random() * 18,
+        60 + Math.random() * 180,
+        Math.random() * Math.PI * 2,
+        0.25 + Math.random() * 0.2
+    );
+    tides.push(tide);
+
+    // Update poetry occasionally
+    if (Math.random() < 0.3) {
+        const lines = POETRY_LINES;
+        const idx = Math.floor(Math.random() * lines.length);
+        poetry.innerHTML = lines[idx];
+    }
+}
+
+// ─── AUTO-SPAWN TIDES ────────────────────────────────────────────────────────
+let nextAutoTide = 3000;
+function checkAutoSpawn() {
+    if (time > nextAutoTide) {
+        const y = H * (0.3 + Math.random() * 0.45);
+        const tide = new TideLine(
+            y,
+            4 + Math.random() * 15,
+            80 + Math.random() * 200,
+            Math.random() * Math.PI * 2,
+            0.1 + Math.random() * 0.12
+        );
+        tides.push(tide);
+        nextAutoTide = time + 4000 + Math.random() * 6000;
+    }
+}
+
+// Auto-spawn ripples
+let nextAutoRipple = 2000;
+function checkAutoRipple() {
+    if (time > nextAutoRipple) {
+        const x = Math.random() * W;
+        const y = H * (0.4 + Math.random() * 0.4);
+        ripples.push(new Ripple(x, y));
+        nextAutoRipple = time + 1500 + Math.random() * 4000;
+    }
+}
+
+// Auto-spawn water particles
+let nextAutoParticle = 100;
+function checkAutoParticles() {
+    if (time > nextAutoParticle) {
+        const x = Math.random() * W;
+        const p = new WaterParticle(x, H - 5);
+        particles.push(p);
+        nextAutoParticle = time + 80 + Math.random() * 200;
+    }
+}
+
+// ─── DRAW GROUND FOG ─────────────────────────────────────────────────────────
+function drawGroundFog() {
+    const fogY = H - 60;
+    const grad = ctx.createLinearGradient(0, fogY - 40, 0, H);
+    grad.addColorStop(0, 'rgba(5, 25, 45, 0)');
+    grad.addColorStop(0.5, 'rgba(5, 25, 45, 0.3)');
+    grad.addColorStop(1, 'rgba(5, 25, 45, 0.8)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, fogY - 40, W, H - fogY + 60);
+}
+
+// ─── MAIN LOOP ───────────────────────────────────────────────────────────────
+function animate() {
+    requestAnimationFrame(animate);
+    time = performance.now();
+
+    // Clear with atmospheric trail
+    ctx.fillStyle = 'rgba(3, 5, 8, 0.18)';
+    ctx.fillRect(0, 0, W, H);
+
+    checkAutoSpawn();
+    checkAutoRipple();
+    checkAutoParticles();
+
+    // Update and draw drift
+    driftParticles.forEach(p => { p.update(); p.draw(); });
+
+    // Update and draw water body
+    waterBody.update();
+    waterBody.draw();
+    drawGroundFog();
+
+    // Update and draw ripples
+    ripples.forEach(r => { r.update(); r.draw(); });
+    ripples = ripples.filter(r => !r.isDead());
+
+    // Update and draw tidemarks
+    tides.forEach(t => { t.update(); t.draw(); });
+    tides = tides.filter(t => !t.isDead());
+
+    // Limit tides
+    if (tides.length > 25) tides.shift();
+
+    // Update and draw foam
+    foamParticles.forEach(p => { p.update(); p.draw(); });
+    foamParticles = foamParticles.filter(p => !p.isDead());
+    if (foamParticles.length > 200) foamParticles = foamParticles.slice(-200);
+
+    // Update and draw water particles
+    particles.forEach(p => { p.update(); p.draw(); });
+    particles = particles.filter(p => !p.isDead());
+    if (particles.length > 300) particles = particles.slice(-300);
+
+    // Draw mouse glow when pressed
+    if (mouse.pressed) {
+        const grad = ctx.createRadialGradient(mouse.x, mouse.y, 0, mouse.x, mouse.y, 60);
+        grad.addColorStop(0, 'rgba(100, 180, 220, 0.12)');
+        grad.addColorStop(1, 'rgba(100, 180, 220, 0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(mouse.x, mouse.y, 60, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+animate();
+</script>
+</body>
+</html>
