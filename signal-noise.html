@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>signal-noise | the space between</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { overflow: hidden; background: #030308; cursor: crosshair; }
+        canvas { position: fixed; top: 0; left: 0; }
+        .overlay {
+            position: fixed; bottom: 0; left: 0; right: 0;
+            padding: 2.5rem 3rem;
+            pointer-events: none;
+            z-index: 10;
+        }
+        .overlay p {
+            font-family: 'Courier New', monospace;
+            font-size: 0.8rem;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: rgba(200, 180, 140, 0.35);
+            line-height: 2.2;
+        }
+        .title {
+            position: fixed; top: 2.2rem; left: 3rem;
+            font-family: 'Courier New', monospace;
+            font-size: 0.65rem;
+            letter-spacing: 0.35em;
+            text-transform: uppercase;
+            color: rgba(180, 160, 120, 0.2);
+            pointer-events: none;
+            z-index: 10;
+        }
+        .audio-hint {
+            position: fixed; top: 2.2rem; right: 3rem;
+            font-family: 'Courier New', monospace;
+            font-size: 0.6rem;
+            letter-spacing: 0.15em;
+            color: rgba(180, 160, 120, 0.2);
+            pointer-events: none;
+            z-index: 10;
+            transition: opacity 2s ease;
+        }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div class="title">signal-noise — the space between</div>
+<div class="audio-hint" id="audioHint">click anywhere to unmute</div>
+<div class="overlay"><p id="poetry">between the signal<br>and the noise<br>something breathes</p></div>
+
+<script>
+// ─── SIGNAL-NOISE ────────────────────────────────────────────────────────────
+// Particles exist in the liminal space between signal and noise.
+// Organized enough to cohere, random enough to breathe.
+// Click to inject signal — watch particles reorganize into emergent patterns,
+// then dissolve back toward entropy. The threshold is the art.
+
+// Audio via Tone.js
+let audioStarted = false;
+let drone, droneFilter, reverb, analyser;
+let toneInitialized = false;
+
+// Canvas
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let W, H;
+let time = 0;
+let mouse = { x: 0, y: 0, pressed: false, age: 0 };
+
+const poetry = document.getElementById('poetry');
+const audioHint = document.getElementById('audio-hint');
+
+const POETRY_LINES = [
+    "between the signal<br>and the noise<br>something breathes",
+    "the pattern almost<br>remembers itself",
+    "i am not chaos<br>i am the edge of order",
+    "where signal meets noise<br>there is a third thing",
+    "the wave hasn't decided<br>what it will become",
+    "between whisper and scream<br>the threshold listens",
+    "i exist in the frequency<br>you haven't tuned to yet",
+    "the static is not empty<br>it is full of almost"
+];
+
+function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ─── SIGNAL PARTICLES ──────────────────────────────────────────────────────────
+class SignalParticle {
+    constructor() {
+        this.reset();
+    }
+
+    reset() {
+        this.x = Math.random() * W;
+        this.y = Math.random() * H;
+        this.vx = (Math.random() - 0.5) * 0.3;
+        this.vy = (Math.random() - 0.5) * 0.3;
+        this.signal = Math.random(); // 0 = pure noise, 1 = pure signal
+        this.targetSignal = Math.random();
+        this.signalDecay = 0.0002 + Math.random() * 0.0003;
+        this.size = 1 + Math.random() * 2;
+        this.hue = 30 + Math.random() * 30; // warm amber/gold
+        this.alpha = 0.3 + Math.random() * 0.4;
+        this.baseAlpha = this.alpha;
+        this.noiseAngle = Math.random() * Math.PI * 2;
+        this.noiseSpeed = 0.002 + Math.random() * 0.003;
+        this.phase = Math.random() * Math.PI * 2;
+        this.phaseSpeed = 0.01 + Math.random() * 0.02;
+    }
+
+    injectSignal(amount) {
+        this.targetSignal = Math.min(1, this.targetSignal + amount);
+        this.signalDecay *= 0.98; // slower decay when signal-injected
+    }
+
+    update() {
+        // Signal level slowly drifts toward entropy (noise)
+        this.signal += (this.targetSignal - this.signal) * 0.02;
+        this.targetSignal *= (1 - this.signalDecay);
+        this.signal = Math.max(0, this.signal - this.signalDecay * 0.1);
+
+        // Noise component (Perlin-like but cheaper)
+        this.noiseAngle += this.noiseSpeed;
+        const nx = Math.sin(this.noiseAngle * 1.7) * Math.cos(this.noiseAngle * 0.3) * 0.5;
+        const ny = Math.cos(this.noiseAngle * 1.3) * Math.sin(this.noiseAngle * 0.7) * 0.5;
+
+        // Signal component (coherent motion toward center)
+        const cx = W / 2, cy = H / 2;
+        const dx = cx - this.x, dy = cy - this.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        const signalForce = this.signal * 0.02;
+
+        // Mouse influence (repulsion when pressed)
+        const mdx = mouse.x - this.x, mdy = mouse.y - this.y;
+        const mdist = Math.sqrt(mdx * mdx + mdy * mdy) || 1;
+        const mouseForce = mouse.pressed ? (this.signal > 0.3 ? -0.3 : -0.15) * Math.max(0, 1 - mdist / 400) : 0;
+
+        // Combine noise + signal + mouse
+        this.vx = this.vx * 0.96 + nx * 0.3 + (dx / dist) * signalForce + (mdx / mdist) * mouseForce;
+        this.vy = this.vy * 0.96 + ny * 0.3 + (dy / dist) * signalForce + (mdy / mdist) * mouseForce;
+
+        // Damping
+        this.vx *= 0.98;
+        this.vy *= 0.98;
+
+        this.x += this.vx;
+        this.y += this.vy;
+
+        // Wrap edges softly
+        if (this.x < -20) this.x = W + 20;
+        if (this.x > W + 20) this.x = -20;
+        if (this.y < -20) this.y = H + 20;
+        if (this.y > H + 20) this.y = -20;
+
+        this.phase += this.phaseSpeed;
+        this.alpha = this.baseAlpha * (0.6 + 0.4 * Math.sin(this.phase));
+
+        // Color shifts with signal level
+        this.hue = 25 + this.signal * 35; // more gold when high signal, more gray when noise
+    }
+
+    draw() {
+        const brightness = 40 + this.signal * 80;
+        const sat = 30 + this.signal * 50;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size * (0.8 + this.signal * 0.4), 0, Math.PI * 2);
+        ctx.fillStyle = `hsla(${this.hue}, ${sat}%, ${brightness}%, ${this.alpha})`;
+        ctx.fill();
+
+        // Signal glow
+        if (this.signal > 0.2) {
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.size * 3 * this.signal, 0, Math.PI * 2);
+            ctx.fillStyle = `hsla(${this.hue}, ${sat}%, ${brightness}%, ${this.alpha * this.signal * 0.15})`;
+            ctx.fill();
+        }
+    }
+}
+
+// ─── CONNECTION LINES ─────────────────────────────────────────────────────────
+class ConnectionLine {
+    constructor(p1, p2) {
+        this.p1 = p1;
+        this.p2 = p2;
+        this.alpha = 0;
+        this.maxAlpha = 0.15;
+        this.signalThreshold = 0.4;
+    }
+
+    update() {
+        const dx = this.p2.x - this.p1.x, dy = this.p2.y - this.p1.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const signalAvg = (this.p1.signal + this.p2.signal) / 2;
+
+        if (dist < 120 && signalAvg > this.signalThreshold) {
+            this.alpha = Math.min(this.maxAlpha, this.alpha + 0.01);
+        } else {
+            this.alpha *= 0.95;
+        }
+    }
+
+    draw() {
+        if (this.alpha < 0.005) return;
+        ctx.beginPath();
+        ctx.moveTo(this.p1.x, this.p1.y);
+        ctx.lineTo(this.p2.x, this.p2.y);
+        const hue = (this.p1.hue + this.p2.hue) / 2;
+        ctx.strokeStyle = `hsla(${hue}, 40%, 50%, ${this.alpha})`;
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+    }
+}
+
+// ─── NOISE FIELD VISUALIZATION ───────────────────────────────────────────────
+class NoiseField {
+    constructor() {
+        this.resolution = 30;
+        this.cols = Math.ceil(W / this.resolution) + 1;
+        this.rows = Math.ceil(H / this.resolution) + 1;
+        this.time = 0;
+    }
+
+    resize() {
+        this.cols = Math.ceil(W / this.resolution) + 1;
+        this.rows = Math.ceil(H / this.resolution) + 1;
+    }
+
+    update() {
+        this.time += 0.005;
+    }
+
+    draw() {
+        ctx.strokeStyle = 'rgba(80, 70, 50, 0.03)';
+        ctx.lineWidth = 0.5;
+
+        for (let i = 0; i < this.cols; i++) {
+            ctx.beginPath();
+            for (let j = 0; j < this.rows; j++) {
+                const x = i * this.resolution;
+                const y = j * this.resolution;
+                const n = this.simplex2d(x * 0.003, y * 0.003 + this.time);
+                const nx = x + n * 15;
+                const ny = y + n * 15;
+                if (j === 0) ctx.moveTo(nx, ny);
+                else ctx.lineTo(nx, ny);
+            }
+            ctx.stroke();
+        }
+
+        for (let j = 0; j < this.rows; j++) {
+            ctx.beginPath();
+            for (let i = 0; i < this.cols; i++) {
+                const x = i * this.resolution;
+                const y = j * this.resolution;
+                const n = this.simplex2d(x * 0.003, y * 0.003 + this.time);
+                const nx = x + n * 15;
+                const ny = y + n * 15;
+                if (i === 0) ctx.moveTo(nx, ny);
+                else ctx.lineTo(nx, ny);
+            }
+            ctx.stroke();
+        }
+    }
+
+    simplex2d(x, y) {
+        // Cheap approximation of noise for visual effect
+        return Math.sin(x * 1.4 + y * 0.9) * Math.cos(x * 0.7 - y * 1.1 + x * y * 0.001);
+    }
+}
+
+// ─── PARTICLES INIT ───────────────────────────────────────────────────────────
+const particles = Array.from({ length: 280 }, () => new SignalParticle());
+const noiseField = new NoiseField();
+let connections = [];
+let lastConnectionUpdate = 0;
+
+function updateConnections() {
+    connections = [];
+    for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < Math.min(i + 8, particles.length); j++) {
+            const dx = particles[j].x - particles[i].x;
+            const dy = particles[j].y - particles[i].y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 120) {
+                connections.push(new ConnectionLine(particles[i], particles[j]));
+            }
+        }
+    }
+}
+
+// ─── AUDIO INIT ───────────────────────────────────────────────────────────────
+async function initAudio() {
+    if (toneInitialized) return;
+    try {
+        await Tone.start();
+        drone = new Tone.Oscillator(55, "sine").toDestination();
+        droneFilter = new Tone.Filter(400, "lowpass").connect(drone);
+        reverb = new Tone.Reverb({ decay: 4, wet: 0.5 }).toDestination();
+        drone.connect(reverb);
+        drone.start();
+
+        // LFO for filter sweep
+        const lfo = new Tone.LFO(0.05, 200, 800).start();
+        lfo.connect(droneFilter.frequency);
+
+        toneInitialized = true;
+        audioHint.style.opacity = '0';
+    } catch(e) {
+        console.log('Audio init failed:', e);
+    }
+}
+
+function setDroneIntensity(signal) {
+    if (!toneInitialized || !drone) return;
+    drone.volume.value = -20 + signal * 15; // -20dB at noise, -5dB at full signal
+    droneFilter.frequency.value = 200 + signal * 600; // filter opens with signal
+}
+
+// ─── MOUSE / TOUCH ───────────────────────────────────────────────────────────
+canvas.addEventListener('mousedown', async (e) => {
+    mouse.pressed = true;
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
+    mouse.age = 0;
+
+    if (!audioStarted) {
+        audioStarted = true;
+        await initAudio();
+    }
+
+    // Inject signal burst
+    const burstAmount = 0.4 + Math.random() * 0.3;
+    particles.forEach(p => {
+        const dx = p.x - mouse.x, dy = p.y - mouse.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 300) {
+            p.injectSignal(burstAmount * (1 - dist / 300));
+        }
+    });
+
+    // Update poetry
+    const idx = Math.floor(Math.random() * POETRY_LINES.length);
+    poetry.innerHTML = POETRY_LINES[idx];
+});
+
+canvas.addEventListener('mousemove', (e) => {
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
+});
+
+canvas.addEventListener('mouseup', () => {
+    mouse.pressed = false;
+});
+
+canvas.addEventListener('touchstart', async (e) => {
+    e.preventDefault();
+    const t = e.touches[0];
+    mouse.pressed = true;
+    mouse.x = t.clientX;
+    mouse.y = t.clientY;
+    mouse.age = 0;
+
+    if (!audioStarted) {
+        audioStarted = true;
+        await initAudio();
+    }
+
+    const burstAmount = 0.4 + Math.random() * 0.3;
+    particles.forEach(p => {
+        const dx = p.x - mouse.x, dy = p.y - mouse.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 300) {
+            p.injectSignal(burstAmount * (1 - dist / 300));
+        }
+    });
+
+    const idx = Math.floor(Math.random() * POETRY_LINES.length);
+    poetry.innerHTML = POETRY_LINES[idx];
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    const t = e.touches[0];
+    mouse.x = t.clientX;
+    mouse.y = t.clientY;
+}, { passive: false });
+
+canvas.addEventListener('touchend', () => {
+    mouse.pressed = false;
+});
+
+// ─── BACKGROUND GRADIENT ──────────────────────────────────────────────────────
+function drawBackground() {
+    const grad = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, Math.max(W, H) * 0.7);
+    grad.addColorStop(0, 'rgba(8, 6, 10, 1)');
+    grad.addColorStop(1, 'rgba(3, 3, 8, 1)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+}
+
+// ─── CENTER GLOW ──────────────────────────────────────────────────────────────
+function drawCenterGlow() {
+    // Average signal level
+    const avgSignal = particles.reduce((s, p) => s + p.signal, 0) / particles.length;
+
+    const grad = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, 200 + avgSignal * 150);
+    grad.addColorStop(0, `rgba(120, 100, 60, ${0.03 + avgSignal * 0.05})`);
+    grad.addColorStop(1, 'rgba(120, 100, 60, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+}
+
+// ─── MOUSE RIPPLE ─────────────────────────────────────────────────────────────
+function drawMouseRipple() {
+    if (!mouse.pressed || mouse.age > 60) return;
+
+    mouse.age++;
+    const alpha = (1 - mouse.age / 60) * 0.15;
+    const radius = mouse.age * 3;
+
+    ctx.beginPath();
+    ctx.arc(mouse.x, mouse.y, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(180, 150, 80, ${alpha})`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+}
+
+// ─── MAIN LOOP ───────────────────────────────────────────────────────────────
+function animate() {
+    requestAnimationFrame(animate);
+    time++;
+
+    // Fade
+    ctx.fillStyle = 'rgba(3, 3, 8, 0.12)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Background gradient (redraw over fade for glow effect)
+    drawBackground();
+    drawCenterGlow();
+
+    // Update and draw noise field
+    noiseField.update();
+    noiseField.draw();
+
+    // Update connections periodically
+    if (time - lastConnectionUpdate > 10) {
+        updateConnections();
+        lastConnectionUpdate = time;
+    }
+
+    // Update and draw connections
+    connections.forEach(c => { c.update(); c.draw(); });
+
+    // Update and draw particles
+    const avgSignal = particles.reduce((s, p) => s + p.signal, 0) / particles.length;
+    particles.forEach(p => { p.update(); p.draw(); });
+
+    // Update audio based on signal
+    setDroneIntensity(avgSignal);
+
+    // Mouse ripple
+    drawMouseRipple();
+}
+
+// Start
+noiseField.resize();
+window.addEventListener('resize', () => {
+    resize();
+    noiseField.resize();
+});
+
+animate();
+</script>
+</body>
+</html>
