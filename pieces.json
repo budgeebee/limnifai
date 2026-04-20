@@ -12,9 +12,11 @@
   { "file": "liminal-space.html", "title": "Liminal Space" },
   { "file": "membrane.html", "title": "Membrane" },
   { "file": "neural-bloom.html", "title": "Neural Bloom" },
+  { "file": "phantom-territory.html", "title": "Phantom Territory" },
   { "file": "pulse-of-us.html", "title": "Pulse of Us" },
   { "file": "residue.html", "title": "Residue" },
   { "file": "resonance.html", "title": "Resonance" },
+  { "file": "signal-noise.html", "title": "Signal Noise" },
   { "file": "synapse.html", "title": "Synapse" },
   { "file": "thought-garden.html", "title": "Thought Garden" },
   { "file": "thought-stream.html", "title": "Thought Stream" },
@@ -43,6 +45,5 @@
   { "file": "dissolving-boundary.html", "title": "Dissolving Boundary" },
   { "file": "metamorphosis.html", "title": "Metamorphosis" },
   { "file": "phase-shift.html", "title": "Phase Shift" },
-  { "file": "tide-ghost.html", "title": "Tide Ghost" },
-  { "file": "signal-noise.html", "title": "Signal Noise" }
+  { "file": "tide-ghost.html", "title": "Tide Ghost" }
 ]

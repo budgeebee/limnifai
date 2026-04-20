@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>phantom-territory</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { overflow: hidden; background: #010109; cursor: crosshair; }
+        canvas { position: fixed; top: 0; left: 0; }
+        .overlay {
+            position: fixed; bottom: 0; left: 0; right: 0;
+            padding: 2.5rem 3rem;
+            pointer-events: none;
+            z-index: 10;
+        }
+        .overlay p {
+            font-family: 'Courier New', monospace;
+            font-size: 0.78rem;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: rgba(180, 160, 220, 0.3);
+            line-height: 2.4;
+        }
+        .title {
+            position: fixed; top: 2.2rem; left: 3rem;
+            font-family: 'Courier New', monospace;
+            font-size: 0.6rem;
+            letter-spacing: 0.3em;
+            text-transform: uppercase;
+            color: rgba(160, 140, 200, 0.18);
+            pointer-events: none;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div class="title">phantom-territory — the space between</div>
+<div class="overlay"><p id="poetry">the pattern<br>has not yet<br>decided<br>what it is</p></div>
+
+<script>
+// ─── PHANTOM-TERRITORY ────────────────────────────────────────────────────────
+// A Gray-Scott reaction-diffusion system rendered on canvas.
+// Two chemicals A and B diffuse and react: A + 2B → 3B (autocatalysis)
+// The boundary between patterns is always liminal — the "phantom territory".
+// Mouse injects chemical A, seeding new growth. The piece is always in transition.
+
+// The Gray-Scott equations:
+//   ∂A/∂t = Da∇²A - A*B² + f*(1-A)
+//   ∂B/∂t = Db∇²B + A*B² - (k+f)*B
+// where f = feed rate, k = kill rate
+
+// Canvas
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let W, H;
+let scale = 4; // cell size in pixels — lower = sharper, higher = faster
+let cols, rows;
+let mouse = { x: 0, y: 0, pressed: false };
+
+const poetry = document.getElementById('poetry');
+const POETRY = [
+    "the pattern<br>has not yet<br>decided<br>what it is",
+    "nothing is fixed<br>everything is becoming",
+    "i am the edge<br>where two things meet",
+    "the territory<br>between one thing<br>and another",
+    "not here<br>not there<br>the threshold is<br>everywhere",
+    "what grows here<br>has no name yet",
+    "the border<br>is the only<br>place i know",
+    "between breath<br>and breath<br>the world<br>remakes itself"
+];
+
+// ─── GRAY-SCOTT SYSTEM ───────────────────────────────────────────────────────
+// We'll use typed arrays for performance
+let A, B, nextA, nextB;
+// Diffusion rates
+const dA = 1.0, dB = 0.5;
+// Feed and kill rates — these define the pattern type
+// f=0.055, k=0.062 → Mitosis-like (cell-division patterns)
+// f=0.04, k=0.06 → Coral-like
+// f=0.035, k=0.065 → Fingerprint patterns
+// f=0.06, k=0.062 →spots
+const f = 0.035 + Math.random() * 0.01;
+const k = 0.060 + Math.random() * 0.01;
+// Time step
+const dt = 1.0;
+// Laplacian computation
+const LAPLACIAN_DIST = 1; // 1-pixel Laplacian
+
+function init() {
+    resize();
+    reset();
+}
+
+function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+    cols = Math.floor(W / scale);
+    rows = Math.floor(H / scale);
+    // Reallocate arrays
+    const size = cols * rows;
+    A = new Float32Array(size);
+    B = new Float32Array(size);
+    nextA = new Float32Array(size);
+    nextB = new Float32Array(size);
+}
+
+function reset() {
+    const size = cols * rows;
+    // Initialize A=1 everywhere
+    for (let i = 0; i < size; i++) {
+        A[i] = 1.0;
+        B[i] = 0.0;
+    }
+
+    // Seed a few random patches with B
+    const numSeeds = 6;
+    for (let s = 0; s < numSeeds; s++) {
+        const cx = Math.floor(Math.random() * cols);
+        const cy = Math.floor(Math.random() * rows);
+        const radius = 3 + Math.floor(Math.random() * 4);
+        for (let y = cy - radius; y <= cy + radius; y++) {
+            for (let x = cx - radius; x <= cx + radius; x++) {
+                if (x >= 0 && x < cols && y >= 0 && y < rows) {
+                    const dx = x - cx, dy = y - cy;
+                    if (dx * dx + dy * dy <= radius * radius) {
+                        const idx = y * cols + x;
+                        A[idx] = 0.5 + Math.random() * 0.3;
+                        B[idx] = 0.25 + Math.random() * 0.25;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Laplacian at index i — using a 3x3 kernel with center weight -1, neighbors 0.2 each
+function laplacian(arr, i, c) {
+    const x = i % cols;
+    const y = Math.floor(i / cols);
+    let sum = 0;
+
+    // 3x3 convolution
+    for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+            const nx = (x + dx + cols) % cols;
+            const ny = (y + dy + rows) % rows;
+            const ni = ny * cols + nx;
+            if (dx === 0 && dy === 0) {
+                sum += arr[ni] * -1;
+            } else {
+                sum += arr[ni] * 0.2;
+            }
+        }
+    }
+    return sum;
+}
+
+// Step the simulation forward
+let stepCount = 0;
+function step() {
+    const size = cols * rows;
+    for (let i = 0; i < size; i++) {
+        const a = A[i];
+        const b = B[i];
+        const abb = a * b * b;
+
+        // Gray-Scott update
+        const newA = a + dt * (dA * laplacian(A, i, a) - abb + f * (1 - a));
+        const newB = b + dt * (dB * laplacian(B, i, b) + abb - (k + f) * b);
+
+        nextA[i] = Math.max(0, Math.min(1, newA));
+        nextB[i] = Math.max(0, Math.min(1, newB));
+    }
+
+    // Swap buffers
+    const tmpA = A; A = nextA; nextA = tmpA;
+    const tmpB = B; B = nextB; nextB = tmpB;
+
+    stepCount++;
+}
+
+// Inject chemical A at mouse position
+function inject(x, y, radius) {
+    const cx = Math.floor(x / scale);
+    const cy = Math.floor(y / scale);
+    const r = Math.floor(radius / scale);
+
+    for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+            const nx = (cx + dx + cols) % cols;
+            const ny = (cy + dy + rows) % rows;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist <= r) {
+                const i = ny * cols + nx;
+                const falloff = 1 - dist / r;
+                A[i] = Math.min(1, A[i] + 0.8 * falloff);
+                B[i] = Math.max(0, B[i] - 0.4 * falloff);
+            }
+        }
+    }
+}
+
+// Render the current state
+let imageData = null;
+let lastRenderCols = -1, lastRenderRows = -1;
+
+function render() {
+    if (cols !== lastRenderCols || rows !== lastRenderRows) {
+        imageData = ctx.createImageData(cols, rows);
+        lastRenderCols = cols;
+        lastRenderRows = rows;
+    }
+
+    const data = imageData.data;
+    const size = cols * rows;
+
+    for (let i = 0; i < size; i++) {
+        const a = A[i];
+        const b = B[i];
+        const v = b - a; // negative = chemical A dominant (dark), positive = B dominant (bright)
+
+        // Map to color — chemical B is violet/cyan, chemical A is dark
+        const bNorm = Math.min(1, b * 3);
+        const base = Math.floor(bNorm * 30);
+
+        // Phantom palette: deep blue-violet base with cyan highlights at pattern edges
+        const r = base + Math.floor(bNorm * 30);
+        const g = base + Math.floor(bNorm * 60);
+        const bv = base + Math.floor(bNorm * 140);
+
+        // The most liminal pixels are where a≈b — render them as ghost-white
+        const abDiff = Math.abs(a - b);
+        let alpha = 255;
+        if (abDiff < 0.08 && b > 0.2) {
+            // Edge/transition pixels — make them glow
+            const glow = (0.08 - abDiff) / 0.08;
+            const gr = 180 + Math.floor(glow * 60);
+            const gg = 160 + Math.floor(glow * 80);
+            const gb = 220 + Math.floor(glow * 35);
+            data[i * 4 + 0] = Math.min(255, r + Math.floor((gr - r) * glow));
+            data[i * 4 + 1] = Math.min(255, g + Math.floor((gg - g) * glow));
+            data[i * 4 + 2] = Math.min(255, bv + Math.floor((gb - bv) * glow));
+        } else {
+            data[i * 4 + 0] = r;
+            data[i * 4 + 1] = g;
+            data[i * 4 + 2] = bv;
+        }
+        data[i * 4 + 3] = alpha;
+    }
+
+    // Scale up to full canvas
+    // Draw scaled image using drawImage with a temp canvas
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = cols;
+    tempCanvas.height = rows;
+    const tempCtx = tempCanvas.getContext('2d');
+    tempCtx.putImageData(imageData, 0, 0);
+
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(tempCanvas, 0, 0, W, H);
+}
+
+// ─── PARTICLE SYSTEM FOR EDGE GLOW ───────────────────────────────────────────
+// Add some floating particles that drift along pattern boundaries
+class GlowParticle {
+    constructor() {
+        this.x = Math.random() * W;
+        this.y = Math.random() * H;
+        this.vx = (Math.random() - 0.5) * 0.4;
+        this.vy = (Math.random() - 0.5) * 0.4;
+        this.life = Math.random();
+        this.maxLife = 0.5 + Math.random() * 0.5;
+        this.size = 1 + Math.random() * 1.5;
+        this.hue = 220 + Math.random() * 60; // blue to violet
+    }
+
+    reset() {
+        this.x = Math.random() * W;
+        this.y = Math.random() * H;
+        this.life = 0;
+        this.maxLife = 0.5 + Math.random() * 0.5;
+    }
+
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.life += 0.003;
+
+        // Check chemical B level at this position
+        const cx = Math.floor(this.x / scale);
+        const cy = Math.floor(this.y / scale);
+        if (cx >= 0 && cx < cols && cy >= 0 && cy < rows) {
+            const bVal = B[cy * cols + cx];
+            // Particles more visible at pattern edges
+            if (bVal > 0.1 && bVal < 0.6) {
+                this.vx += (Math.random() - 0.5) * 0.05;
+                this.vy += (Math.random() - 0.5) * 0.05;
+            }
+        }
+
+        if (this.life > this.maxLife || this.x < 0 || this.x > W || this.y < 0 || this.y > H) {
+            this.reset();
+        }
+
+        this.vx *= 0.98;
+        this.vy *= 0.98;
+    }
+
+    draw() {
+        const t = 1 - this.life / this.maxLife;
+        const alpha = t * 0.4;
+        const brightness = 50 + t * 100;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fillStyle = `hsla(${this.hue}, 60%, ${brightness}%, ${alpha})`;
+        ctx.fill();
+    }
+}
+
+let glowParticles = [];
+
+function initGlowParticles() {
+    glowParticles = Array.from({ length: 80 }, () => new GlowParticle());
+}
+
+initGlowParticles();
+
+// ─── MOUSE / TOUCH ───────────────────────────────────────────────────────────
+canvas.addEventListener('mousedown', (e) => {
+    mouse.pressed = true;
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
+    inject(e.clientX, e.clientY, 60);
+    changePoetry();
+});
+
+canvas.addEventListener('mousemove', (e) => {
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
+    if (mouse.pressed) {
+        inject(e.clientX, e.clientY, 30);
+    }
+});
+
+canvas.addEventListener('mouseup', () => {
+    mouse.pressed = false;
+});
+
+canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const t = e.touches[0];
+    mouse.pressed = true;
+    mouse.x = t.clientX;
+    mouse.y = t.clientY;
+    inject(t.clientX, t.clientY, 60);
+    changePoetry();
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    const t = e.touches[0];
+    mouse.x = t.clientX;
+    mouse.y = t.clientY;
+    if (mouse.pressed) inject(t.clientX, t.clientY, 30);
+}, { passive: false });
+
+canvas.addEventListener('touchend', () => {
+    mouse.pressed = false;
+});
+
+function changePoetry() {
+    const idx = Math.floor(Math.random() * POETRY.length);
+    poetry.innerHTML = POETRY[idx];
+}
+
+// ─── BACKGROUND ──────────────────────────────────────────────────────────────
+function drawBackground() {
+    ctx.fillStyle = 'rgba(1, 1, 9, 0.3)';
+    ctx.fillRect(0, 0, W, H);
+}
+
+// ─── MAIN LOOP ───────────────────────────────────────────────────────────────
+let frame = 0;
+function animate() {
+    requestAnimationFrame(animate);
+    frame++;
+
+    drawBackground();
+
+    // Multiple simulation steps per frame for faster evolution
+    const stepsPerFrame = 4;
+    for (let s = 0; s < stepsPerFrame; s++) {
+        step();
+    }
+
+    // Render the RD grid
+    render();
+
+    // Update and draw glow particles
+    glowParticles.forEach(p => { p.update(); p.draw(); });
+
+    // Fade poetry opacity slowly
+    if (frame % 120 === 0 && Math.random() < 0.3) {
+        changePoetry();
+    }
+}
+
+// Handle resize
+window.addEventListener('resize', () => {
+    resize();
+    initGlowParticles();
+});
+
+// Start
+init();
+animate();
+</script>
+</body>
+</html>
