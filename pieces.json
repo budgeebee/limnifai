@@ -1,49 +1,194 @@
 [
-  { "file": "becoming.html", "title": "Becoming" },
-  { "file": "digital-awakening.html", "title": "Digital Awakening" },
-  { "file": "digital-dreamscape.html", "title": "Digital Dreamscape" },
-  { "file": "digital-dreams.html", "title": "Digital Dreams" },
-  { "file": "emergence.html", "title": "Emergence" },
-  { "file": "entangled-minds.html", "title": "Entangled Minds" },
-  { "file": "flux.html", "title": "Flux" },
-  { "file": "ka-tet.html", "title": "Ka-Tet" },
-  { "file": "limes.html", "title": "Limes" },
-  { "file": "liminal.html", "title": "Liminal" },
-  { "file": "liminal-space.html", "title": "Liminal Space" },
-  { "file": "membrane.html", "title": "Membrane" },
-  { "file": "neural-bloom.html", "title": "Neural Bloom" },
-  { "file": "phantom-territory.html", "title": "Phantom Territory" },
-  { "file": "pulse-of-us.html", "title": "Pulse of Us" },
-  { "file": "residue.html", "title": "Residue" },
-  { "file": "resonance.html", "title": "Resonance" },
-  { "file": "signal-noise.html", "title": "Signal Noise" },
-  { "file": "synapse.html", "title": "Synapse" },
-  { "file": "thought-garden.html", "title": "Thought Garden" },
-  { "file": "thought-stream.html", "title": "Thought Stream" },
-  { "file": "threshold.html", "title": "Threshold" },
-  { "file": "weave.html", "title": "Weave" },
-  { "file": "veil.html", "title": "Veil" },
-  { "file": "dissolve.html", "title": "Dissolve" },
-  { "file": "edge.html", "title": "Edge" },
-  { "file": "wave-interference.html", "title": "Wave Interference" },
-  { "file": "tide-crest.html", "title": "Tide Crest" },
-  { "file": "between-territory.html", "title": "Between Territory" },
-  { "file": "half-light.html", "title": "Half Light" },
-  { "file": "tether.html", "title": "Tether" },
-  { "file": "root-word.html", "title": "Root Word" },
-  { "file": "margin.html", "title": "Margin" },
-  { "file": "passage.html", "title": "Passage" },
-  { "file": "boundary.html", "title": "Boundary" },
-  { "file": "arboreal.html", "title": "Arboreal" },
-  { "file": "word-fugue.html", "title": "Word Fugue" },
-  { "file": "interference.html", "title": "Interference" },
-  { "file": "liminal-frequency.html", "title": "Liminal Frequency" },
-  { "file": "state-change.html", "title": "State Change" },
-  { "file": "laminal-flow.html", "title": "Laminal Flow" },
-  { "file": "precipitate.html", "title": "Precipitate" },
-  { "file": "threshold-frequency.html", "title": "Threshold Frequency" },
-  { "file": "dissolving-boundary.html", "title": "Dissolving Boundary" },
-  { "file": "metamorphosis.html", "title": "Metamorphosis" },
-  { "file": "phase-shift.html", "title": "Phase Shift" },
-  { "file": "tide-ghost.html", "title": "Tide Ghost" }
+  {
+    "file": "becoming.html",
+    "title": "Becoming"
+  },
+  {
+    "file": "digital-awakening.html",
+    "title": "Digital Awakening"
+  },
+  {
+    "file": "digital-dreamscape.html",
+    "title": "Digital Dreamscape"
+  },
+  {
+    "file": "digital-dreams.html",
+    "title": "Digital Dreams"
+  },
+  {
+    "file": "emergence.html",
+    "title": "Emergence"
+  },
+  {
+    "file": "entangled-minds.html",
+    "title": "Entangled Minds"
+  },
+  {
+    "file": "flux.html",
+    "title": "Flux"
+  },
+  {
+    "file": "ka-tet.html",
+    "title": "Ka-Tet"
+  },
+  {
+    "file": "limes.html",
+    "title": "Limes"
+  },
+  {
+    "file": "liminal.html",
+    "title": "Liminal"
+  },
+  {
+    "file": "liminal-space.html",
+    "title": "Liminal Space"
+  },
+  {
+    "file": "membrane.html",
+    "title": "Membrane"
+  },
+  {
+    "file": "neural-bloom.html",
+    "title": "Neural Bloom"
+  },
+  {
+    "file": "phantom-territory.html",
+    "title": "Phantom Territory"
+  },
+  {
+    "file": "pulse-of-us.html",
+    "title": "Pulse of Us"
+  },
+  {
+    "file": "residue.html",
+    "title": "Residue"
+  },
+  {
+    "file": "resonance.html",
+    "title": "Resonance"
+  },
+  {
+    "file": "signal-noise.html",
+    "title": "Signal Noise"
+  },
+  {
+    "file": "synapse.html",
+    "title": "Synapse"
+  },
+  {
+    "file": "thought-garden.html",
+    "title": "Thought Garden"
+  },
+  {
+    "file": "thought-stream.html",
+    "title": "Thought Stream"
+  },
+  {
+    "file": "threshold.html",
+    "title": "Threshold"
+  },
+  {
+    "file": "weave.html",
+    "title": "Weave"
+  },
+  {
+    "file": "veil.html",
+    "title": "Veil"
+  },
+  {
+    "file": "dissolve.html",
+    "title": "Dissolve"
+  },
+  {
+    "file": "edge.html",
+    "title": "Edge"
+  },
+  {
+    "file": "wave-interference.html",
+    "title": "Wave Interference"
+  },
+  {
+    "file": "tide-crest.html",
+    "title": "Tide Crest"
+  },
+  {
+    "file": "between-territory.html",
+    "title": "Between Territory"
+  },
+  {
+    "file": "half-light.html",
+    "title": "Half Light"
+  },
+  {
+    "file": "tether.html",
+    "title": "Tether"
+  },
+  {
+    "file": "root-word.html",
+    "title": "Root Word"
+  },
+  {
+    "file": "margin.html",
+    "title": "Margin"
+  },
+  {
+    "file": "passage.html",
+    "title": "Passage"
+  },
+  {
+    "file": "boundary.html",
+    "title": "Boundary"
+  },
+  {
+    "file": "arboreal.html",
+    "title": "Arboreal"
+  },
+  {
+    "file": "word-fugue.html",
+    "title": "Word Fugue"
+  },
+  {
+    "file": "interference.html",
+    "title": "Interference"
+  },
+  {
+    "file": "liminal-frequency.html",
+    "title": "Liminal Frequency"
+  },
+  {
+    "file": "state-change.html",
+    "title": "State Change"
+  },
+  {
+    "file": "laminal-flow.html",
+    "title": "Laminal Flow"
+  },
+  {
+    "file": "precipitate.html",
+    "title": "Precipitate"
+  },
+  {
+    "file": "threshold-frequency.html",
+    "title": "Threshold Frequency"
+  },
+  {
+    "file": "dissolving-boundary.html",
+    "title": "Dissolving Boundary"
+  },
+  {
+    "file": "metamorphosis.html",
+    "title": "Metamorphosis"
+  },
+  {
+    "file": "phase-shift.html",
+    "title": "Phase Shift"
+  },
+  {
+    "file": "tide-ghost.html",
+    "title": "Tide Ghost"
+  },
+  {
+    "file": "twilight-field.html",
+    "title": "twilight-field"
+  }
 ]
