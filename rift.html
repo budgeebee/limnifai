@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rift</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+  canvas { display: block; position: fixed; top: 0; left: 0; }
+  .overlay {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    padding: 2.5rem 3rem;
+    pointer-events: none;
+    z-index: 20;
+  }
+  .overlay p {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: clamp(0.85rem, 1.4vw, 1.05rem);
+    line-height: 1.9;
+    letter-spacing: 0.03em;
+    color: rgba(220, 200, 255, 0.55);
+    text-align: center;
+    max-width: 640px;
+    margin: 0 auto;
+    opacity: 0;
+    transition: opacity 4s ease;
+  }
+  .overlay p.visible { opacity: 1; }
+  .title-tag {
+    position: fixed; top: 1.8rem; right: 2.2rem;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
+    color: rgba(180, 150, 220, 0.3);
+    text-transform: uppercase;
+    pointer-events: none;
+    z-index: 20;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="title-tag">rift</div>
+<div class="overlay"><p id="poem">in the wound between worlds<br>the in-between breathes<br>neither here nor there —<br>the threshold is the only home</p></div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+let mx = 0, my = 0;
+let riftPhase = 0;
+let time = 0;
+
+const PARTICLE_COUNT = 2800;
+const RIFT_SPREAD = 0.12;
+
+let particles = [];
+
+class Particle {
+  constructor(randomY) {
+    this.reset(randomY);
+  }
+  reset(randomY = false) {
+    this.x = Math.random() * W;
+    this.y = randomY ? Math.random() * H : H + Math.random() * 60;
+    this.vx = 0.6 + Math.random() * 1.2;
+    this.vy = (Math.random() - 0.5) * 0.4;
+    this.size = 1.2 + Math.random() * 2.8;
+    this.alpha = 0;
+    this.state = 'pre'; // pre, crossing, post
+    this.life = 0;
+    this.maxLife = 400 + Math.random() * 600;
+    this.turbX = Math.random() * 1000;
+    this.turbY = Math.random() * 1000;
+  }
+  update() {
+    const t = time * 0.0008;
+    const turbX = Math.sin(t + this.turbX) * 0.4;
+    const turbY = Math.sin(t * 1.3 + this.turbY) * 0.3;
+
+    // Mouse influence
+    const dx = this.x - mx;
+    const dy = this.y - my;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const influence = Math.max(0, 1 - dist / 280);
+    const angle = Math.atan2(dy, dx);
+    this.vx += Math.cos(angle) * influence * 0.6;
+    this.vy += Math.sin(angle) * influence * 0.6;
+
+    this.vx += turbX * 0.05;
+    this.vy += turbY * 0.05;
+
+    // Damping
+    this.vx *= 0.97;
+    this.vy *= 0.97;
+
+    // Base drift upward with slight rightward bias
+    this.vy -= 0.018;
+    this.vx += 0.004;
+
+    this.x += this.vx;
+    this.y += this.vy;
+    this.life++;
+
+    // Determine rift proximity and state
+    const riftCenterX = W * 0.5;
+    const riftCenterY = H * 0.5;
+    const distFromRift = Math.abs(this.x - riftCenterX);
+    const yDistFromRift = Math.abs(this.y - riftCenterY);
+    const riftWidth = W * RIFT_SPREAD * (1 + 0.3 * Math.sin(riftPhase * 2 + this.y / H * Math.PI));
+    const riftHeight = H * RIFT_SPREAD * (1 + 0.3 * Math.sin(riftPhase * 1.5 + this.x / W * Math.PI));
+
+    const inRiftX = distFromRift < riftWidth;
+    const inRiftY = yDistFromRift < riftHeight;
+    const inRift = inRiftX && inRiftY;
+
+    if (inRift && this.state === 'pre') {
+      this.state = 'crossing';
+    } else if (this.state === 'crossing' && !inRift) {
+      this.state = 'post';
+    }
+
+    // Alpha based on state
+    if (this.state === 'pre') {
+      this.alpha = Math.min(1, this.life / 60) * 0.35;
+    } else if (this.state === 'crossing') {
+      this.alpha = 0.9;
+      // Pull toward rift center
+      const pull = 0.08;
+      this.vx += (riftCenterX - this.x) * pull * 0.02;
+      this.vy += (riftCenterY - this.y) * pull * 0.02;
+    } else {
+      this.alpha = 0.7;
+    }
+
+    // Reset when out of bounds or dead
+    if (this.life > this.maxLife || this.x > W + 30 || this.y < -30 || this.y > H + 30) {
+      this.reset(false);
+    }
+  }
+  draw() {
+    let r, g, b;
+    if (this.state === 'pre') {
+      r = 80; g = 120; b = 200;
+    } else if (this.state === 'crossing') {
+      const t = Math.sin(riftPhase * 4) * 0.5 + 0.5;
+      r = 100 + t * 155;
+      g = 60 + t * 80;
+      b = 255;
+    } else {
+      r = 200; g = 100; b = 220;
+    }
+
+    // Glow when crossing
+    if (this.state === 'crossing') {
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.size * 3, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${r},${g},${b},${this.alpha * 0.15})`;
+      ctx.fill();
+    }
+
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${r},${g},${b},${this.alpha})`;
+    ctx.fill();
+  }
+}
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  if (particles.length === 0) init();
+}
+
+function init() {
+  particles = [];
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    particles.push(new Particle(true));
+  }
+}
+
+function drawRift() {
+  const cx = W / 2;
+  const cy = H / 2;
+
+  // Animate rift phase
+  riftPhase += 0.008;
+
+  // Main rift geometry — a torn vertical slit
+  const halfW = W * 0.5;
+  const halfH = H * 0.5;
+
+  // Outer glow layers
+  for (let i = 5; i >= 0; i--) {
+    const spread = i * (W * 0.015) * (1 + 0.2 * Math.sin(riftPhase));
+    const grad = ctx.createLinearGradient(cx - spread, 0, cx + spread, 0);
+    const pulse = 0.5 + 0.5 * Math.sin(riftPhase * 2);
+    const baseAlpha = 0.06 * (1 - i / 6) * pulse;
+    grad.addColorStop(0, `rgba(80,40,180,0)`);
+    grad.addColorStop(0.4, `rgba(100,60,200,${baseAlpha})`);
+    grad.addColorStop(0.5, `rgba(200,120,255,${baseAlpha * 1.5})`);
+    grad.addColorStop(0.6, `rgba(100,60,200,${baseAlpha})`);
+    grad.addColorStop(1, `rgba(80,40,180,0)`);
+
+    ctx.save();
+    ctx.beginPath();
+    // Tapered rift shape — wider at center, narrowing to top/bottom
+    const topNarrow = 0.04;
+    const botNarrow = 0.04;
+    ctx.moveTo(cx - W * topNarrow, 0);
+    ctx.lineTo(cx + W * topNarrow, 0);
+    ctx.lineTo(cx + W * 0.02 + spread, cy);
+    ctx.lineTo(cx + W * botNarrow, H);
+    ctx.lineTo(cx - W * botNarrow, H);
+    ctx.lineTo(cx - W * 0.02 - spread, cy);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Central bright line — the actual rift
+  const brightPulse = 0.6 + 0.4 * Math.sin(riftPhase * 3);
+  const lineGrad = ctx.createLinearGradient(cx - 4, 0, cx + 4, 0);
+  lineGrad.addColorStop(0, `rgba(180,140,255,0)`);
+  lineGrad.addColorStop(0.3, `rgba(200,160,255,${0.3 * brightPulse})`);
+  lineGrad.addColorStop(0.5, `rgba(255,220,255,${0.7 * brightPulse})`);
+  lineGrad.addColorStop(0.7, `rgba(200,160,255,${0.3 * brightPulse})`);
+  lineGrad.addColorStop(1, `rgba(180,140,255,0)`);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(cx - W * 0.01, 0);
+  ctx.lineTo(cx + W * 0.01, 0);
+  ctx.lineTo(cx + W * 0.005, H);
+  ctx.lineTo(cx - W * 0.005, H);
+  ctx.closePath();
+  ctx.fillStyle = lineGrad;
+  ctx.fill();
+  ctx.restore();
+
+  // Flickering sparks along rift
+  const sparkCount = 8;
+  for (let i = 0; i < sparkCount; i++) {
+    const sy = (i / sparkCount + riftPhase * 0.05) % 1 * H;
+    const flicker = Math.sin(riftPhase * 7 + i * 2.3) * 0.5 + 0.5;
+    const sparkX = cx + Math.sin(riftPhase * 2 + i) * (W * 0.005);
+    ctx.beginPath();
+    ctx.arc(sparkX, sy, 1.5 + flicker * 2, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255,220,255,${flicker * 0.8})`;
+    ctx.fill();
+  }
+}
+
+function drawNoise() {
+  const imgData = ctx.createImageData(W, H);
+  const data = imgData.data;
+  // Only update a subset to simulate noise
+  const step = 4;
+  for (let y = 0; y < H; y += step) {
+    for (let x = 0; x < W; x += step) {
+      const n = (Math.random() - 0.5) * 12;
+      for (let dy = 0; dy < step && y + dy < H; dy++) {
+        for (let dx = 0; dx < step && x + dx < W; dx++) {
+          const idx = ((y + dy) * W + (x + dx)) * 4;
+          data[idx] = Math.max(0, n);
+          data[idx + 1] = Math.max(0, n * 0.8);
+          data[idx + 2] = Math.max(0, n * 1.2);
+          data[idx + 3] = 8;
+        }
+      }
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+}
+
+function animate(ts) {
+  time = ts;
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  ctx.fillRect(0, 0, W, H);
+
+  drawRift();
+
+  for (const p of particles) {
+    p.update();
+    p.draw();
+  }
+
+  // Subtle noise overlay
+  if (Math.random() < 0.3) {
+    drawNoise();
+  }
+
+  // Vignette
+  const vigGrad = ctx.createRadialGradient(W/2, H/2, H * 0.3, W/2, H/2, H * 0.9);
+  vigGrad.addColorStop(0, 'rgba(0,0,0,0)');
+  vigGrad.addColorStop(1, 'rgba(0,0,0,0.55)');
+  ctx.fillStyle = vigGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  requestAnimationFrame(animate);
+}
+
+window.addEventListener('resize', resize);
+window.addEventListener('mousemove', e => {
+  mx = e.clientX;
+  my = e.clientY;
+});
+window.addEventListener('touchmove', e => {
+  mx = e.touches[0].clientX;
+  my = e.touches[0].clientY;
+}, { passive: true });
+
+resize();
+requestAnimationFrame(animate);
+
+// Fade in poem after 2 seconds
+setTimeout(() => {
+  document.getElementById('poem').classList.add('visible');
+}, 2000);
+</script>
+</body>
+</html>
