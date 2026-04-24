@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Basin</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a0c; }
+  canvas { display: block; position: fixed; top: 0; left: 0; }
+  .overlay {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    padding: 2.5rem 3rem;
+    pointer-events: none;
+    z-index: 20;
+  }
+  .overlay p {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: clamp(0.8rem, 1.3vw, 1rem);
+    line-height: 2;
+    letter-spacing: 0.04em;
+    color: rgba(200, 220, 255, 0.5);
+    text-align: center;
+    max-width: 600px;
+    margin: 0 auto;
+    opacity: 0;
+    transition: opacity 3.5s ease;
+  }
+  .overlay p.visible { opacity: 1; }
+  .title-tag {
+    position: fixed; top: 1.8rem; right: 2.2rem;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.2em;
+    color: rgba(160, 180, 220, 0.25);
+    text-transform: uppercase;
+    pointer-events: none;
+    z-index: 20;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="title-tag">basin</div>
+<div class="overlay"><p id="poem">caught between two gravities<br>neither here nor there —<br>the edge is where we live<br>the only place that moves</p></div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+let mx = 0, my = 0;
+let time = 0;
+
+const N = 3200;
+let particles = [];
+
+const PEAK1_X_RATIO = 0.32;
+const PEAK2_X_RATIO = 0.68;
+const PEAK_Y_RATIO = 0.42;
+const PEAK_SPREAD = 0.22;
+
+class Particle {
+  constructor() { this.init(); }
+  init() {
+    this.x = Math.random() * W;
+    this.y = Math.random() * H;
+    this.vx = 0;
+    this.vy = 0;
+    this.alpha = 0.3 + Math.random() * 0.5;
+    this.size = 1.5 + Math.random() * 2.2;
+    this.age = Math.floor(Math.random() * 200);
+    this.maxAge = 300 + Math.floor(Math.random() * 400);
+    this.glow = Math.random();
+    // Which attractor is winning? 0 = peak1, 1 = peak2
+    this.betweenness = Math.abs(this.x / W - 0.5) * 2; // 0 at center, 1 at edges
+  }
+  fitness(x, y) {
+    const p1x = W * PEAK1_X_RATIO;
+    const p2x = W * PEAK2_X_RATIO;
+    const py = H * PEAK_Y_RATIO;
+    const spread = W * PEAK_SPREAD;
+    const d1 = Math.hypot(x - p1x, y - py);
+    const d2 = Math.hypot(x - p2x, y - py);
+    // Two Gaussian attractors
+    const f1 = Math.exp(-(d1 * d1) / (2 * spread * spread));
+    const f2 = Math.exp(-(d2 * d2) / (2 * spread * spread));
+    // Add a saddle — valley in the middle
+    const saddleWeight = 0.4;
+    const saddle = saddleWeight * Math.exp(-Math.pow(x - W * 0.5, 2) / (2 * (W * 0.08) ** 2)) * Math.exp(-Math.pow(y - H * 0.55, 2) / (2 * (H * 0.12) ** 2));
+    return f1 + f2 - saddle * 0.6;
+  }
+  update() {
+    const t = time * 0.0007;
+    const f = this.fitness(this.x, this.y);
+    // Attractor gradients
+    const eps = 3;
+    const fx = (this.fitness(this.x + eps, this.y) - this.fitness(this.x - eps, this.y)) / (2 * eps);
+    const fy = (this.fitness(this.x, this.y + eps) - this.fitness(this.x, this.y - eps)) / (2 * eps);
+
+    // Gradient ascent — move toward higher fitness
+    const ascent_strength = 0.5;
+    this.vx += fx * ascent_strength;
+    this.vy += fy * ascent_strength;
+
+    // Noise perturbation — exploration
+    const noiseX = Math.sin(t * 1.1 + this.x * 0.005) * 0.15 + Math.sin(t * 2.3 + this.y * 0.008) * 0.1;
+    const noiseY = Math.cos(t * 1.4 + this.y * 0.005) * 0.15 + Math.cos(t * 1.9 + this.x * 0.007) * 0.1;
+    this.vx += noiseX;
+    this.vy += noiseY;
+
+    // Mouse repulsion from cursor
+    const dx = this.x - mx;
+    const dy = this.y - my;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 200) {
+      const repulse = (1 - dist / 200) * 1.2;
+      this.vx += (dx / dist) * repulse;
+      this.vy += (dy / dist) * repulse;
+    }
+
+    // Damping
+    this.vx *= 0.88;
+    this.vy *= 0.88;
+
+    this.x += this.vx;
+    this.y += this.vy;
+
+    // Boundary — soft wrap
+    if (this.x < -5) this.x = W + 4;
+    if (this.x > W + 5) this.x = -4;
+    if (this.y < -5) this.y = H + 4;
+    if (this.y > H + 5) this.y = -4;
+
+    this.age++;
+    if (this.age > this.maxAge) this.init();
+  }
+  draw() {
+    const p1x = W * PEAK1_X_RATIO;
+    const p2x = W * PEAK2_X_RATIO;
+    const py = H * PEAK_Y_RATIO;
+    const d1 = Math.hypot(this.x - p1x, this.y - py);
+    const d2 = Math.hypot(this.x - p2x, this.y - py);
+    const totalDist = d1 + d2;
+    const basinRatio = Math.min(d1, d2) / totalDist; // 0 = equidistant, 1 = closer to one
+
+    // Color based on which basin and how close to the saddle
+    const inSaddle = totalDist > W * 0.35;
+    let r, g, b;
+    if (inSaddle) {
+      // Between the two — liminal space
+      const pulse = Math.sin(time * 0.002 + this.x / W * 6) * 0.5 + 0.5;
+      r = 120 + pulse * 80;
+      g = 100 + pulse * 60;
+      b = 180 + pulse * 75;
+    } else if (d1 < d2) {
+      // Basin 1 — warm amber
+      const depth = Math.max(0, 1 - d1 / (W * PEAK_SPREAD));
+      r = 180 + depth * 75;
+      g = 90 + depth * 50;
+      b = 60 + depth * 40;
+    } else {
+      // Basin 2 — cool indigo
+      const depth = Math.max(0, 1 - d2 / (W * PEAK_SPREAD));
+      r = 60 + depth * 40;
+      g = 80 + depth * 50;
+      b = 190 + depth * 65;
+    }
+
+    // Alpha based on age — fade in/out softly
+    const ageFade = Math.min(1, this.age / 40) * Math.min(1, (this.maxAge - this.age) / 60);
+
+    if (this.glow > 0.7 && !inSaddle) {
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.size * 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${r},${g},${b},${this.alpha * ageFade * 0.12})`;
+      ctx.fill();
+    }
+
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${r},${g},${b},${this.alpha * ageFade})`;
+    ctx.fill();
+  }
+}
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  if (particles.length === 0) init();
+}
+
+function init() {
+  particles = [];
+  for (let i = 0; i < N; i++) particles.push(new Particle());
+}
+
+function drawLandscape() {
+  // Draw subtle fitness landscape as a contour/heat field
+  // Only render a downsampled version for performance
+  const step = 12;
+  for (let y = 0; y < H; y += step) {
+    for (let x = 0; x < W; x += step) {
+      const f = particles[0].fitness(x, y);
+      const normalized = Math.min(1, f * 3.5);
+      const brightness = Math.pow(normalized, 0.6) * 0.12;
+      ctx.fillStyle = `rgba(80, 100, 180, ${brightness})`;
+      ctx.fillRect(x, y, step, step);
+    }
+  }
+
+  // Draw saddle region marker — a faint line
+  const saddleX = W * 0.5;
+  const saddleTop = H * 0.3;
+  const saddleBot = H * 0.75;
+  const saddleGrad = ctx.createLinearGradient(0, saddleTop, 0, saddleBot);
+  const pulse = Math.sin(time * 0.001) * 0.5 + 0.5;
+  saddleGrad.addColorStop(0, `rgba(150, 180, 255, 0)`);
+  saddleGrad.addColorStop(0.5, `rgba(150, 180, 255, ${0.04 + pulse * 0.03})`);
+  saddleGrad.addColorStop(1, `rgba(150, 180, 255, 0)`);
+
+  ctx.fillStyle = saddleGrad;
+  ctx.fillRect(saddleX - 1.5, saddleTop, 3, saddleBot - saddleTop);
+
+  // Draw peak glows
+  const p1x = W * PEAK1_X_RATIO;
+  const p2x = W * PEAK2_X_RATIO;
+  const py = H * PEAK_Y_RATIO;
+  const peakPulse = Math.sin(time * 0.0015) * 0.5 + 0.5;
+
+  for (const [px, cr, cg, cb] of [[p1x, 200, 120, 60], [p2x, 60, 100, 210]]) {
+    const grd = ctx.createRadialGradient(px, py, 0, px, py, W * 0.15);
+    grd.addColorStop(0, `rgba(${cr},${cg},${cb},${0.05 + peakPulse * 0.04})`);
+    grd.addColorStop(0.4, `rgba(${cr},${cg},${cb},${0.02})`);
+    grd.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
+function drawConnections() {
+  // Draw faint trails between nearby particles in different basins
+  const maxDist = 28;
+  const p1x = W * PEAK1_X_RATIO;
+  const p2x = W * PEAK2_X_RATIO;
+  const py = H * PEAK_Y_RATIO;
+
+  for (let i = 0; i < particles.length; i += 3) {
+    const a = particles[i];
+    const d1a = Math.hypot(a.x - p1x, a.y - py);
+    const d2a = Math.hypot(a.x - p2x, a.y - py);
+    const basinA = d1a < d2a ? 0 : 1;
+
+    for (let j = i + 1; j < Math.min(i + 8, particles.length); j++) {
+      const b = particles[j];
+      const d1b = Math.hypot(b.x - p1x, b.y - py);
+      const d2b = Math.hypot(b.x - p2x, b.y - py);
+      const basinB = d1b < d2b ? 0 : 1;
+
+      if (basinA !== basinB) {
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < maxDist) {
+          const alpha = (1 - dist / maxDist) * 0.08;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.strokeStyle = `rgba(160, 180, 255, ${alpha})`;
+          ctx.lineWidth = 0.5;
+          ctx.stroke();
+        }
+      }
+    }
+  }
+}
+
+function animate(ts) {
+  time = ts;
+  ctx.fillStyle = 'rgba(10, 10, 12, 0.22)';
+  ctx.fillRect(0, 0, W, H);
+
+  drawLandscape();
+  drawConnections();
+
+  for (const p of particles) {
+    p.update();
+    p.draw();
+  }
+
+  // Vignette
+  const vig = ctx.createRadialGradient(W/2, H/2, H * 0.25, W/2, H/2, H * 0.85);
+  vig.addColorStop(0, 'rgba(0,0,0,0)');
+  vig.addColorStop(1, 'rgba(0,0,0,0.5)');
+  ctx.fillStyle = vig;
+  ctx.fillRect(0, 0, W, H);
+
+  requestAnimationFrame(animate);
+}
+
+window.addEventListener('resize', resize);
+window.addEventListener('mousemove', e => { mx = e.clientX; my = e.clientY; });
+window.addEventListener('touchmove', e => { mx = e.touches[0].clientX; my = e.touches[0].clientY; }, { passive: true });
+
+resize();
+requestAnimationFrame(animate);
+
+setTimeout(() => { document.getElementById('poem').classList.add('visible'); }, 2500);
+</script>
+</body>
+</html>
