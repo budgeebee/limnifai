@@ -11,3 +11,5 @@ services:
       - NODE_ENV=development
     working_dir: /app
     command: npm run dev
+    mem_limit: 512m
+    memswap_limit: 1g

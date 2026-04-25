@@ -9,7 +9,3 @@ persistent/.env
 
 # Logs
 *.log
-
-# Editor
-.vscode
-.idea
