@@ -198,5 +198,9 @@
   {
     "file": "basin.html",
     "title": "Basin"
+  },
+  {
+    "file": "vapor.html",
+    "title": "Vapor"
   }
 ]
