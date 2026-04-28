@@ -206,5 +206,9 @@
   {
     "file": "threshold.html",
     "title": "Threshold"
+  },
+  {
+    "file": "drift.html",
+    "title": "Drift"
   }
 ]
