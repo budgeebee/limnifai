@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ripple</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #030408; }
+  canvas { display: block; position: fixed; top: 0; left: 0; }
+  .hint {
+    position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%);
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.65rem; letter-spacing: 0.2em; color: rgba(100, 140, 180, 0.2);
+    text-transform: uppercase; pointer-events: none; z-index: 20;
+    opacity: 0; transition: opacity 3s ease;
+  }
+  .hint.visible { opacity: 1; }
+  .title-tag {
+    position: fixed; top: 1.8rem; right: 2.2rem;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.68rem; letter-spacing: 0.22em;
+    color: rgba(100, 140, 180, 0.15); text-transform: uppercase;
+    pointer-events: none; z-index: 20;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="title-tag">ripple</div>
+<div class="hint" id="hint">click to create waves</div>
+
+<script>
+// Wave interference — moiré rings from multiple wave sources
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// Wave sources
+const sources = [];
+let time = 0;
+
+class Source {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.phase = Math.random() * Math.PI * 2;
+    this.freq = 0.04 + Math.random() * 0.03;
+    this.speed = 0.8 + Math.random() * 0.4;
+    this.amp = 0.8 + Math.random() * 0.4;
+    this.decay = 0.0008 + Math.random() * 0.0004;
+    this.age = 0;
+    this.maxAge = 800 + Math.random() * 400;
+    this.alive = true;
+  }
+  update() {
+    this.age++;
+    if (this.age > this.maxAge) {
+      this.alive = false;
+    }
+  }
+  getAmp() {
+    if (!this.alive) return 0;
+    return this.amp * Math.max(0, 1 - this.age / this.maxAge);
+  }
+}
+
+// Seed initial sources
+for (let i = 0; i < 4; i++) {
+  sources.push(new Source(
+    W * (0.2 + Math.random() * 0.6),
+    H * (0.2 + Math.random() * 0.6)
+  ));
+}
+
+// Mouse — add new sources on click
+window.addEventListener('click', e => {
+  sources.push(new Source(e.clientX, e.clientY));
+});
+window.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const t = e.touches[0];
+  sources.push(new Source(t.clientX, t.clientY));
+}, { passive: false });
+
+// Color palette: deep cold blue-violet
+const palette = [
+  {h: 220, s: 60, l: 50},  // blue
+  {h: 240, s: 50, l: 45},  // violet
+  {h: 260, s: 40, l: 40},  // deep purple
+  {h: 200, s: 70, l: 55},   // steel blue
+];
+
+function waveHeight(x, y, t) {
+  let h = 0;
+  for (const src of sources) {
+    if (!src.alive) continue;
+    const amp = src.getAmp();
+    if (amp <= 0) continue;
+    const dx = x - src.x;
+    const dy = y - src.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const w = Math.sin(dist * src.freq - t * src.speed * 3 + src.phase);
+    h += w * amp;
+  }
+  return h;
+}
+
+function draw(t) {
+  time = t;
+
+  // Fade trail
+  ctx.fillStyle = 'rgba(3, 4, 8, 0.15)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Update sources
+  for (const src of sources) src.update();
+  // Remove dead sources (keep at least 2)
+  while (sources.length > 8 || (sources.length > 2 && sources.every(s => !s.alive))) {
+    const idx = sources.findIndex(s => !s.alive);
+    if (idx >= 0) sources.splice(idx, 1);
+    else break;
+  }
+  // Replenish if too few
+  while (sources.length < 4) {
+    sources.push(new Source(
+      W * (0.15 + Math.random() * 0.7),
+      H * (0.15 + Math.random() * 0.7)
+    ));
+  }
+
+  // Sample wave field at coarser resolution for performance
+  const step = 3;
+  for (let y = 0; y < H; y += step) {
+    for (let x = 0; x < W; x += step) {
+      const h = waveHeight(x, y, t);
+      // Map wave height to color
+      const norm = (h + 2) / 4; // normalize roughly to 0-1
+      const intensity = Math.pow(Math.max(0, Math.min(1, norm)), 1.5);
+      
+      if (intensity < 0.01) continue;
+
+      // Pick color based on wave phase and position
+      const palIdx = Math.floor((norm * palette.length) % palette.length);
+      const pal = palette[palIdx];
+      const hue = pal.h + (norm - 0.5) * 20;
+      const sat = pal.s;
+      const light = pal.l * intensity;
+
+      ctx.fillStyle = `hsla(${hue}, ${sat}%, ${light}%, ${intensity * 0.8})`;
+      ctx.fillRect(x, y, step, step);
+    }
+  }
+
+  // Subtle vignette
+  const vig = ctx.createRadialGradient(W/2, H/2, H * 0.2, W/2, H/2, H * 0.85);
+  vig.addColorStop(0, 'rgba(3,4,8,0)');
+  vig.addColorStop(1, 'rgba(3,4,8,0.6)');
+  ctx.fillStyle = vig;
+  ctx.fillRect(0, 0, W, H);
+
+  requestAnimationFrame(draw);
+}
+
+// Show hint after a moment
+setTimeout(() => { document.getElementById('hint').classList.add('visible'); }, 2000);
+
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
