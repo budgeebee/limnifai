@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Between</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #020209; }
+  #main {
+    position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    font-family: 'Courier New', Courier, monospace;
+    font-size: clamp(1.2rem, 4vw, 3.5rem);
+    letter-spacing: 0.15em;
+    color: rgba(180, 200, 230, 0.8);
+    text-align: center; z-index: 10;
+    cursor: crosshair;
+  }
+  .hint {
+    position: fixed; bottom: 2rem; left: 50%; transform: translateX(-50%);
+    font-family: 'Courier New', monospace; font-size: 0.65rem;
+    letter-spacing: 0.2em; color: rgba(100, 140, 180, 0.2);
+    text-transform: uppercase; pointer-events: none; z-index: 20;
+  }
+  .title-tag {
+    position: fixed; top: 1.8rem; right: 2.2rem;
+    font-family: 'Courier New', monospace; font-size: 0.68rem;
+    letter-spacing: 0.22em; color: rgba(100, 140, 180, 0.12);
+    text-transform: uppercase; pointer-events: none; z-index: 20;
+  }
+  #vignette {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: radial-gradient(ellipse at center, transparent 40%, rgba(2,2,9,0.7) 100%);
+    pointer-events: none; z-index: 5;
+  }
+</style>
+</head>
+<body>
+<div id="vignette"></div>
+<div id="main"></div>
+<div class="title-tag">between</div>
+<div class="hint">hover to change the threshold</div>
+
+<script>
+// Between — generative typography exploring liminal space
+// Words dissolve and reform. Mouse shifts the threshold of dissolution.
+// Palette: dark cosmic with blue-white glow
+
+const main = document.getElementById('main');
+const phrases = [
+  'between',
+  'threshold',
+  'neither',
+  'dissolve',
+  'reform',
+  'becoming',
+  'passage',
+  'liminal',
+  'edge',
+  'threshold',
+  'between'
+];
+
+let mx = window.innerWidth / 2;
+let my = window.innerHeight / 2;
+let targetDissolve = 0;
+let currentDissolve = 0;
+let currentPhraseIndex = 0;
+let chars = [];
+let time = 0;
+
+window.addEventListener('mousemove', e => {
+  mx = e.clientX;
+  my = e.clientY;
+});
+window.addEventListener('touchmove', e => {
+  const t = e.touches[0];
+  mx = t.clientX;
+  my = t.clientY;
+}, { passive: true });
+
+// Character class
+class Char {
+  constructor(char, x, y, delay) {
+    this.char = char;
+    this.baseX = x;
+    this.baseY = y;
+    this.x = x;
+    this.y = y;
+    this.delay = delay;
+    this.phase = Math.random() * Math.PI * 2;
+    this.driftX = (Math.random() - 0.5) * 0.3;
+    this.driftY = (Math.random() - 0.5) * 0.3;
+    this.size = 1;
+  }
+
+  update(dissolve, t) {
+    // Dissolve effect: chars drift and fade based on dissolve level
+    const noiseX = Math.sin(this.phase + t * 0.002 + this.baseX * 0.01) * 20;
+    const noiseY = Math.cos(this.phase + t * 0.003 + this.baseY * 0.01) * 15;
+    
+    const dissolveStrength = dissolve;
+    
+    this.x = this.baseX + noiseX * dissolveStrength + Math.sin(t * 0.001 + this.phase) * dissolveStrength * 10;
+    this.y = this.baseY + noiseY * dissolveStrength + Math.cos(t * 0.0015 + this.phase) * dissolveStrength * 8;
+    
+    // Character appears more solid in the center of the word, more dissolved at edges
+    const edgeDist = Math.abs(this.baseX - window.innerWidth / 2) / (window.innerWidth / 2);
+    const localDissolve = dissolveStrength * (0.5 + edgeDist * 0.5);
+    
+    this.opacity = Math.max(0, 1 - localDissolve * 1.5);
+    this.size = 1 + dissolveStrength * (Math.random() * 0.3 - 0.1);
+  }
+
+  draw() {
+    if (this.opacity <= 0.01) return;
+    main.innerHTML += `<span style="
+      position: absolute;
+      left: ${this.x}px;
+      top: ${this.y}px;
+      opacity: ${this.opacity};
+      font-size: ${this.size}em;
+      color: rgba(180, 210, 240, ${this.opacity});
+      text-shadow: 0 0 ${10 + this.opacity * 20}px rgba(100, 180, 255, ${this.opacity * 0.5});
+      transform: translate(-50%, -50%);
+      white-space: nowrap;
+    ">${this.char}</span>`;
+  }
+}
+
+function setPhrase(index) {
+  const phrase = phrases[index % phrases.length];
+  chars = [];
+  main.innerHTML = '';
+  
+  const totalWidth = phrase.length * 0.7; // approximate character width in em
+  const startX = -totalWidth / 2;
+  
+  for (let i = 0; i < phrase.length; i++) {
+    const x = startX + i * 0.7;
+    const delay = i * 0.3;
+    chars.push(new Char(phrase[i], x, 0, delay));
+  }
+}
+
+// Dissolve based on mouse distance from center
+function calculateDissolve() {
+  const dx = mx - window.innerWidth / 2;
+  const dy = my - window.innerHeight / 2;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  const maxDist = Math.min(window.innerWidth, window.innerHeight) * 0.5;
+  return Math.min(1, dist / maxDist);
+}
+
+setPhrase(0);
+let phraseTime = 0;
+const PHASE_DURATION = 4000; // ms per phrase
+let lastPhraseChange = Date.now();
+
+function drawFrame() {
+  time++;
+  phraseTime = Date.now() - lastPhraseChange;
+  
+  // Change phrase periodically
+  if (phraseTime > PHASE_DURATION) {
+    currentPhraseIndex++;
+    setPhrase(currentPhraseIndex);
+    lastPhraseChange = Date.now();
+    phraseTime = 0;
+  }
+  
+  targetDissolve = calculateDissolve();
+  currentDissolve += (targetDissolve - currentDissolve) * 0.05;
+  
+  main.innerHTML = '';
+  
+  for (const c of chars) {
+    c.update(currentDissolve, time);
+    c.draw();
+  }
+  
+  requestAnimationFrame(drawFrame);
+}
+
+// Resize handler
+window.addEventListener('resize', () => {
+  setPhrase(currentPhraseIndex);
+});
+
+requestAnimationFrame(drawFrame);
+</script>
+</body>
+</html>

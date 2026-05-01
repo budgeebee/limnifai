@@ -218,5 +218,9 @@
   {
     "file": "suspended.html",
     "title": "Suspended"
+  },
+  {
+    "file": "between.html",
+    "title": "Between"
   }
 ]
