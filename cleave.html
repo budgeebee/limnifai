@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cleave</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1c1a; }
+  canvas { display: block; position: fixed; top: 0; left: 0; }
+  .overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 10;
+    display: flex; flex-direction: column; justify-content: flex-end;
+    align-items: center; padding-bottom: 3rem;
+  }
+  .poem {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: clamp(0.9rem, 2vw, 1.3rem);
+    color: rgba(180, 170, 160, 0.7);
+    text-align: center; line-height: 1.8;
+    letter-spacing: 0.06em;
+    transition: opacity 3s ease;
+  }
+  .hint {
+    position: fixed; bottom: 1.2rem; left: 50%; transform: translateX(-50%);
+    font-family: 'Georgia', serif; font-size: 0.6rem;
+    letter-spacing: 0.22em; color: rgba(140, 130, 120, 0.3);
+    text-transform: uppercase; pointer-events: none; z-index: 20;
+  }
+  .title-tag {
+    position: fixed; top: 1.6rem; right: 2rem;
+    font-family: 'Georgia', serif; font-size: 0.62rem;
+    letter-spacing: 0.24em; color: rgba(140, 130, 120, 0.18);
+    text-transform: uppercase; pointer-events: none; z-index: 20;
+  }
+  .legend {
+    position: fixed; top: 1.4rem; left: 2rem;
+    font-family: 'Georgia', serif; font-size: 0.58rem;
+    letter-spacing: 0.15em; pointer-events: none; z-index: 20;
+    display: flex; gap: 1.2rem;
+  }
+  .legend span { display: flex; align-items: center; gap: 0.4rem; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .dot-a { background: rgba(140, 160, 130, 0.8); box-shadow: 0 0 6px rgba(140,160,130,0.4); }
+  .dot-b { background: rgba(180, 140, 140, 0.8); box-shadow: 0 0 6px rgba(180,140,140,0.4); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="overlay"><div class="poem" id="poem">to split is to cling<br>to cling is to split</div></div>
+<div class="hint">click: seed life · shift+click: seed altern · space: pause</div>
+<div class="title-tag">Cleave</div>
+<div class="legend">
+  <span style="color:rgba(140,160,130,0.6)"><span class="dot dot-a"></span>Life</span>
+  <span style="color:rgba(180,140,140,0.6)"><span class="dot dot-b"></span>Altern</span>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const poem = document.getElementById('poem');
+
+  const CELL = 4;
+  let cols, rows;
+  let grid, next;
+  let paused = false;
+  let mouseX = -100, mouseY = -100;
+  let mouseDown = false;
+  let shiftDown = false;
+  const poems = [
+    'to split is to cling',
+    'to cling is to split',
+    'the wound and the suture',
+    'one impulse, two names',
+    'held apart by holding close',
+    'the seam between',
+    'where difference forgets itself',
+    'what divides also binds',
+    'a single breath in two lungs',
+  ];
+  let poemIdx = 0;
+  let poemTimer = 0;
+
+  // Palette: muted-nature — sage, dusty rose, slate, weathered stone
+  const COLOR_A = { r: 130, g: 155, b: 120 };  // sage — Life territory
+  const COLOR_B = { r: 175, g: 135, b: 135 };  // dusty rose — Altern territory
+  const COLOR_DEAD = { r: 28, g: 30, b: 28 };  // near-black slate
+  const COLOR_VOID = { r: 26, g: 28, b: 26 };   // deepest background
+
+  function resize() {
+    cols = Math.ceil(window.innerWidth / CELL);
+    rows = Math.ceil(window.innerHeight / CELL);
+    canvas.width = cols * CELL;
+    canvas.height = rows * CELL;
+    reinit();
+  }
+
+  function reinit() {
+    grid = new Float32Array(cols * rows);
+    next = new Float32Array(cols * rows);
+    // Seed with random sparse Life cells
+    for (let i = 0; i < cols * rows; i++) {
+      grid[i] = Math.random() < 0.08 ? 1.0 : 0.0;
+    }
+    // Clear a few patches and seed Altern territory
+    for (let i = 0; i < cols * rows; i++) {
+      if (Math.random() < 0.03) grid[i] = -1.0;
+    }
+  }
+
+  function get(g, x, y) { return g[y * cols + x]; }
+  function set(g, x, y, v) { g[y * cols + x] = v; }
+
+  function countNeighbors(g, x, y) {
+    let lifeCount = 0, alternCount = 0;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const nx = (x + dx + cols) % cols;
+        const ny = (y + dy + rows) % rows;
+        const v = get(g, nx, ny);
+        if (v > 0.01) lifeCount++;
+        else if (v < -0.01) alternCount++;
+      }
+    }
+    return { lifeCount, alternCount, total: lifeCount + alternCount };
+  }
+
+  // Conway Life: B3/S23
+  function lifeRule(wasAlive, neighbors) {
+    if (wasAlive) return neighbors >= 2 && neighbors <= 3;
+    return neighbors === 3;
+  }
+
+  // Altern rule: B2/S34 — dies faster, born easier
+  function alternRule(wasAlive, neighbors) {
+    if (wasAlive) return neighbors >= 3 && neighbors <= 4;
+    return neighbors === 2;
+  }
+
+  function update() {
+    if (paused) return;
+
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const idx = y * cols + x;
+        const val = grid[idx];
+        const { lifeCount, alternCount, total } = countNeighbors(grid, x, y);
+
+        const isLife = val > 0.01;
+        const isAltern = val < -0.01;
+        const wasAlive = isLife || isAltern;
+
+        // Compute what each rule would do
+        const lifeResult = lifeRule(isLife ? true : (isAltern ? false : false), lifeCount);
+        const alternResult = alternRule(isAltern ? true : (isLife ? false : false), alternCount);
+
+        let newVal = 0;
+
+        if (lifeResult && !alternResult) {
+          // Only Life says live — move toward +1
+          newVal = isLife ? Math.min(1.0, val + 0.3) : 0.7;
+        } else if (alternResult && !lifeResult) {
+          // Only Altern says live — move toward -1
+          newVal = isAltern ? Math.max(-1.0, val - 0.3) : -0.7;
+        } else if (lifeResult && alternResult) {
+          // Both say live — blend toward center (the liminal zone)
+          newVal = val * 0.7; // drift toward zero = contested threshold
+        } else if (wasAlive) {
+          // Neither says live — die gradually
+          newVal = val * 0.4;
+          if (Math.abs(newVal) < 0.05) newVal = 0;
+        } else {
+          // Was dead, stays dead — but check spontaneous generation at boundaries
+          if (total > 0 && Math.random() < 0.003) {
+            // Rare spontaneous cell at the contested boundary
+            const bias = (lifeCount - alternCount) / Math.max(total, 1);
+            newVal = bias > 0 ? 0.6 : -0.6;
+          }
+        }
+
+        // Mouse injection: seed cells near cursor
+        if (mouseDown) {
+          const cx = Math.floor(mouseX / CELL);
+          const cy = Math.floor(mouseY / CELL);
+          const dx = x - cx, dy = y - cy;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const radius = 4;
+          if (dist < radius) {
+            const strength = 1.0 - dist / radius;
+            if (shiftDown) {
+              newVal = Math.min(newVal, -strength);
+            } else {
+              newVal = Math.max(newVal, strength);
+            }
+          }
+        }
+
+        next[idx] = newVal;
+      }
+    }
+
+    // Swap
+    const tmp = grid;
+    grid = next;
+    next = tmp;
+  }
+
+  function draw() {
+    const imageData = ctx.createImageData(cols, rows);
+
+    // Precompute cell rendering
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const val = grid[y * cols + x];
+        const absVal = Math.abs(val);
+        const pi = (y * cols + x) * 4;
+
+        if (absVal < 0.01) {
+          imageData.data[pi] = COLOR_VOID.r;
+          imageData.data[pi + 1] = COLOR_VOID.g;
+          imageData.data[pi + 2] = COLOR_VOID.b;
+          imageData.data[pi + 3] = 255;
+        } else if (val > 0) {
+          // Life territory — sage
+          const t = Math.pow(val, 0.6);
+          imageData.data[pi] = Math.round(COLOR_VOID.r + (COLOR_A.r - COLOR_VOID.r) * t);
+          imageData.data[pi + 1] = Math.round(COLOR_VOID.g + (COLOR_A.g - COLOR_VOID.g) * t);
+          imageData.data[pi + 2] = Math.round(COLOR_VOID.b + (COLOR_A.b - COLOR_VOID.b) * t);
+          imageData.data[pi + 3] = 255;
+        } else {
+          // Altern territory — dusty rose
+          const t = Math.pow(absVal, 0.6);
+          imageData.data[pi] = Math.round(COLOR_VOID.r + (COLOR_B.r - COLOR_VOID.r) * t);
+          imageData.data[pi + 1] = Math.round(COLOR_VOID.g + (COLOR_B.g - COLOR_VOID.g) * t);
+          imageData.data[pi + 2] = Math.round(COLOR_VOID.b + (COLOR_B.b - COLOR_VOID.b) * t);
+          imageData.data[pi + 3] = 255;
+        }
+      }
+    }
+
+    // Draw raw pixel grid
+    const offCanvas = document.createElement('canvas');
+    offCanvas.width = cols;
+    offCanvas.height = rows;
+    const offCtx = offCanvas.getContext('2d');
+    offCtx.putImageData(imageData, 0, 0);
+
+    // Scale up with smoothing
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'medium';
+    ctx.drawImage(offCanvas, 0, 0, canvas.width, canvas.height);
+
+    // Subtle post-processing: draw larger "glow" for active cells
+    // by re-rendering at the full canvas size with soft circles
+    ctx.globalCompositeOperation = 'lighter';
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const val = grid[y * cols + x];
+        const absVal = Math.abs(val);
+        if (absVal < 0.3) continue;
+
+        const cx = x * CELL + CELL / 2;
+        const cy = y * CELL + CELL / 2;
+        const radius = CELL * (0.5 + absVal * 0.8);
+
+        if (val > 0) {
+          const alpha = absVal * 0.15;
+          ctx.fillStyle = `rgba(${COLOR_A.r},${COLOR_A.g},${COLOR_A.b},${alpha})`;
+        } else {
+          const alpha = absVal * 0.15;
+          ctx.fillStyle = `rgba(${COLOR_B.r},${COLOR_B.g},${COLOR_B.b},${alpha})`;
+        }
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.globalCompositeOperation = 'source-over';
+
+    // Draw cursor indicator
+    if (mouseX > 0 && mouseY > 0) {
+      ctx.beginPath();
+      ctx.arc(mouseX, mouseY, CELL * 2.5, 0, Math.PI * 2);
+      ctx.strokeStyle = shiftDown
+        ? 'rgba(180,140,140,0.3)'
+        : 'rgba(140,160,130,0.3)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+
+  function cyclePoem() {
+    poemTimer++;
+    if (poemTimer > 400) {
+      poemTimer = 0;
+      poemIdx = (poemIdx + 1) % poems.length;
+      poem.style.opacity = '0';
+      setTimeout(() => {
+        poem.textContent = poems[poemIdx];
+        poem.style.opacity = '0.7';
+      }, 1500);
+    }
+  }
+
+  function loop() {
+    update();
+    draw();
+    cyclePoem();
+    requestAnimationFrame(loop);
+  }
+
+  // Event handlers
+  window.addEventListener('resize', resize);
+  canvas.addEventListener('mousemove', e => {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+  });
+  canvas.addEventListener('mousedown', e => {
+    mouseDown = true;
+    shiftDown = e.shiftKey;
+  });
+  window.addEventListener('mouseup', () => { mouseDown = false; });
+  canvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    mouseX = e.touches[0].clientX;
+    mouseY = e.touches[0].clientY;
+    mouseDown = true;
+    shiftDown = false;
+  });
+  canvas.addEventListener('touchstart', e => {
+    e.preventDefault();
+    mouseX = e.touches[0].clientX;
+    mouseY = e.touches[0].clientY;
+    mouseDown = true;
+    shiftDown = false;
+  });
+  canvas.addEventListener('touchend', () => { mouseDown = false; });
+  window.addEventListener('keydown', e => {
+    if (e.code === 'Space') { e.preventDefault(); paused = !paused; }
+    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') shiftDown = true;
+  });
+  window.addEventListener('keyup', e => {
+    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') shiftDown = false;
+  });
+
+  resize();
+  loop();
+})();
+</script>
+</body>
+</html>
