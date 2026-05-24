@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Attune</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0d0a06; }
+  canvas { display: block; position: fixed; top: 0; left: 0; }
+  .overlay {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    padding: 2.5rem 3rem;
+    pointer-events: none;
+    z-index: 20;
+  }
+  .overlay p {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: clamp(0.8rem, 1.3vw, 1rem);
+    line-height: 2;
+    letter-spacing: 0.04em;
+    color: rgba(200, 180, 140, 0.5);
+    text-align: center;
+    max-width: 560px;
+    margin: 0 auto;
+    opacity: 0;
+    transition: opacity 4s ease;
+  }
+  .overlay p.visible { opacity: 1; }
+  .title-tag {
+    position: fixed; top: 1.8rem; right: 2.2rem;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.22em;
+    color: rgba(180, 140, 80, 0.2);
+    text-transform: uppercase;
+    pointer-events: none;
+    z-index: 20;
+  }
+  .freq-display {
+    position: fixed; top: 1.8rem; left: 2.2rem;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.15em;
+    color: rgba(180, 140, 80, 0.18);
+    pointer-events: none;
+    z-index: 20;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="title-tag">attune</div>
+<div class="freq-display" id="freq">A:1.00 B:1.00 Δ:0.00</div>
+<div class="overlay"><p id="poem">the moment two frequencies<br>stop being two<br>and become one threshold<br>before dissolving again</p></div>
+
+<script>
+// Attune — Lissajous curves as liminal geometry
+// Two oscillators, ratio drifts through integers —
+// the figure morphs from line to circle to figure-eight to knot
+// Particles trail from the moving point, each one marking a moment of attunement
+// Palette: warm-earth (ochre, sienna, cream, terracotta)
+// Mood: urgent — the sweep feels like holding your breath before resolution
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H, time = 0;
+let mx = 0, my = 0;
+let mouseOnCanvas = false;
+
+const PARTICLE_COUNT = 600;
+const particles = [];
+
+const palette = [
+  { r: 200, g: 160, b: 80 },  // ochre
+  { r: 180, g: 100, b: 60 },  // burnt sienna
+  { r: 240, g: 200, b: 140 }, // warm cream
+  { r: 160, g: 80, b: 50 },   // terracotta
+  { r: 220, g: 140, b: 100 }, // dusty coral
+];
+
+class TrailParticle {
+  constructor() { this.reset(); }
+  reset() {
+    this.x = W * 0.65 + Math.random() * W * 0.05;
+    this.y = H * 0.42 + Math.random() * H * 0.05;
+    this.vx = (Math.random() - 0.5) * 0.6;
+    this.vy = (Math.random() - 0.5) * 0.6;
+    this.size = 1 + Math.random() * 2.5;
+    this.alpha = 0.6 + Math.random() * 0.4;
+    this.life = 0;
+    this.maxLife = 200 + Math.random() * 300;
+    this.col = palette[Math.floor(Math.random() * palette.length)];
+    this.decay = 0.992 + Math.random() * 0.005;
+    this.drift = 0.96 + Math.random() * 0.04;
+  }
+  update(cx, cy, px, py) {
+    // Particles spawn near the Lissajous moving point
+    if (Math.random() < 0.08) {
+      this.x = cx + (Math.random() - 0.5) * 6;
+      this.y = cy + (Math.random() - 0.5) * 6;
+      this.vx = (cx - px) * 0.04 + (Math.random() - 0.5) * 0.8;
+      this.vy = (cy - py) * 0.04 + (Math.random() - 0.5) * 0.8;
+      this.life = 0;
+      this.alpha = 0.7 + Math.random() * 0.3;
+      this.col = palette[Math.floor(Math.random() * palette.length)];
+    }
+
+    // Gentle mouse influence
+    const dx = this.x - mx;
+    const dy = this.y - my;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 180 && mouseOnCanvas) {
+      const force = (1 - dist / 180) * 0.5;
+      this.vx += (dx / dist) * force;
+      this.vy += (dy / dist) * force;
+    }
+
+    this.vx *= this.drift;
+    this.vy *= this.drift;
+    this.vy -= 0.004; // gentle rise
+
+    this.x += this.vx;
+    this.y += this.vy;
+    this.life++;
+    this.alpha *= this.decay;
+
+    if (this.life > this.maxLife || this.alpha < 0.01) this.reset();
+  }
+  draw() {
+    const t = this.life / this.maxLife;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size * (1 - t * 0.5), 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${this.col.r},${this.col.g},${this.col.b},${this.alpha})`;
+    ctx.fill();
+  }
+}
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  if (particles.length === 0) init();
+}
+
+function init() {
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    const p = new TrailParticle();
+    p.x = W * 0.3 + Math.random() * W * 0.4;
+    p.y = H * 0.3 + Math.random() * H * 0.4;
+    p.life = Math.random() * 200;
+    particles.push(p);
+  }
+}
+
+// Lissajous params — drift slowly
+function getLissajousParams(t) {
+  const baseA = 3;
+  const baseB = 2;
+  const drift = Math.sin(t * 0.00008) * 0.5 + 0.5; // 0..1 slow
+  // Drift toward integer ratios over time, then reset
+  const cycle = (t * 0.00003) % 1;
+  const A = baseA + Math.floor(cycle * 3);
+  const B = baseB + Math.floor(cycle * 2) % 3;
+  // Delta approaches 0 as we approach an integer ratio
+  const phase = t * 0.0005 + Math.sin(t * 0.0001) * Math.PI;
+  return { A, B, phase };
+}
+
+function drawLissajous(cx, cy, rx, ry, A, B, phase, t) {
+  const steps = 800;
+  const dt = (Math.PI * 2) / steps;
+  const speed = 0.004;
+
+  // Draw the full figure faintly
+  ctx.beginPath();
+  let first = true;
+  for (let i = 0; i <= steps; i++) {
+    const th = i * dt;
+    const x = cx + rx * Math.sin(A * th + phase);
+    const y = cy + ry * Math.sin(B * th);
+    if (first) { ctx.moveTo(x, y); first = false; }
+    else ctx.lineTo(x, y);
+  }
+  ctx.strokeStyle = 'rgba(180, 140, 80, 0.06)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Moving point — Lissajous tracer
+  const pT = (t * speed) % (Math.PI * 2);
+  const px = cx + rx * Math.sin(A * pT + phase);
+  const py = cy + ry * Math.sin(B * pT);
+
+  // Glow at the moving point
+  const glowR = 8 + 4 * Math.sin(t * 0.005);
+  const grad = ctx.createRadialGradient(px, py, 0, px, py, glowR * 4);
+  grad.addColorStop(0, 'rgba(240, 200, 140, 0.5)');
+  grad.addColorStop(0.3, 'rgba(200, 140, 60, 0.2)');
+  grad.addColorStop(1, 'rgba(180, 100, 40, 0)');
+  ctx.beginPath();
+  ctx.arc(px, py, glowR * 4, 0, Math.PI * 2);
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Bright center dot
+  ctx.beginPath();
+  ctx.arc(px, py, glowR, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255, 220, 160, 0.9)';
+  ctx.fill();
+
+  return { px, py };
+}
+
+function drawGrid(cx, cy, rx, ry) {
+  // Subtle reference grid — asymmetric placement
+  ctx.strokeStyle = 'rgba(180, 140, 80, 0.04)';
+  ctx.lineWidth = 0.5;
+  const gridStep = 60;
+  // Vertical lines
+  for (let x = cx % gridStep; x < W; x += gridStep) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, H);
+    ctx.stroke();
+  }
+  // Horizontal lines
+  for (let y = cy % gridStep; y < H; y += gridStep) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+  }
+}
+
+function drawVignette() {
+  const vx = W * 0.15;
+  const vy = H * 0.1;
+  const grad = ctx.createRadialGradient(vx, vy, 0, vx, vy, Math.max(W, H) * 0.8);
+  grad.addColorStop(0, 'rgba(0,0,0,0)');
+  grad.addColorStop(0.5, 'rgba(0,0,0,0.2)');
+  grad.addColorStop(1, 'rgba(0,0,0,0.7)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function animate(ts) {
+  time = ts;
+  ctx.fillStyle = 'rgba(13, 10, 6, 0.15)';
+  ctx.fillRect(0, 0, W, H);
+
+  const { A, B, phase } = getLissajousParams(time);
+
+  // Lissajous figure center — asymmetric, lower-right quadrant
+  const cx = W * 0.65;
+  const cy = H * 0.42;
+  const rx = W * 0.26;
+  const ry = H * 0.34;
+
+  drawGrid(cx, cy, rx, ry);
+
+  const { px, py } = drawLissajous(cx, cy, rx, ry, A, B, phase, time);
+
+  // Update and draw particles
+  for (const p of particles) {
+    p.update(cx, cy, px, py);
+    p.draw();
+  }
+
+  // Update frequency display
+  const delta = Math.abs(A / B - 1.5);
+  document.getElementById('freq').textContent =
+    `A:${A.toFixed(0)} B:${B.toFixed(0)} Δ:${delta.toFixed(2)}`;
+
+  drawVignette();
+
+  requestAnimationFrame(animate);
+}
+
+window.addEventListener('resize', resize);
+window.addEventListener('mousemove', e => {
+  mx = e.clientX;
+  my = e.clientY;
+  mouseOnCanvas = true;
+});
+window.addEventListener('mouseleave', () => { mouseOnCanvas = false; });
+window.addEventListener('touchmove', e => {
+  mx = e.touches[0].clientX;
+  my = e.touches[0].clientY;
+  mouseOnCanvas = true;
+}, { passive: true });
+
+resize();
+requestAnimationFrame(animate);
+
+setTimeout(() => {
+  document.getElementById('poem').classList.add('visible');
+}, 2500);
+</script>
+</body>
+</html>
