@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Apparition</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #010309; overflow: hidden; cursor: crosshair; }
+  canvas { display: block; position: fixed; top: 0; left: 0; }
+  #overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 10;
+    background: radial-gradient(ellipse at 50% 50%, transparent 30%, rgba(1,3,9,0.6) 100%);
+  }
+  #words {
+    position: fixed; bottom: 0; left: 0; width: 100%; padding: 2rem 3rem;
+    display: flex; justify-content: space-between; align-items: flex-end;
+    pointer-events: none; z-index: 20;
+  }
+  .word-line {
+    font-family: 'Courier New', monospace;
+    font-size: 0.85rem; letter-spacing: 0.12em; line-height: 1.6;
+    color: rgba(180, 210, 240, 0.35);
+    transition: color 4s ease;
+  }
+  .word-line:hover { color: rgba(180, 210, 240, 0.7); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="overlay"></div>
+<div id="words">
+  <div class="word-line" id="wl0">between</div>
+  <div class="word-line" id="wl1">visible</div>
+  <div class="word-line" id="wl2">threshold</div>
+  <div class="word-line" id="wl3">apparition</div>
+  <div class="word-line" id="wl4">light</div>
+  <div class="word-line" id="wl5">edge</div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H, mx = 0, my = 0, t = 0;
+
+const PALETTE = [
+  { r: 80,  g: 160, b: 220 },   // ice cyan
+  { r: 140, g: 100, b: 200 },   // pale violet
+  { r: 60,  g: 200, b: 180 },   // mint-green aurora
+  { r: 200, g: 160, b: 240 },   // soft magenta
+  { r: 100, g: 180, b: 255 },   // sky blue
+];
+
+const LINES = [
+  { phrase: "between", y: 0.3 },
+  { phrase: "visible", y: 0.5 },
+  { phrase: "threshold", y: 0.65 },
+  { phrase: "apparition", y: 0.78 },
+  { phrase: "light", y: 0.88 },
+  { phrase: "edge", y: 0.95 },
+];
+
+let ribbons = [];
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  initRibbons();
+}
+
+function initRibbons() {
+  ribbons = [];
+  const count = 7;
+  for (let i = 0; i < count; i++) {
+    ribbons.push({
+      baseY: H * (0.15 + 0.7 * (i / (count - 1))),
+      amplitude: H * (0.04 + 0.08 * Math.random()),
+      wavelength: W * (0.3 + 0.4 * Math.random()),
+      speed: 0.0003 + 0.0004 * Math.random(),
+      phase: Math.random() * Math.PI * 2,
+      thickness: 80 + 120 * Math.random(),
+      alpha: 0.08 + 0.12 * Math.random(),
+      colorIdx: i % PALETTE.length,
+      drift: (Math.random() - 0.5) * 0.00005,
+      breathe: Math.random() * Math.PI * 2,
+      breatheSpeed: 0.0008 + 0.0006 * Math.random(),
+    });
+  }
+}
+
+function simplex(x, y, z) {
+  // fast 2D noise approximation using trigonometric layering
+  const s = Math.sin(x * 1.1 + z * 0.7) * Math.cos(y * 0.9 + z * 1.3);
+  const t = Math.cos(x * 0.8 - z * 1.1) * Math.sin(y * 1.2 + z * 0.6);
+  const u = Math.sin(x * 1.4 + y * 0.7 + z * 0.5);
+  return (s + t * 0.6 + u * 0.4) / 2.1;
+}
+
+function fbm(x, y, z, octaves) {
+  let v = 0, a = 0.5, f = 1;
+  for (let i = 0; i < octaves; i++) {
+    v += a * simplex(x * f, y * f, z);
+    a *= 0.5; f *= 2.1;
+  }
+  return v;
+}
+
+function drawRibbon(r, now) {
+  const breathMod = 0.7 + 0.3 * Math.sin(now * r.breatheSpeed + r.breathe);
+  const mouseInfluence = Math.exp(-Math.pow((mx - W/2)/W, 2) * 3) * 0.3;
+  
+  ctx.beginPath();
+  const steps = 200;
+  let firstX = null, firstY = null;
+  
+  for (let i = 0; i <= steps; i++) {
+    const px = (i / steps) * W;
+    const nx = px / r.wavelength;
+    
+    // layered noise for organic motion
+    const wave1 = Math.sin(nx * Math.PI * 2 + r.phase + now * r.speed * 1000);
+    const wave2 = fbm(nx * 1.5, r.baseY * 0.003, now * r.speed) * 0.6;
+    const wave3 = Math.sin(nx * Math.PI * 4 - now * r.speed * 600) * 0.15;
+    
+    const totalWave = wave1 + wave2 + wave3;
+    const py = r.baseY + totalWave * r.amplitude * breathMod;
+    
+    // mouse perturbation
+    const mdistY = Math.abs(py - my);
+    const mouseShift = Math.exp(-mdistY * mdistY / (H * H * 0.15)) * H * 0.04 * (my > r.baseY ? -1 : 1);
+    const finalY = py + mouseShift * mouseInfluence;
+    
+    if (i === 0) {
+      ctx.moveTo(px, finalY);
+      firstX = px; firstY = finalY;
+    } else {
+      ctx.lineTo(px, finalY);
+    }
+  }
+  
+  // close ribbon bottom
+  for (let i = steps; i >= 0; i--) {
+    const px = (i / steps) * W;
+    const nx = px / r.wavelength;
+    const wave1 = Math.sin(nx * Math.PI * 2 + r.phase + now * r.speed * 1000);
+    const wave2 = fbm(nx * 1.5, r.baseY * 0.003, now * r.speed) * 0.6;
+    const wave3 = Math.sin(nx * Math.PI * 4 - now * r.speed * 600) * 0.15;
+    const totalWave = wave1 + wave2 + wave3;
+    const py = r.baseY + totalWave * r.amplitude * breathMod;
+    const mdistY = Math.abs(py - my);
+    const mouseShift = Math.exp(-mdistY * mdistY / (H * H * 0.15)) * H * 0.04 * (my > r.baseY ? -1 : 1);
+    const finalY = py + mouseShift * mouseInfluence + r.thickness * 0.4;
+    ctx.lineTo(px, finalY);
+  }
+  
+  ctx.closePath();
+  
+  const col = PALETTE[r.colorIdx];
+  const grad = ctx.createLinearGradient(0, r.baseY - r.amplitude, 0, r.baseY + r.thickness);
+  grad.addColorStop(0, `rgba(${col.r},${col.g},${col.b},0)`);
+  grad.addColorStop(0.3, `rgba(${col.r},${col.g},${col.b},${r.alpha * breathMod * 0.5})`);
+  grad.addColorStop(0.5, `rgba(${col.r},${col.g},${col.b},${r.alpha * breathMod})`);
+  grad.addColorStop(0.7, `rgba(${col.r},${col.g},${col.b},${r.alpha * breathMod * 0.5})`);
+  grad.addColorStop(1, `rgba(${col.r},${col.g},${col.b},0)`);
+  
+  ctx.fillStyle = grad;
+  ctx.fill();
+  
+  // glow pass
+  ctx.save();
+  ctx.shadowBlur = 30;
+  ctx.shadowColor = `rgba(${col.r},${col.g},${col.b},${r.alpha * breathMod * 0.4})`;
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawStars(now) {
+  const starCount = 120;
+  ctx.save();
+  for (let i = 0; i < starCount; i++) {
+    const sx = ((i * 137.508) % 1) * W;
+    const sy = ((i * 97.333) % 1) * H;
+    const twinkle = 0.3 + 0.7 * Math.abs(Math.sin(now * 0.0005 + i * 0.7));
+    const size = 0.5 + 1.5 * twinkle;
+    
+    ctx.beginPath();
+    ctx.arc(sx, sy, size, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(200, 220, 255, ${0.1 + 0.3 * twinkle})`;
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawPulse(now) {
+  // central pulse of light - the threshold moment
+  const cx = W * 0.5, cy = H * 0.45;
+  const pulse = 0.5 + 0.5 * Math.sin(now * 0.0003);
+  const radius = 60 + 40 * pulse;
+  
+  const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+  grad.addColorStop(0, `rgba(140, 200, 255, ${0.15 * pulse})`);
+  grad.addColorStop(0.5, `rgba(100, 160, 220, ${0.05 * pulse})`);
+  grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.fillStyle = grad;
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawHorizontalScan(now) {
+  // subtle horizontal lines that drift through - the scan line of seeing
+  ctx.save();
+  ctx.globalAlpha = 0.03;
+  for (let i = 0; i < 5; i++) {
+    const y = H * (0.2 + 0.6 * ((i + (now * 0.00002) % 1) / 5));
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.strokeStyle = 'rgba(180, 220, 255, 0.5)';
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function animate(ts) {
+  t = ts;
+  ctx.fillStyle = '#010309';
+  ctx.fillRect(0, 0, W, H);
+  
+  // dark cosmic base
+  const bgGrad = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, W * 0.8);
+  bgGrad.addColorStop(0, 'rgba(5, 15, 40, 1)');
+  bgGrad.addColorStop(1, 'rgba(1, 3, 9, 1)');
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+  
+  drawStars(t);
+  drawHorizontalScan(t);
+  drawPulse(t);
+  
+  // draw ribbons back to front with depth sorting
+  const sortedRibbons = [...ribbons].sort((a, b) => a.baseY - b.baseY);
+  for (const r of sortedRibbons) {
+    drawRibbon(r, t);
+  }
+  
+  // central veil - fades in/out
+  const veilPulse = 0.02 + 0.04 * Math.abs(Math.sin(t * 0.0002));
+  const veilGrad = ctx.createRadialGradient(W/2, H/2, H * 0.1, W/2, H/2, H * 0.6);
+  veilGrad.addColorStop(0, `rgba(1, 3, 9, ${veilPulse})`);
+  veilGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = veilGrad;
+  ctx.fillRect(0, 0, W, H);
+  
+  // word line color response based on aurora intensity at that height
+  const now = t;
+  LINES.forEach((line, i) => {
+    const wordEl = document.getElementById(`wl${i}`);
+    const ribbonAtY = ribbons.find(r => Math.abs(r.baseY - H * line.y) < H * 0.15);
+    if (ribbonAtY) {
+      const col = PALETTE[ribbonAtY.colorIdx];
+      const breathe = 0.7 + 0.3 * Math.sin(now * ribbonAtY.breatheSpeed + ribbonAtY.breathe);
+      wordEl.style.color = `rgba(${col.r + 40}, ${col.g + 30}, ${col.b + 20}, ${0.25 + 0.15 * breathe})`;
+    }
+  });
+  
+  requestAnimationFrame(animate);
+}
+
+canvas.addEventListener('mousemove', e => {
+  mx = e.clientX;
+  my = e.clientY;
+});
+
+canvas.addEventListener('touchmove', e => {
+  mx = e.touches[0].clientX;
+  my = e.touches[0].clientY;
+});
+
+window.addEventListener('resize', resize);
+
+resize();
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>
