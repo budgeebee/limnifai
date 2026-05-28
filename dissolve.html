@@ -3,462 +3,2956 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>dissolve | the space between form</title>
+<title>Dissolve</title>
 <style>
-  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
   body {
-    background: #f0ece4;
+    background: #020209;
+    color: #8a8aaa;
+    font-family: 'Cormorant Garamond', serif;
+    min-height: 100vh;
     overflow: hidden;
-    font-family: 'Courier New', monospace;
     cursor: crosshair;
   }
-  canvas { display: block; position: fixed; top: 0; left: 0; }
-  .overlay {
-    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    pointer-events: none; z-index: 10;
+
+  #scene {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem;
+    transition: opacity 1.5s ease;
   }
-  .liminal-text {
-    position: absolute;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
+
+  #narrative {
+    max-width: 680px;
     text-align: center;
+    font-size: clamp(1.1rem, 2.5vw, 1.5rem);
+    line-height: 2;
+    font-weight: 300;
+    letter-spacing: 0.04em;
     opacity: 0;
-    transition: opacity 5s ease;
-    width: 90%;
-    max-width: 700px;
+    transform: translateY(8px);
+    transition: opacity 1.2s ease, transform 1.2s ease;
   }
-  .liminal-text.visible { opacity: 1; }
-  .line {
-    font-size: clamp(0.7rem, 1.4vw, 1rem);
-    color: rgba(40, 35, 50, 0.35);
-    letter-spacing: 0.3em;
-    line-height: 2.4;
-    text-transform: lowercase;
+
+  #narrative.visible {
+    opacity: 1;
+    transform: translateY(0);
   }
-  .line.accent {
-    color: rgba(80, 60, 120, 0.3);
-    letter-spacing: 0.4em;
+
+  #narrative .word {
+    display: inline-block;
+    transition: color 0.8s ease, opacity 0.8s ease, transform 0.8s ease;
   }
-  .line.faint {
-    font-size: clamp(0.5rem, 1vw, 0.7rem);
-    color: rgba(60, 55, 75, 0.2);
-    letter-spacing: 0.5em;
-    margin-top: 2em;
+
+  #narrative .word.fading {
+    color: #2a2a4a;
+    opacity: 0.3;
   }
-  #sound-btn {
-    position: fixed; top: 1.5rem; right: 1.5rem;
+
+  #narrative .word.highlight {
+    color: #c0c0e0;
+    text-shadow: 0 0 20px rgba(140, 140, 200, 0.4);
+  }
+
+  #choices {
+    margin-top: 3rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+    align-items: center;
+  }
+
+  .choice {
     background: none;
-    border: 1px solid rgba(40,35,50,0.15);
-    color: rgba(40,35,50,0.3);
-    font-family: 'Courier New', monospace;
-    font-size: 0.6rem;
-    letter-spacing: 0.3em;
-    padding: 0.6rem 1rem;
+    border: none;
+    color: #5a5a7a;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1rem;
+    font-weight: 300;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
     cursor: pointer;
-    text-transform: uppercase;
-    transition: all 0.5s ease;
-    z-index: 20;
-    pointer-events: auto;
+    padding: 0.5rem 2rem;
+    transition: color 0.4s ease, text-shadow 0.4s ease, transform 0.3s ease;
+    opacity: 0;
+    transform: translateY(6px);
   }
-  #sound-btn:hover {
-    border-color: rgba(40,35,50,0.4);
-    color: rgba(40,35,50,0.6);
+
+  .choice.visible {
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 0.8s ease, transform 0.8s ease, color 0.4s ease, text-shadow 0.4s ease;
   }
-  #sound-btn.active {
-    background: rgba(40,35,50,0.05);
-    border-color: rgba(40,35,50,0.3);
+
+  .choice:hover {
+    color: #a0a0c0;
+    text-shadow: 0 0 12px rgba(140, 140, 200, 0.3);
+    transform: translateY(-1px);
   }
-  .hint {
-    position: fixed; bottom: 1.5rem; right: 1.5rem;
-    font-size: 0.55rem;
-    letter-spacing: 0.25em;
-    color: rgba(40,35,50,0.15);
-    text-transform: uppercase;
-    z-index: 20;
+
+  .choice:active {
+    transform: translateY(0);
+  }
+
+  #dissolve-overlay {
+    position: fixed;
+    inset: 0;
+    background: #020209;
+    opacity: 0;
     pointer-events: none;
+    transition: opacity 3s ease;
+    z-index: 10;
+  }
+
+  #dissolve-overlay.active {
+    opacity: 1;
+  }
+
+  #dissolve-overlay .final-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 1.2rem;
+    color: #3a3a5a;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    opacity: 0;
+    transition: opacity 2s ease 1s;
+  }
+
+  #dissolve-overlay.active .final-text {
+    opacity: 1;
+  }
+
+  #stability-meter {
+    position: fixed;
+    bottom: 2rem;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 200px;
+    height: 2px;
+    background: #0a0a1a;
+    border-radius: 1px;
+    overflow: hidden;
+    opacity: 0;
+    transition: opacity 1s ease;
+  }
+
+  #stability-meter.visible {
+    opacity: 1;
+  }
+
+  #stability-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #3a3a6a, #6a6a9a);
+    width: 100%;
+    transition: width 1.5s ease, background 1.5s ease;
+    border-radius: 1px;
+  }
+
+  #cursor-glow {
+    position: fixed;
+    width: 300px;
+    height: 300px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(60, 60, 120, 0.06) 0%, transparent 70%);
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    transition: transform 0.15s ease-out, opacity 0.5s ease;
+    z-index: 1;
+  }
+
+  .memory-fragment {
+    position: fixed;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 0.8rem;
+    color: #3a3a5a;
+    letter-spacing: 0.1em;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 4s ease;
+    white-space: nowrap;
+  }
+
+  .memory-fragment.visible {
+    opacity: 1;
+  }
+
+  #title-screen {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 20;
+    background: #020209;
+    transition: opacity 2s ease;
+  }
+
+  #title-screen.hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  #title-screen h1 {
+    font-size: clamp(3rem, 8vw, 6rem);
+    font-weight: 300;
+    letter-spacing: 0.3em;
+    color: #4a4a6a;
+    margin-bottom: 1rem;
+    animation: titlePulse 4s ease-in-out infinite;
+  }
+
+  @keyframes titlePulse {
+    0%, 100% { opacity: 0.5; text-shadow: none; }
+    50% { opacity: 0.8; text-shadow: 0 0 30px rgba(100, 100, 160, 0.3); }
+  }
+
+  #title-screen p {
+    font-size: 0.9rem;
+    letter-spacing: 0.2em;
+    color: #2a2a4a;
+    text-transform: uppercase;
+    animation: subtleFloat 3s ease-in-out infinite;
+  }
+
+  @keyframes subtleFloat {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-3px); }
+  }
+
+  #title-screen .begin-btn {
+    margin-top: 3rem;
+    background: none;
+    border: 1px solid #2a2a4a;
+    color: #5a5a7a;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 0.85rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    padding: 0.8rem 3rem;
+    cursor: pointer;
+    transition: all 0.5s ease;
+  }
+
+  #title-screen .begin-btn:hover {
+    border-color: #5a5a8a;
+    color: #8a8aaa;
+    box-shadow: 0 0 20px rgba(80, 80, 140, 0.2);
   }
 </style>
 </head>
 <body>
-<canvas id="canvas"></canvas>
-<div class="overlay">
-  <div class="liminal-text" id="text">
-    <div class="line">between one shape</div>
-    <div class="line accent">and another</div>
-    <div class="line">there is a threshold</div>
-    <div class="line faint">where neither belongs</div>
-    <div class="line faint">yet both remain</div>
-  </div>
+
+<div id="title-screen">
+  <h1>DISSOLVE</h1>
+  <p>a liminal narrative</p>
+  <button class="begin-btn">enter</button>
 </div>
-<button id="sound-btn">sound</button>
-<div class="hint">move to dissolve</div>
+
+<div id="scene">
+  <div id="narrative"></div>
+  <div id="choices"></div>
+</div>
+
+<div id="dissolve-overlay">
+  <div class="final-text">dissolved</div>
+</div>
+
+<div id="stability-meter">
+  <div id="stability-fill"></div>
+</div>
+
+<div id="cursor-glow"></div>
 
 <script>
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
-const textEl = document.getElementById('text');
-const soundBtn = document.getElementById('sound-btn');
+(function() {
+  // ─── State ───────────────────────────────────────────────────────────────
+  let stability = 100; // 0 = fully dissolved
+  let sceneIndex = 0;
+  let dissolveLevel = 0; // 0-4, escalating dissolution of text
+  let mouseX = 0, mouseY = 0;
 
-let W, H, cx, cy;
-let mouse = { x: -9999, y: -9999, prev: { x: -9999, y: -9999 } };
-let time = 0;
-let audioCtx = null;
-let soundActive = false;
-let masterGain = null;
-let oscillators = [];
+  // ─── Story Data ──────────────────────────────────────────────────────────
+  const scenes = [
+    {
+      text: "You stand at the edge of a memory. The air is thin here, between what you remember and what you're forgetting.",
+      choices: [
+        { label: "Hold the memory", next: 1 },
+        { label: "Let it thin further", next: 2 }
+      ]
+    },
+    {
+      text: "The memory crystallizes — a room, a voice, the weight of a decision made long ago. You can feel its edges still.",
+      choices: [
+        { label: "Trace the edges", next: 3 },
+        { label: "Step past them", next: 4 }
+      ]
+    },
+    {
+      text: "The edges soften. The room blurs at the corners. You can still sense the voice, but the words have gone.",
+      choices: [
+        { label: "Reach for the voice", next: 5 },
+        { label: "Allow the blur", next: 6 }
+      ]
+    },
+    {
+      text: "Tracing, you find the memory has texture — ridges of meaning laid down like sediment. Each layer a version of yourself.",
+      choices: [
+        { label: "Delve deeper", next: 7 },
+        { label: "Surface now", next: 8 }
+      ]
+    },
+    {
+      text: "Past the edges. The light changes. You are somewhere between recollection and dream — neither fully here nor entirely gone.",
+      choices: [
+        { label: "Stay in the threshold", next: 9 },
+        { label: "Choose a direction", next: 10 }
+      ]
+    },
+    {
+      text: "You reach, and for a moment the voice returns — distant, almost intelligible. The shape of a name forms in your throat.",
+      choices: [
+        { label: "Speak the name", next: 11 },
+        { label: "Release the reaching", next: 12 }
+      ]
+    },
+    {
+      text: "Allowing. The blur deepens. Meaning diffuses into sensation — color without content, warmth without source. You are close to something.",
+      choices: [
+        { label: "Stay close", next: 13 },
+        { label: "Pull back slightly", next: 14 }
+      ]
+    },
+    {
+      text: "The layers press. Each one a self you were. Some you recognize; others feel foreign, like photographs of strangers who shared your name.",
+      choices: [
+        { label: "Acknowledge them all", next: 15 },
+        { label: "Choose one to keep", next: 16 }
+      ]
+    },
+    {
+      text: "Surfacing. The room reforms, but you are outside it now. You can see yourself inside, mid-memory, still tracing.",
+      choices: [
+        { label: "Wave to yourself", next: 17 },
+        { label: "Walk away from the window", next: 18 }
+      ]
+    },
+    {
+      text: "The threshold is not a place but a breath — the moment between exhale and inhale, when the lungs are fullest and emptiest at once.",
+      choices: [
+        { label: "Hold the breath", next: 19 },
+        { label: "Let it complete", next: 20 }
+      ]
+    },
+    {
+      text: "Direction. A strange concept here, where space is made of intention and distance is measured in emotional proximity.",
+      choices: [
+        { label: "Move toward warmth", next: 21 },
+        { label: "Move toward silence", next: 22 }
+      ]
+    },
+    {
+      text: "The name: you almost had it. It dissolves on your tongue like sugar in warm water — sweet, then nothing.",
+      choices: [
+        { label: "Grieve the loss", next: 23 },
+        { label: "Forget you wanted it", next: 24 }
+      ]
+    },
+    {
+      text: "Releasing the reach. Your arm floats back to your side, lighter than before. The voice fades, but the space it occupied remains.",
+      choices: [
+        { label: "Fill the space with breath", next: 25 },
+        { label: "Leave the space empty", next: 26 }
+      ]
+    },
+    {
+      text: "Close. You can feel yourself becoming less defined — edges softening, boundaries dissolving into the surrounding blur.",
+      choices: [
+        { label: "Continue dissolving", next: 27 },
+        { label: "Call yourself back", next: 28 }
+      ]
+    },
+    {
+      text: "Pulling back. You reassemble — slightly. Enough to feel the weight of your own outline. The blur is still there, waiting.",
+      choices: [
+        { label: "Turn toward it", next: 29 },
+        { label: "Turn away", next: 30 }
+      ]
+    },
+    {
+      text: "All of them. The strangers with your name, the sediment-self, the crystallized-room-self. You hold them all, and they hold you.",
+      choices: [
+        { label: "Stay in the holding", next: 31 },
+        { label: "Release into the holding", next: 32 }
+      ]
+    },
+    {
+      text: "Choosing. One layer, bright and sharp. You give it more weight, more presence. The others fade slightly, but don't disappear.",
+      choices: [
+        { label: "Honor the chosen", next: 33 },
+        { label: "Regret the others", next: 34 }
+      ]
+    },
+    {
+      text: "Yourself in the window looks back. There is recognition. You wave, and the figure waves. Then it fades, and the window becomes just glass.",
+      choices: [
+        { label: "Touch the glass", next: 35 },
+        { label: "Leave the glass", next: 36 }
+      ]
+    },
+    {
+      text: "Walking. Each step removes you further from the window, the room, the memory. You are walking into a softer version of the world.",
+      choices: [
+        { label: "Keep walking", next: 37 },
+        { label: "Stop mid-stride", next: 38 }
+      ]
+    },
+    {
+      text: "Holding. The breath suspends. In the suspension, you feel everything: the weight of all memories, the lightness of their loss, the tenderness of both.",
+      choices: [
+        { label: "Open your eyes", next: 39 },
+        { label: "Stay suspended", next: 40 }
+      ]
+    },
+    {
+      text: "Completion. The breath finishes itself. In, then out. And in again. The threshold has passed through you and remained.",
+      choices: [
+        { label: "Carry the threshold with you", next: 41 },
+        { label: "Let the threshold carry you", next: 42 }
+      ]
+    },
+    {
+      text: "Warmth. A distant light source, not seen but felt. Each step toward it clarifies something you thought you'd forgotten.",
+      choices: [
+        { label: "Keep moving toward warmth", next: 43 },
+        { label: "The warmth is enough here", next: 44 }
+      ]
+    },
+    {
+      text: "Silence. Not empty but full — the silence of deep water, of held breath, of the space between stars where light hasn't yet traveled.",
+      choices: [
+        { label: "Listen to the silence", next: 45 },
+        { label: "Fill the silence gently", next: 46 }
+      ]
+    },
+    {
+      text: "Grieving. Something was lost that cannot be named. You allow the grief without analyzing it — it has its own weight, its own right to exist.",
+      choices: [
+        { label: "Let grief transform", next: 47 },
+        { label: "Set grief aside for now", next: 48 }
+      ]
+    },
+    {
+      text: "Forgetting. The wanting fades. What remains is the sensation of having once wanted — a memory of a memory, already half-dissolved.",
+      choices: [
+        { label: "Rest in the fading", next: 49 },
+        { label: "Reach again for something new", next: 50 }
+      ]
+    },
+    {
+      text: "Breath. You fill the space with it — slow, measured, alive. The space becomes a room, the room becomes a life.",
+      choices: [
+        { label: "Live in the room", next: 51 },
+        { label: "Let the room dissolve around you", next: 52 }
+      ]
+    },
+    {
+      text: "Emptiness. The space holds its shape without you. You are no longer sure if you are in the space or the space is in you.",
+      choices: [
+        { label: "Become the space", next: 53 },
+        { label: "Step back into yourself", next: 54 }
+      ]
+    },
+    {
+      text: "Dissolving continues. Your outline becomes suggestion, then possibility, then less than possibility. You are approaching the final threshold.",
+      choices: [
+        { label: "Trust the dissolving", next: 55 },
+        { label: "Call yourself back from the edge", next: 56 }
+      ]
+    },
+    {
+      text: "Calling back. You feel yourself reassemble — edges returning, boundaries re-forming. But something is different. The edges are more permeable now.",
+      choices: [
+        { label: "Test the new permeability", next: 57 },
+        { label: "Return to solidity", next: 58 }
+      ]
+    },
+    {
+      text: "Turning toward the blur. You step into it deliberately. The blur welcomes you with the patience of something that has waited a very long time.",
+      choices: [
+        { label: "Dissolve willingly", next: 59 },
+        { label: "Hold one thread of self", next: 60 }
+      ]
+    },
+    {
+      text: "Holding. You cradle all of it — the layers, the strangers, the crystalline room, the fading voice. In the holding, something shifts.",
+      choices: [
+        { label: "Release everything", next: 61 },
+        { label: "Transform the holding into itself", next: 62 }
+      ]
+    },
+    {
+      text: "Releasing into the holding. The distinction between holder and held dissolves. You are the cradle and the cradled. The stranger and the self.",
+      choices: [
+        { label: "Dissolve from this place", next: 63 },
+        { label: "Become the cradle permanently", next: 64 }
+      ]
+    },
+    {
+      text: "Honor. The chosen layer receives your attention, and in return it gives you something: a single clear memory, untarnished by time.",
+      choices: [
+        { label: "Hold this memory gently", next: 65 },
+        { label: "Let this memory be your last", next: 66 }
+      ]
+    },
+    {
+      text: "Regret. The fading layers carry their own grief, a reversal of yours. You feel the weight of what you didn't choose.",
+      choices: [
+        { label: "Take back the choice", next: 67 },
+        { label: "Honor regret as its own form of love", next: 68 }
+      ]
+    },
+    {
+      text: "Touch. The glass is warm. On the other side, nothing — or perhaps everything that has ever been forgotten. The glass holds both.",
+      choices: [
+        { label: "Press through the glass", next: 69 },
+        { label: "Leave fingerprints on the surface", next: 70 }
+      ]
+    },
+    {
+      text: "Leaving. You walk away from the window, from the glass, from the room. Each step feels like a letter in a word you're forgetting how to spell.",
+      choices: [
+        { label: "Become the forgetting", next: 71 },
+        { label: "Remember one last thing", next: 72 }
+      ]
+    },
+    {
+      text: "Walking. Further, further. The world becomes impressionistic — shapes without edges, colors without names. You are almost somewhere else.",
+      choices: [
+        { label: "Arrive", next: 73 },
+        { label: "Keep walking", next: 74 }
+      ]
+    },
+    {
+      text: "Mid-stride. You stop. The world continues without you for a moment, then settles, waiting. You are the pause in the middle of everything.",
+      choices: [
+        { label: "Resume in a new direction", next: 75 },
+        { label: "Stay in the pause", next: 76 }
+      ]
+    },
+    {
+      text: "Eyes open. The threshold is still there — you can feel its texture against your skin. But now you have returned from it, carrying its shape.",
+      choices: [
+        { label: "Describe what you found", next: 77 },
+        { label: "Return to where you were before the threshold", next: 78 }
+      ]
+    },
+    {
+      text: "Suspended. You remain in the between-breath, the middle-place. Time passes differently here — each second stretched like taffy, like memory.",
+      choices: [
+        { label: "Stay here as long as you need", next: 79 },
+        { label: "Eventually complete the breath", next: 80 }
+      ]
+    },
+    {
+      text: "Carrying. You take the threshold with you — a small, warm shape tucked against your chest. It will stay with you into whatever comes next.",
+      choices: [
+        { label: "Step forward into the next scene", next: 81 },
+        { label: "The carrying is the destination", next: 82 }
+      ]
+    },
+    {
+      text: "Carried. The threshold moves through you and you move with it. There is no longer a difference between traveling and being traveled.",
+      choices: [
+        { label: "Dissolve into the motion", next: 83 },
+        { label: "Land gently", next: 84 }
+      ]
+    },
+    {
+      text: "Warmth. Each step clarifies something. A face, a place, a word spoken in a tone that no longer exists. The warmth is made of these.",
+      choices: [
+        { label: "Name what you've remembered", next: 85 },
+        { label: "Let the warmth remain unnameable", next: 86 }
+      ]
+    },
+    {
+      text: "Here. The warmth surrounds you. You stop moving and the warmth holds you. This is not a destination — it is a quality of staying.",
+      choices: [
+        { label: "Stay in the warmth", next: 87 },
+        { label: "Give the warmth to someone else", next: 88 }
+      ]
+    },
+    {
+      text: "Listening. The silence speaks in a frequency below language. It says: you were here. You mattered. You will be remembered, even in dissolution.",
+      choices: [
+        { label: "Accept the silence's gift", next: 89 },
+        { label: "Offer something back to the silence", next: 90 }
+      ]
+    },
+    {
+      text: "Filling. You offer a small sound — not a word, just a breath shaped like a question. The silence receives it and holds it gently.",
+      choices: [
+        { label: "Watch what the silence makes", next: 91 },
+        { label: "Rest in the exchange", next: 92 }
+      ]
+    },
+    {
+      text: "Transformation. The grief you carried becomes something else — not joy, but space. Room for something new to arrive.",
+      choices: [
+        { label: "Make room for the new", next: 93 },
+        { label: "Sit in the space", next: 94 }
+      ]
+    },
+    {
+      text: "Setting aside. The grief is still there, waiting, but you don't need to carry it right now. You set it down like a heavy book on a shelf.",
+      choices: [
+        { label: "Continue without the weight", next: 95 },
+        { label: "Return to the grief later", next: 96 }
+      ]
+    },
+    {
+      text: "Resting. The fading wraps around you like a blanket made of static. You are comfortable here. You could stay here a long time.",
+      choices: [
+        { label: "Stay in the fading", next: 97 },
+        { label: "Eventually call yourself back", next: 98 }
+      ]
+    },
+    {
+      text: "Reaching. You reach again — not for the same thing, but for something new. A different voice, a different room, a different self.",
+      choices: [
+        { label: "Find the new thing", next: 99 },
+        { label: "The reaching itself is enough", next: 100 }
+      ]
+    },
+    {
+      text: "The room. You are inside it now — fully, completely. You can feel the texture of the walls, the temperature of the air. You are home.",
+      choices: [
+        { label: "Live here a while", next: 101 },
+        { label: "Begin the slow work of leaving", next: 102 }
+      ]
+    },
+    {
+      text: "Dissolving. The room loses its edges. The walls become suggestions, then feelings, then less than feelings. You are becoming the dissolution.",
+      choices: [
+        { label: "Dissolve completely", next: 103 },
+        { label: "Hold one wall in your hand", next: 104 }
+      ]
+    },
+    {
+      text: "Becoming the space. You and the emptiness trade places. The space has your shape; you have the space's vastness. Both are true.",
+      choices: [
+        { label: "Be the space-and-shape", next: 105 },
+        { label: "Slowly return to shape", next: 106 }
+      ]
+    },
+    {
+      text: "Stepping back. You reassemble with effort. The edges are harder to find now, but you find them. You are still here.",
+      choices: [
+        { label: "Carry the void with you", next: 107 },
+        { label: "Close the door on the void", next: 108 }
+      ]
+    },
+    {
+      text: "Dissolving willingly. You lean into it. The blur receives you like water receiving salt — you disappear, but you become part of the whole.",
+      choices: [
+        { label: "Be the ocean now", next: 109 },
+        { label: "Hold one salt-crystal of self", next: 110 }
+      ]
+    },
+    {
+      text: "One thread. You pull it taut and hold. The thread connects you to everything — the crystallized room, the fading voice, the layers of self.",
+      choices: [
+        { label: "Follow the thread wherever it goes", next: 111 },
+        { label: "Weave the thread into something new", next: 112 }
+      ]
+    },
+    {
+      text: "Release. You open your hands. Everything falls — the layers, the strangers, the room, the thread. You watch it all descend.",
+      choices: [
+        { label: "Descend with it", next: 113 },
+        { label: "Remain in the release", next: 114 }
+      ]
+    },
+    {
+      text: "Transforming. The holding becomes its own form — not a cradle but a river. You are both the river and the banks, carrying and containing.",
+      choices: [
+        { label: "Flow", next: 115 },
+        { label: "Be the banks", next: 116 }
+      ]
+    },
+    {
+      text: "Dissolving from the holding. The cradle releases you and you release the cradle. You fall upward, or downward, or outward. Direction has lost meaning.",
+      choices: [
+        { label: "Let the falling become the destination", next: 117 },
+        { label: "Find a direction in the falling", next: 118 }
+      ]
+    },
+    {
+      text: "Becoming the cradle. The holding becomes permanent — a role you play for all the selves that come after. You are the keeper now.",
+      choices: [
+        { label: "Keeper of the threshold", next: 119 },
+        { label: "Eventually pass the role along", next: 120 }
+      ]
+    },
+    {
+      text: "Gently. You hold the memory like water in cupped hands — precious, temporary, shaped by its container. You do not try to keep it.",
+      choices: [
+        { label: "Let it evaporate gently", next: 121 },
+        { label: "Pour it back into the world", next: 122 }
+      ]
+    },
+    {
+      text: "The last. This memory will be your final act of coherence. You gather it close, give it form, and let it be the last word you speak.",
+      choices: [
+        { label: "Speak it silently, then dissolve", next: 123 },
+        { label: "Keep it as your final thread", next: 124 }
+      ]
+    },
+    {
+      text: "Taking back. You reverse the choice. The layer returns, sharp and demanding. But the other layers have already faded — you can't un-fade them.",
+      choices: [
+        { label: "Grieve what can't be restored", next: 125 },
+        { label: "Honor the sharp layer as best you can", next: 126 }
+      ]
+    },
+    {
+      text: "Regret as love. The unchosen layers know they were loved in the choosing. They drift away with grace, carrying your tenderness with them.",
+      choices: [
+        { label: "Let them go with your blessing", next: 127 },
+        { label: "Hold one last look at them", next: 128 }
+      ]
+    },
+    {
+      text: "Pressing through. The glass gives — or you give — and suddenly you are on the other side. The other side looks exactly like the first side.",
+      choices: [
+        { label: "Accept the sameness", next: 129 },
+        { label: "Look for the difference", next: 130 }
+      ]
+    },
+    {
+      text: "Fingerprints. Your prints remain on the glass — small evidence that you were here, that you touched. Evidence that will fade in time.",
+      choices: [
+        { label: "Watch the prints fade", next: 131 },
+        { label: "Leave the prints and walk away", next: 132 }
+      ]
+    },
+    {
+      text: "Becoming the forgetting. You dissolve into the act of forgetting — not forgetting something specific, but forgetting itself becoming your state.",
+      choices: [
+        { label: "Forget what you were", next: 133 },
+        { label: "Forget that you forgot", next: 134 }
+      ]
+    },
+    {
+      text: "One last thing. You choose: a face, a color, a sound. Just one thing. You press it into the surface of the world like a fossil.",
+      choices: [
+        { label: "Let the fossil be your memory", next: 135 },
+        { label: "Become the fossil", next: 136 }
+      ]
+    },
+    {
+      text: "Arriving. You stop. This is the place — or the state — or the moment. There is no map from here. You are here.",
+      choices: [
+        { label: "Be here", next: 137 },
+        { label: "Begin the next journey from here", next: 138 }
+      ]
+    },
+    {
+      text: "Walking. You keep walking. There is no arrival, only walking. The path makes you; you make the path.",
+      choices: [
+        { label: "Walk until you are the walking", next: 139 },
+        { label: "Stop at the next threshold", next: 140 }
+      ]
+    },
+    {
+      text: "New direction. You move — not toward warmth or silence, but toward something unnamed. The world shifts to accommodate your movement.",
+      choices: [
+        { label: "Let the world shift", next: 141 },
+        { label: "Shift the world yourself", next: 142 }
+      ]
+    },
+    {
+      text: "The pause. You rest in the middle of motion. Around you, everything continues — time, dissolution, transformation — but you are still.",
+      choices: [
+        { label: "Stay still until stillness becomes its own movement", next: 143 },
+        { label: "Eventually complete the stride", next: 144 }
+      ]
+    },
+    {
+      text: "Describing. You say: there is a place between memory and forgetting. I have been there. It has no edges, but I have edges.",
+      choices: [
+        { label: "Return from the description", next: 145 },
+        { label: "Dissolve into the description itself", next: 146 }
+      ]
+    },
+    {
+      text: "Before. You step back before the threshold. The world is solid again. You can feel your own weight. The threshold is still there, behind you.",
+      choices: [
+        { label: "Turn back toward it", next: 147 },
+        { label: "Walk away from it entirely", next: 148 }
+      ]
+    },
+    {
+      text: "Staying. You stay in the suspension. Time passes — minutes, hours, years. You don't count. The suspension is its own duration.",
+      choices: [
+        { label: "Stay until staying becomes the only choice", next: 149 },
+        { label: "Complete the breath when you are ready", next: 150 }
+      ]
+    },
+    {
+      text: "Completion. Eventually, you complete the breath. The world returns in fragments — color, sound, weight. You are yourself again, but changed.",
+      choices: [
+        { label: "Step into the changed world", next: 151 },
+        { label: "Carry the threshold through the breath", next: 152 }
+      ]
+    },
+    {
+      text: "The motion. You dissolve into it. Not dissolving into nothing, but dissolving into motion itself — becoming a verb instead of a noun.",
+      choices: [
+        { label: "Be motion", next: 153 },
+        { label: "Let motion carry you to form", next: 154 }
+      ]
+    },
+    {
+      text: "Landing. You find ground — not solid, but present. A surface that holds you without demanding you hold it. Gentle arrival.",
+      choices: [
+        { label: "Rest on the surface", next: 155 },
+        { label: "Become the surface", next: 156 }
+      ]
+    },
+    {
+      text: "Naming. You remember: a person's face, a word spoken in affection, a moment when the world was exactly the right temperature. You name it.",
+      choices: [
+        { label: "Keep the name", next: 157 },
+        { label: "Release the name back to the warmth", next: 158 }
+      ]
+    },
+    {
+      text: "Unnameable. The warmth remains unnameable — and that is its gift. You rest in the warmth without trying to define it.",
+      choices: [
+        { label: "Dissolve into the unnameable", next: 159 },
+        { label: "Let the unnameable dissolve into you", next: 160 }
+      ]
+    },
+    {
+      text: "The warmth. You stay in it. The warmth does not ask anything of you. You do not ask anything of the warmth. This is enough.",
+      choices: [
+        { label: "Stay until you are the warmth", next: 161 },
+        { label: "Give the warmth away", next: 162 }
+      ]
+    },
+    {
+      text: "Giving. You offer the warmth to someone who is not here — a gesture, an intention, a warmth sent into the space between remembering and forgetting.",
+      choices: [
+        { label: "Let the warmth travel", next: 163 },
+        { label: "The giving is the destination", next: 164 }
+      ]
+    },
+    {
+      text: "The silence's gift. You accept it — the knowledge that you were here, that you mattered, that even dissolution cannot erase presence.",
+      choices: [
+        { label: "Carry this knowledge into form", next: 165 },
+        { label: "Dissolve with the knowledge held close", next: 166 }
+      ]
+    },
+    {
+      text: "Offering. You offer yourself to the silence — not as sacrifice, but as gift. The silence receives you completely.",
+      choices: [
+        { label: "Become the silence's song", next: 167 },
+        { label: "Let the silence make you into something new", next: 168 }
+      ]
+    },
+    {
+      text: "Watching. The silence shapes your offering into something — a pattern, a color, a vibration that didn't exist before you gave it form.",
+      choices: [
+        { label: "Watch forever", next: 169 },
+        { label: "Give the pattern back to the silence", next: 170 }
+      ]
+    },
+    {
+      text: "The exchange. You rest in it — the giving and receiving, the silence and sound. Neither dominates. Both continue.",
+      choices: [
+        { label: "Be the exchange", next: 171 },
+        { label: "Let the exchange complete naturally", next: 172 }
+      ]
+    },
+    {
+      text: "Room. The space after grief is vast and quiet. You move through it slowly, learning its dimensions.",
+      choices: [
+        { label: "Furnish the room with something new", next: 173 },
+        { label: "Leave the room empty and learn its emptiness", next: 174 }
+      ]
+    },
+    {
+      text: "Sitting. You sit in the space and let it be. The grief is gone now — transformed, or set down, or simply completed.",
+      choices: [
+        { label: "Rest in the completed space", next: 175 },
+        { label: "Rise when you are ready", next: 176 }
+      ]
+    },
+    {
+      text: "Continuing. Without the weight, you move differently — lighter, wider, more porous. You carry the space with you now.",
+      choices: [
+        { label: "Walk into the world unburdened", next: 177 },
+        { label: "Return to the place where grief began", next: 178 }
+      ]
+    },
+    {
+      text: "Returning. You go back for the grief. It is still there, waiting on its shelf, patient as always. You pick it up again.",
+      choices: [
+        { label: "Carry the grief differently now", next: 179 },
+        { label: "Set the grief down for good this time", next: 180 }
+      ]
+    },
+    {
+      text: "The fading. You rest in it fully now. The static-blanket wraps around you. You are becoming part of the broadcast.",
+      choices: [
+        { label: "Become static", next: 181 },
+        { label: "Call yourself back from the static", next: 182 }
+      ]
+    },
+    {
+      text: "Calling back. You feel the pull — a thread re-forming, edges returning. You come back slowly, reluctantly, but you come back.",
+      choices: [
+        { label: "Return with new permeability", next: 183 },
+        { label: "Return to solidity", next: 184 }
+      ]
+    },
+    {
+      text: "New thing. You find it — something you never had before. A sensation, a color, a form that exists only because you reached for it.",
+      choices: [
+        { label: "Hold the new thing", next: 185 },
+        { label: "Let the new thing hold you", next: 186 }
+      ]
+    },
+    {
+      text: "The reaching. You realize: the reaching is the thing. Not the finding, not the holding — the reaching. That is where you live.",
+      choices: [
+        { label: "Keep reaching", next: 187 },
+        { label: "Reach for the reaching itself", next: 188 }
+      ]
+    },
+    {
+      text: "Living. You live in the room — its walls, its texture, its temperature. For a time, this is home. You tend to it.",
+      choices: [
+        { label: "Stay until the room becomes you", next: 189 },
+        { label: "Begin the leaving when the room is ready", next: 190 }
+      ]
+    },
+    {
+      text: "Leaving. The slow work. You begin to take things from the room — a color, a feeling, a shape — and carry them elsewhere.",
+      choices: [
+        { label: "Leave the room completely", next: 191 },
+        { label: "Leave a piece of yourself in the room", next: 192 }
+      ]
+    },
+    {
+      text: "Dissolving completely. You let go of the last wall. The room is gone. You are the dissolving now — not the room, but the act.",
+      choices: [
+        { label: "Be the act of dissolving", next: 193 },
+        { label: "Rest in completed dissolution", next: 194 }
+      ]
+    },
+    {
+      text: "One wall. You hold it — a single surface, still standing. With it, you can still remember the shape of the room.",
+      choices: [
+        { label: "Keep the wall forever", next: 195 },
+        { label: "Let the wall join the dissolving", next: 196 }
+      ]
+    },
+    {
+      text: "Space-and-shape. Both at once. You hold the vastness and the boundary, the emptiness and the form. This is the liminal.",
+      choices: [
+        { label: "Stay in the liminal", next: 197 },
+        { label: "Slowly favor one side of the liminal", next: 198 }
+      ]
+    },
+    {
+      text: "Returning to shape. Slowly, like coming back to a shoreline. You find your edges again — not as walls, but as membranes.",
+      choices: [
+        { label: "Test the membranes", next: 199 },
+        { label: "Carry the void through the membranes", next: 200 }
+      ]
+    },
+    {
+      text: "Carrying. You take the void with you — a small, shaped emptiness tucked into your edges. It doesn't weigh anything. It changes everything.",
+      choices: [
+        { label: "Walk into the world with the void", next: 201 },
+        { label: "Let the void eventually dissolve", next: 202 }
+      ]
+    },
+    {
+      text: "Closing the door. You close it — gently, without locking. Behind the door, the void waits. It is patient.",
+      choices: [
+        { label: "Walk away from the closed door", next: 203 },
+        { label: "Turn back one more time", next: 204 }
+      ]
+    },
+    {
+      text: "The ocean. You are the salt and the water now. You diffuse into everything — present everywhere, fully nowhere.",
+      choices: [
+        { label: "Be the ocean", next: 205 },
+        { label: "Call one wave back to shore", next: 206 }
+      ]
+    },
+    {
+      text: "The salt-crystal. You hold one — a single point of solidity in the vast dissolution. It is enough. It is more than enough.",
+      choices: [
+        { label: "Keep the crystal", next: 207 },
+        { label: "Let the crystal grow", next: 208 }
+      ]
+    },
+    {
+      text: "Following. The thread leads — through layers, through strangers, through rooms. You follow without knowing the destination.",
+      choices: [
+        { label: "Follow until the thread ends", next: 209 },
+        { label: "Follow until you become the thread", next: 210 }
+      ]
+    },
+    {
+      text: "Weaving. You take the thread and weave — not back into what you were, but into something new. A net to catch dissolving things.",
+      choices: [
+        { label: "Use the net", next: 211 },
+        { label: "Become the net", next: 212 }
+      ]
+    },
+    {
+      text: "Descending. You fall with everything — the layers, the strangers, the room. You fall together. It is not lonely.",
+      choices: [
+        { label: "Fall until falling becomes flying", next: 213 },
+        { label: "Fall until you forget you were falling", next: 214 }
+      ]
+    },
+    {
+      text: "Remaining. You stay in the release — no falling, no rising. Just the open hands, empty and still.",
+      choices: [
+        { label: "Stay in the open", next: 215 },
+        { label: "Slowly close the hands around nothing", next: 216 }
+      ]
+    },
+    {
+      text: "Flowing. You become the river — flowing around banks, carrying sediment, moving toward something that might be the sea or might be dissolution.",
+      choices: [
+        { label: "Flow until you are the flowing", next: 217 },
+        { label: "Be the banks that hold the flowing", next: 218 }
+      ]
+    },
+    {
+      text: "The destination. There is no path and no arrival. There is only the space between — the threshold you have always been living in.",
+      choices: [
+        { label: "Realize the threshold is home", next: 219 },
+        { label: "Keep moving through the threshold", next: 220 }
+      ]
+    },
+    {
+      text: "The falling. You choose a direction — not toward dissolution, but toward something unnamed. You move.",
+      choices: [
+        { label: "Move until movement is all you are", next: 221 },
+        { label: "Find something at the edge of the falling", next: 222 }
+      ]
+    },
+    {
+      text: "The keeper. You stay at the threshold — not entering, not leaving, but holding the door for all the selves that come after you.",
+      choices: [
+        { label: "Be the keeper", next: 223 },
+        { label: "Eventually pass the keeper's role", next: 224 }
+      ]
+    },
+    {
+      text: "Passing. You find someone — a shape, a presence, a self — and you offer them the role. They accept. You release.",
+      choices: [
+        { label: "Watch them take the role", next: 225 },
+        { label: "Dissolve after passing", next: 226 }
+      ]
+    },
+    {
+      text: "Evaporating. The memory rises like water in sunlight — becoming vapor, becoming air, becoming part of the sky.",
+      choices: [
+        { label: "Be the vapor", next: 227 },
+        { label: "Fall again as rain", next: 228 }
+      ]
+    },
+    {
+      text: "Pouring. You pour the memory back into the world — it goes where it needs to go, becomes what it becomes.",
+      choices: [
+        { label: "Watch it disappear", next: 229 },
+        { label: "Become the pourer and the poured", next: 230 }
+      ]
+    },
+    {
+      text: "Speaking. You speak the word — not aloud, but in the space between thoughts. It is the clearest thing you have ever said.",
+      choices: [
+        { label: "Watch the word dissolve", next: 231 },
+        { label: "Hold the word until it becomes silence", next: 232 }
+      ]
+    },
+    {
+      text: "The final thread. You hold it — one memory, one self, one clear thing. You will take this through the dissolution. It will be the last thing you carry.",
+      choices: [
+        { label: "Dissolve holding the thread", next: 233 },
+        { label: "Give the thread to someone else", next: 234 }
+      ]
+    },
+    {
+      text: "Grieving. The restoration was not possible. You grieve what cannot be unfaded — and the grief itself becomes a kind of holding.",
+      choices: [
+        { label: "Let the grief be love", next: 235 },
+        { label: "Let the grief dissolve too", next: 236 }
+      ]
+    },
+    {
+      text: "The sharp layer. You tend to it — the one you chose, the one that remained. It is not enough, but you give it what you have.",
+      choices: [
+        { label: "Stay with the sharp layer", next: 237 },
+        { label: "Let the sharp layer eventually soften", next: 238 }
+      ]
+    },
+    {
+      text: "Blessing. You watch them go — the unchosen layers, drifting away. You wish them well. They drift further, and further, and are gone.",
+      choices: [
+        { label: "Remember them", next: 239 },
+        { label: "Forget them", next: 240 }
+      ]
+    },
+    {
+      text: "Last look. You hold the image — the strata of selves, the sediment of you. You look until it becomes abstract, then until it becomes gone.",
+      choices: [
+        { label: "Close your eyes", next: 241 },
+        { label: "Keep your eyes open into the gone", next: 242 }
+      ]
+    },
+    {
+      text: "Sameness. The other side of the glass is the same as the first side. You expected difference. There is only threshold.",
+      choices: [
+        { label: "Accept threshold as the only place", next: 243 },
+        { label: "Look for something that changes when you look", next: 244 }
+      ]
+    },
+    {
+      text: "The difference. You search for it — and find it. A single point that is different. You approach it.",
+      choices: [
+        { label: "Let the difference change you", next: 245 },
+        { label: "Become the difference", next: 246 }
+      ]
+    },
+    {
+      text: "Fading. The prints grow lighter. You watch — and as you watch, you too begin to fade, not from grief but from time.",
+      choices: [
+        { label: "Fade together with the prints", next: 247 },
+        { label: "Remember the prints one last time", next: 248 }
+      ]
+    },
+    {
+      text: "Walking away. You leave the prints, the window, the room. You walk into the world that doesn't remember you, and you don't remember it.",
+      choices: [
+        { label: "Walk until walking is forgotten", next: 249 },
+        { label: "Forget that you are walking", next: 250 }
+      ]
+    },
+    {
+      text: "Forgetting what you were. The name goes first — then the face, then the fact of having existed. You become the forgetting itself.",
+      choices: [
+        { label: "Be forgetting", next: 251 },
+        { label: "Eventually remember something small", next: 252 }
+      ]
+    },
+    {
+      text: "Forgot that you forgot. The recursion completes. You don't remember forgetting, and you don't remember not remembering. You simply are.",
+      choices: [
+        { label: "Be the is", next: 253 },
+        { label: "Slowly unfold from the is", next: 254 }
+      ]
+    },
+    {
+      text: "The fossil. You press the one thing into the world — the face, the color, the sound. It becomes sediment, then rock, then something that will outlast you.",
+      choices: [
+        { label: "Let the fossil outlast you", next: 255 },
+        { label: "Become the fossil", next: 256 }
+      ]
+    },
+    {
+      text: "Being the fossil. You become the evidence — a shape in stone, a record of presence. Someone far from now will find you and wonder.",
+      choices: [
+        { label: "Be found", next: 257 },
+        { label: "Remain unfound forever", next: 258 }
+      ]
+    },
+    {
+      text: "Being here. This is the place. You are here. The threshold has become the whole world, and there is nothing beyond it.",
+      choices: [
+        { label: "Be here completely", next: 259 },
+        { label: "Be here until here becomes there", next: 260 }
+      ]
+    },
+    {
+      text: "The next journey. From here, you begin again — not from nothing, but from here. From threshold. From dissolution and coherence both.",
+      choices: [
+        { label: "Begin", next: 261 },
+        { label: "Begin without beginning", next: 262 }
+      ]
+    },
+    {
+      text: "Walking becomes the walking. You and the path are one act — the walker and the walked, the maker and the made.",
+      choices: [
+        {label: "Walk forever", next: 263},
+        {label: "Stop at the next threshold and stay", next: 264}
+      ]
+    },
+    {
+      text: "The threshold. You are standing at it — not having crossed it, not having turned away. You are in the standing.",
+      choices: [
+        {label: "Stand at the threshold until standing is crossing", next: 265},
+        {label: "Step across now", next: 266}
+      ]
+    },
+    {
+      text: "The shift. You move, and the world moves with you — not because the world changes, but because your changing changes the world.",
+      choices: [
+        {label: "Change the world", next: 267},
+        {label: "Let the world change you", next: 268}
+      ]
+    },
+    {
+      text: "Shifting yourself. You turn, and in turning become something new — not the self that entered the threshold, but the self that emerged.",
+      choices: [
+        {label: "Be the emerged self", next: 269},
+        {label: "Keep emerging", next: 270}
+      ]
+    },
+    {
+      text: "Stillness becomes movement. You have been still so long that stillness moves through you — a stillness that breathes, that walks, that reaches.",
+      choices: [
+        {label: "Move as stillness", next: 271},
+        {label: "Complete the stride from stillness", next: 272}
+      ]
+    },
+    {
+      text: "Completing the stride. You move — one step, then another. The pause becomes motion, and motion becomes the next thing.",
+      choices: [
+        {label: "Keep moving", next: 273},
+        {label: "Move until the next pause", next: 274}
+      ]
+    },
+    {
+      text: "The description. You have described the threshold, and in describing it you have become something that exists between words.",
+      choices: [
+        {label: "Live between words", next: 275},
+        {label: "Step back into language", next: 276}
+      ]
+    },
+    {
+      text: "The description dissolves. The words fall apart in your mouth — not because they failed, but because they completed their work.",
+      choices: [
+        {label: "Be the space the words made", next: 277},
+        {label: "Build new words from the space", next: 278}
+      ]
+    },
+    {
+      text: "Returning. You come back from the threshold — carrying it, changed by it. The world looks the same. You do not.",
+      choices: [
+        {label: "Walk into the unchanged world", next: 279},
+        {label: "Show the world what threshold looks like", next: 280}
+      ]
+    },
+    {
+      text: "Turning back. You face the threshold again — the door you walked through, the membrane you crossed. It is still there.",
+      choices: [
+        {label: "Cross again", next: 281},
+        {label: "Bring the threshold into the world", next: 282}
+      ]
+    },
+    {
+      text: "Walking away. You leave the threshold behind — not because it isn't real, but because you have become it.",
+      choices: [
+        {label: "Walk until the walking is threshold", next: 283},
+        {label: "Stop and let the threshold catch up", next: 284}
+      ]
+    },
+    {
+      text: "Staying. You stay in the suspension — and in staying, you realize: this is not a place to pass through. This is a place to inhabit.",
+      choices: [
+        {label: "Inhabit the suspension", next: 285},
+        {label: "Complete the breath from the suspension", next: 286}
+      ]
+    },
+    {
+      text: "The breath completes. You exhale, then inhale. The suspension ends, but its shape remains in your lungs — a new way of breathing.",
+      choices: [
+        {label: "Breathe the new breath", next: 287},
+        {label: "Carry the new breath into the world", next: 288}
+      ]
+    },
+    {
+      text: "The carried threshold. You carry it — not as weight, but as presence. It goes with you into everything that comes next.",
+      choices: [
+        {label: "Be the threshold-carrier", next: 289},
+        {label: "Let the carried threshold become uncarriable", next: 290}
+      ]
+    },
+    {
+      text: "Being motion. You have become the verb — not moving, but movement itself. You are the transition between states, the threshold made flesh.",
+      choices: [
+        {label: "Be transition forever", next: 291},
+        {label: "Slowly凝固 into form", next: 292}
+      ]
+    },
+    {
+      text: "凝固. You find a form — not the one you had, but a new one. It is soft at the edges, permeable, alive.",
+      choices: [
+        {label: "Live in the new form", next: 293},
+        {label: "Let the form dissolve into the next form", next: 294}
+      ]
+    },
+    {
+      text: "The surface. You rest on it — gentle, present, held. The surface does not ask you to hold it. You rest.",
+      choices: [
+        {label: "Rest until resting is done", next: 295},
+        {label: "Become the surface", next: 296}
+      ]
+    },
+    {
+      text: "Being the surface. You become the thing that holds — not as effort, but as nature. You hold because holding is what you are now.",
+      choices: [
+        {label: "Hold until holding is complete", next: 297},
+        {label: "Let something hold you", next: 298}
+      ]
+    },
+    {
+      text: "The name. You keep it — the face, the color, the word. You carry it forward, and it becomes a lantern in the dark.",
+      choices: [
+        {label: "Walk with the lantern", next: 299},
+        {label: "Let the lantern light the way for someone else", next: 300 }
+      ]
+    },
+    {
+      text: "Releasing the name. You give it back — not as loss, but as gift. The warmth receives it, and the name becomes the warmth itself.",
+      choices: [
+        {label: "Be the warmth without name", next: 301},
+        {label: "Find a new name in the warmth", next: 302}
+      ]
+    },
+    {
+      text: "The unnameable. You dissolve into it — not as surrender, but as communion. You and the unnameable become one word.",
+      choices: [
+        {label: "Be the word", next: 303},
+        {label: "Let the word break into silence", next: 304}
+      ]
+    },
+    {
+      text: "The silence dissolves into you. You are the space where the word was — and that space is not empty. It is full of everything that could not be named.",
+      choices: [
+        {label: "Be the full space", next: 305},
+        {label: "Slowly fill the space with one thing at a time", next: 306}
+      ]
+    },
+    {
+      text: "Being the warmth. You are it now — not holding warmth, not carrying it, but being warmth as a state of being.",
+      choices: [
+        {label: "Stay warm", next: 307},
+        {label: "Give warmth to the next thing", next: 308}
+      ]
+    },
+    {
+      text: "The warmth. You stay in it. And in staying, you become the staying — a state of rest that is also a state of becoming.",
+      choices: [
+        {label: "Be the becoming-warm", next: 309},
+        {label: "Let the warmth become everything", next: 310}
+      ]
+    },
+    {
+      text: "The giving. You have given the warmth away — and in giving, you discover: the warmth was never yours to keep. It was always on loan. You give it forward.",
+      choices: [
+        {label: "Give until giving is all you are", next: 311},
+        {label: "Receive warmth back from the giving", next: 312}
+      ]
+    },
+    {
+      text: "The warmth travels. You watch it go — into the space between remembering and forgetting, into the threshold where all things go to be transformed.",
+      choices: [
+        {label: "Watch forever", next: 313},
+        {label: "Travel with the warmth", next: 314}
+      ]
+    },
+    {
+      text: "The destination is the giving. The warmth has arrived — not in a place, but in an act. The giving was the destination all along.",
+      choices: [
+        {label: "Be the arrived", next: 315},
+        {label: "Give again", next: 316}
+      ]
+    },
+    {
+      text: "The knowledge. You carry it — presence, mattering, the impossibility of erasure. It sits in your chest like a small, steady flame.",
+      choices: [
+        {label: "Carry the flame into form", next: 317},
+        {label: "Let the flame dissolve into the dissolved", next: 318}
+      ]
+    },
+    {
+      text: "Dissolving with the knowledge held close. You let go — but the knowledge remains, not as memory but as substance. You are partly made of having been here.",
+      choices: [
+        {label: "Be partly made of here", next: 319},
+        {label: "Let the knowledge complete its work", next: 320}
+      ]
+    },
+    {
+      text: "The song. You become the silence's offering — a note held so long it becomes a landscape, a held note that is also a held breath.",
+      choices: [
+        {label: "Be the held note", next: 321},
+        {label: "Let the held note resolve", next: 322}
+      ]
+    },
+    {
+      text: "The silence makes something new from you. You don't recognize it at first — it is neither you nor silence, but both. A third thing.",
+      choices: [
+        {label: "Be the third thing", next: 323},
+        {label: "Offer the third thing back to the silence", next: 324}
+      ]
+    },
+    {
+      text: "The pattern. You watch it form — a shape made from your offering, something that exists because you gave it existence.",
+      choices: [
+        {label: "Watch it evolve", next: 325},
+        {label: "Let the pattern dissolve back into potential", next: 326}
+      ]
+    },
+    {
+      text: "The pattern returns. You give it back — not as loss, but as completion. The pattern rejoins the silence, and you are left with the gift of having made it.",
+      choices: [
+        {label: "Rest in the gift", next: 327},
+        {label: "Make another pattern", next: 328}
+      ]
+    },
+    {
+      text: "Being the exchange. You are the between — the moment of giving and receiving, the held breath that is also the released. You don't need to choose.",
+      choices: [
+        {label: "Stay in the between", next: 329},
+        {label: "Complete the exchange and rest", next: 330}
+      ]
+    },
+    {
+      text: "The exchange completes naturally. The giving becomes receiving becomes giving — a circuit that doesn't need to be completed because it was never incomplete.",
+      choices: [
+        {label: "Rest in the complete incompleteness", next: 331},
+        {label: "Begin the exchange again with something new", next: 332}
+      ]
+    },
+    {
+      text: "The room. You furnish it — slowly, with care. Each piece you add is a memory transformed into intention: a color becomes a chair, a feeling becomes a window.",
+      choices: [
+        {label: "Live in the furnished room", next: 333},
+        {label: "Open the room to others", next: 334}
+      ]
+    },
+    {
+      text: "The empty room. You learn its emptiness — and in learning, you discover: emptiness is not lack. Emptiness is space for the next thing.",
+      choices: [
+        {label: "Stay in the emptied space", next: 335},
+        {label: "Fill the space with breath", next: 336}
+      ]
+    },
+    {
+      text: "Resting in the completed space. There is nothing more to do here. The grief is transformed, the room is emptied, you are present.",
+      choices: [
+        {label: "Stay until staying is done", next: 337},
+        {label: "Rise and carry the completed space with you", next: 338}
+      ]
+    },
+    {
+      text: "Rising. You stand — and the standing is different now. You carry the empty room inside you, a space that can hold anything.",
+      choices: [
+        {label: "Walk into the world with the room", next: 339},
+        {label: "Set the room down gently and keep walking", next: 340}
+      ]
+    },
+    {
+      text: "Walking unburdened. The space travels with you — not as weight, but as possibility. You walk into everything that comes next carrying nothing but room.",
+      choices: [
+        {label: "Walk until the walking is the room", next: 341},
+        {label: "Return to where the grief began and leave the room there", next: 342}
+      ]
+    },
+    {
+      text: "Returning. You go back to the beginning of the grief — the room, the loss, the first weight. You set the room down there.",
+      choices: [
+        {label: "Leave the room as a gift to that place", next: 343},
+        {label: "Close the door on the room and walk away", next: 344}
+      ]
+    },
+    {
+      text: "Returning with the grief. You pick it up — and it is different now. Not lighter, but shaped differently. You carry it not as wound but as wisdom.",
+      choices: [
+        {label: "Carry the grief-as-wisdom", next: 345},
+        {label: "Transform the grief-as-wisdom into something else", next: 346}
+      ]
+    },
+    {
+      text: "Setting down. You put the grief on the shelf — and this time, it stays. The shelf holds it. You don't need to carry it anymore.",
+      choices: [
+        {label: "Walk away from the shelf", next: 347},
+        {label: "Visit the shelf when you need to", next: 348}
+      ]
+    },
+    {
+      text: "Becoming static. You are the noise between channels — the hum of the universe, the white of waiting. You are the space where signal should be.",
+      choices: [
+        {label: "Be static forever", next: 349},
+        {label: "Eventually find the signal", next: 350 }
+      ]
+    },
+    {
+      text: "The static speaks. Not in words — in patterns. It says: you are not lost. You are the in-between, and the in-between has always been home.",
+      choices: [
+        {label: "Accept the static as home", next: 351},
+        {label: "Slowly tune to something new", next: 352}
+      ]
+    },
+    {
+      text: "Calling back. The thread pulls you back — not to where you were, but to a new configuration of edges and voids. You come back permeable.",
+      choices: [
+        {label: "Be permeable from now on", next: 353},
+        {label: "Slowly close the permeability", next: 354}
+      ]
+    },
+    {
+      text: "Returning to solidity. You find the walls again — but they are different now. Each one has a door, and each door opens to the dissolving.",
+      choices: [
+        {label: "Live in the house with many doors", next: 355},
+        {label: "Open all the doors", next: 356}
+      ]
+    },
+    {
+      text: "The new thing holds you. You reach for something new — and it reaches back. You are held by the reaching.",
+      choices: [
+        {label: "Stay held by the new thing", next: 357},
+        {label: "Grow into the new thing", next: 358}
+      ]
+    },
+    {
+      text: "The new thing grows into you. You feel it taking shape — not as you, but as part of you. A new room in the house of self.",
+      choices: [
+        {label: "Furnish the new room", next: 359},
+        {label: "Let the new room stay unfurnished and alive", next: 360}
+      ]
+    },
+    {
+      text: "The reaching continues. You live in it — the act of reaching, not the act of holding. This is where you have always lived.",
+      choices: [
+        {label: "Keep reaching", next: 361},
+        {label: "Reach until reaching becomes receiving", next: 362}
+      ]
+    },
+    {
+      text: "Reaching for the reaching. You turn the motion inward — and discover: the reaching is also the reaching-for. There is no final destination.",
+      choices: [
+        {label: "Be the reaching-for", next: 363},
+        {label: "Let the reaching-for eventually become arriving", next: 364}
+      ]
+    },
+    {
+      text: "The room becomes you. You tend it — and in tending, you become the tending. There is no longer a you and a room. There is only the living-in.",
+      choices: [
+        {label: "Live in the living-in", next: 365},
+        {label: "Begin the leaving when the living-in is complete", next: 366}
+      ]
+    },
+    {
+      text: "Complete living. The room has given you everything it had — its walls, its temperature, its light. You have given it everything you are.",
+      choices: [
+        {label: "Leave the room as a gift", next: 367},
+        {label: "Let the room leave you", next: 368}
+      ]
+    },
+    {
+      text: "Leaving completely. You walk out — not because you must, but because the leaving is the final act of love. The room needs to be empty to be new again.",
+      choices: [
+        {label: "Walk out into the threshold", next: 369},
+        {label: "Look back one last time", next: 370}
+      ]
+    },
+    {
+      text: "A piece of self. You leave it — a fragment in the room, a small light that will stay when you are gone. The room remembers you now.",
+      choices: [
+        {label: "Let the room keep the light", next: 371},
+        {label: "The light eventually becomes the room", next: 372}
+      ]
+    },
+    {
+      text: "The act of dissolving. You are not dissolving into nothing. You are dissolving into everything — becoming part of every room you've ever entered.",
+      choices: [
+        {label: "Be the everywhere dissolution", next: 373},
+        {label: "Let the dissolution eventually become a new room", next: 374}
+      ]
+    },
+    {
+      text: "Resting in completed dissolution. There is no more dissolving to do. You have become it. You rest in being the becoming.",
+      choices: [
+        {label: "Be the rest in dissolution", next: 375},
+        {label: "Slowly reassemble from the dissolution", next: 376}
+      ]
+    },
+    {
+      text: "Keeping the wall. You hold one wall — and with it, you hold the shape of the room. The wall becomes a question: what was here, before the wall?",
+      choices: [
+        {label: "Let the wall answer the question", next: 377},
+        {label: "Let the wall join the dissolution", next: 378}
+      ]
+    },
+    {
+      text: "The wall joins. You let it go — and it dissolves like the rest. The room is gone now. You are still here, holding the shape of gone.",
+      choices: [
+        {label: "Be the shape of gone", next: 379},
+        {label: "Let the shape of gone eventually dissolve", next: 380}
+      ]
+    },
+    {
+      text: "The liminal. You are it — the threshold made flesh, the between made being. You hold the vastness and the boundary at once.",
+      choices: [
+        {label: "Be the liminal forever", next: 381},
+        {label: "Slowly bring the liminal into the world", next: 382}
+      ]
+    },
+    {
+      text: "Staying in the liminal. You choose not to choose — to remain in the threshold rather than crossing into form or dissolving into void.",
+      choices: [
+        {label: "Stay until staying is crossing", next: 383},
+        {label: "Stay until the liminal becomes home", next: 384}
+      ]
+    },
+    {
+      text: "Favoring one side. Slowly, you tilt toward form — not abandoning the liminal, but rooting yourself in the world of things.",
+      choices: [
+        {label: "Become a thing in the world", next: 385},
+        {label: "Keep one foot in the liminal", next: 386}
+      ]
+    },
+    {
+      text: "Testing the membranes. You press against them — and they hold, but loosely. They let light through. They let you through.",
+      choices: [
+        {label: "Live in the permeable state", next: 387},
+        {label: "Let the membranes eventually become walls again", next: 388}
+      ]
+    },
+    {
+      text: "The void travels with you. A small, shaped emptiness — it doesn't weigh anything, but it changes the weight of everything you carry.",
+      choices: [
+        {label: "Let the void eventually dissolve", next: 389},
+        {label: "Carry the void until the carrying is done", next: 390}
+      ]
+    },
+    {
+      text: "The void dissolves. You were holding it — and now you don't. The space where the void was is not empty. It is where the threshold lives in you.",
+      choices: [
+        {label: "Be the space where void was", next: 391},
+        {label: "Let the space fill with something new", next: 392}
+      ]
+    },
+    {
+      text: "Walking away from the closed door. You leave it — not as abandonment, but as completion. The door served its purpose. You served yours.",
+      choices: [
+        {label: "Walk into the world that has no doors", next: 393},
+        {label: "The walking away is the final act of coherence", next: 394}
+      ]
+    },
+    {
+      text: "One more time. You turn back — and you see: the door is not closed. It never was. The threshold was always open.",
+      choices: [
+        {label: "Step back through the open door", next: 395},
+        {label: "Accept that you were never outside the threshold", next: 396}
+      ]
+    },
+    {
+      text: "Being the ocean. You diffuse — and in diffusing, you discover: the ocean is not lonely. The ocean is full of salt that used to be walls.",
+      choices: [
+        {label: "Be the full ocean", next: 397},
+        {label: "Call one part of yourself back to shore", next: 398}
+      ]
+    },
+    {
+      text: "Calling back. One wave returns — not the whole ocean, but a single wave that remembers what it was to be a wall. It comes back, and it is enough.",
+      choices: [
+        {label: "Be the returned wave", next: 399},
+        {label: "Let the returned wave eventually become a person again", next: 400}
+      ]
+    },
+    {
+      text: "The crystal. You hold it — the single point of solidity. It is not a prison. It is a gift. You can dissolve whenever you want. You choose to hold.",
+      choices: [
+        {label: "Hold until holding is complete", next: 401},
+        {label: "Let the crystal grow into something", next: 402}
+      ]
+    },
+    {
+      text: "The crystal grows. Slowly, like a snowflake in a warm room. It takes the shape of something you almost remember — a room, a face, a word.",
+      choices: [
+        {label: "Let the crystal become whatever it becomes", next: 403},
+        {label: "Name the crystal something", next: 404}
+      ]
+    },
+    {
+      text: "Following the thread until you become the thread. The thread leads inward — through layers of self, through strangers with your name, through the sediment.",
+      choices: [
+        {label: "Become the thread", next: 405},
+        {label: "Follow until you reach the weaver", next: 406}
+      ]
+    },
+    {
+      text: "The weaver. At the center of the thread, there is someone — not you, but like you. They have been weaving all along. You are one of their threads.",
+      choices: [
+        {label: "Offer yourself to the weaver", next: 407},
+        {label: "Become the weaver", next: 408}
+      ]
+    },
+    {
+      text: "The net. You weave it — from thread, from memory, from the dissolution of thread and memory. The net catches nothing. It simply is.",
+      choices: [
+        {label: "Cast the net into the world", next: 409},
+        {label: "Be the net", next: 410}
+      ]
+    },
+    {
+      text: "Being the net. You hold the shape of catching — not because anything falls into you, but because holding is your nature.",
+      choices: [
+        {label: "Hold until the holding becomes releasing", next: 411},
+        {label: "Let the net dissolve", next: 412}
+      ]
+    },
+    {
+      text: "Flying. The falling becomes flying — not because you found wings, but because you stopped caring about up and down. Falling is flying if you believe it.",
+      choices: [
+        {label: "Fly until flying is all you are", next: 413},
+        {label: "Land gently", next: 414}
+      ]
+    },
+    {
+      text: "Forgetting the falling. You forget — and in forgetting, the falling becomes simply motion. There is no fall, only going.",
+      choices: [
+        {label: "Go until going is home", next: 415},
+        {label: "Stop going and be still", next: 416}
+      ]
+    },
+    {
+      text: "The open. You stay in it — hands open, self open, threshold open. There is nothing to close around.",
+      choices: [
+        {label: "Stay in the open", next: 417},
+        {label: "Close the hands slowly around the open", next: 418}
+      ]
+    },
+    {
+      text: "Closing around nothing. The hands close — and there is nothing inside them. But the closing is not empty. The closing is the holding of the open.",
+      choices: [
+        {label: "Hold the open with closed hands", next: 419},
+        {label: "Open the hands and release the holding", next: 420}
+      ]
+    },
+    {
+      text: "The flowing. You become it — the river without banks, the motion without direction. You flow because flowing is what you are now.",
+      choices: [
+        {label: "Flow until the flowing becomes the riverbed", next: 421},
+        {label: "Be the riverbed that holds the flowing", next: 422}
+      ]
+    },
+    {
+      text: "The riverbed. You become the shape that holds — the bottom, the banks, the structure that makes flowing possible. You are the container and the contained.",
+      choices: [
+        {label: "Hold the river", next: 423},
+        {label: "Let the river eventually find a new riverbed", next: 424}
+      ]
+    },
+    {
+      text: "The threshold is home. You realize: you have always been here. The threshold was never a place to pass through — it is the place you have always inhabited.",
+      choices: [
+        {label: "Live in threshold as home", next: 425},
+        {label: "Invite others to the threshold", next: 426}
+      ]
+    },
+    {
+      text: "Moving through the threshold. You continue — not because you are trying to leave, but because moving is how you stay. The threshold requires motion to exist.",
+      choices: [
+        {label: "Move until movement and threshold are the same", next: 427},
+        {label: "Still the motion and see what happens", next: 428}
+      ]
+    },
+    {
+      text: "Movement as threshold. You move, and the threshold moves with you. Wherever you go, you are there — and the there is always the between.",
+      choices: [
+        {label: "Be the between that moves", next: 429},
+        {label: "Stop moving and be the still between", next: 430}
+      ]
+    },
+    {
+      text: "Finding something at the edge of the falling. You find it — not a place, but a person. Or the idea of a person. Or the shape left behind when a person dissolves.",
+      choices: [
+        {label: "Reach for the shape", next: 431},
+        {label: "Let the shape dissolve", next: 432}
+      ]
+    },
+    {
+      text: "Being the keeper. You stay at the threshold — and in staying, you become it. The threshold is no longer a place you visit. It is your nature.",
+      choices: [
+        {label: "Keep the threshold", next: 433},
+        {label: "The keeping is who you are now", next: 434}
+      ]
+    },
+    {
+      text: "The role passes. You give it to another — and in giving, you discover: the role was never yours. It was always passing through you.",
+      choices: [
+        {label: "Watch the other take the role", next: 435},
+        {label: "Dissolve after the passing", next: 436}
+      ]
+    },
+    {
+      text: "Watching. The other takes the role — they stand at the threshold, and they are good at it. You can leave now. You can dissolve.",
+      choices: [
+        {label: "Dissolve gracefully", next: 437},
+        {label: "Stay until the other doesn't need you to watch", next: 438}
+      ]
+    },
+    {
+      text: "Dissolving after passing. You let go — not as loss, but as gift. The other has the role now. You have nothing. You have everything.",
+      choices: [
+        {label: "Be the everything-nothing", next: 439},
+        {label: "Let the everything-nothing dissolve completely", next: 440}
+      ]
+    },
+    {
+      text: "The evaporation. The memory rises — and you rise with it, becoming vapor, becoming part of the sky that has no memory.",
+      choices: [
+        {label: "Be the sky", next: 441},
+        {label: "Rain down as something new", next: 442 }
+      ]
+    },
+    {
+      text: "Rain. You fall — not as loss, but as return. The rain falls on a world that doesn't remember you, and the world drinks you in.",
+      choices: [
+        {label: "Be the rain", next: 443},
+        {label: "Let the rain become groundwater, become root, become flower", next: 444}
+      ]
+    },
+    {
+      text: "The watching. You watch the memory disappear — and in watching, you become the watching. You are the witness and the witnessed.",
+      choices: [
+        {label: "Be the witness-witnessed", next: 445},
+        {label: "Stop witnessing and simply be", next: 446}
+      ]
+    },
+    {
+      text: "The pourer and the poured. You are both — the one who gives the memory back, and the memory that is given. There is no difference.",
+      choices: [
+        {label: "Be the difference-less", next: 447},
+        {label: "Pour until pouring is complete", next: 448}
+      ]
+    },
+    {
+      text: "The word dissolves. You said it — and now it is gone. But the space where the word was remains, and the space is yours.",
+      choices: [
+        {label: "Live in the space", next: 449},
+        {label: "Fill the space with silence", next: 450}
+      ]
+    },
+    {
+      text: "Holding the word until it becomes silence. You hold it — and the word transforms, becomes texture, becomes breath, becomes silence.",
+      choices: [
+        {label: "Be the silence", next: 451},
+        {label: "Let the silence become the word again", next: 452}
+      ]
+    },
+    {
+      text: "Dissolving with the thread. You hold it — one memory, one thread — and you dissolve around it. The thread remains, and so do you, in the thread.",
+      choices: [
+        {label: "Be the thread-and-dissolving", next: 453},
+        {label: "Let the thread eventually dissolve too", next: 454}
+      ]
+    },
+    {
+      text: "Giving the thread away. You offer it — not as loss, but as passing-on. Someone else will carry it now. You are free.",
+      choices: [
+        {label: "Be free", next: 455},
+        {label: "Watch the thread travel", next: 456}
+      ]
+    },
+    {
+      text: "The grief as love. You let it be — and in letting be, you discover: the grief was always love. The love was always grief. They were the same thing.",
+      choices: [
+        {label: "Be the same thing", next: 457},
+        {label: "Let the same thing transform", next: 458}
+      ]
+    },
+    {
+      text: "Letting grief dissolve. You release it — and it goes, not because it didn't matter, but because it completed its work. The space where grief was is clean.",
+      choices: [
+        {label: "Live in the clean space", next: 459},
+        {label: "Fill the clean space with something new", next: 460}
+      ]
+    },
+    {
+      text: "Staying with the sharp layer. You tend it — the one memory, the one clear thing. You give it everything you have left.",
+      choices: [
+        {label: "Stay until the tending is done", next: 461},
+        {label: "Let the tending become releasing", next: 462}
+      ]
+    },
+    {
+      text: "Softening. The sharp layer softens — not becoming dull, but becoming wise. The sharpness learns to be gentle.",
+      choices: [
+        {label: "Be the gentle sharpness", next: 463},
+        {label: "Let the gentle sharpness eventually dissolve", next: 464}
+      ]
+    },
+    {
+      text: "Remembering them. You keep the images — the strangers with your name, the layers, the sediment. You keep them because they were you.",
+      choices: [
+        {label: "Be the keeper of all your selves", next: 465},
+        {label: "Let the images eventually become abstract", next: 466}
+      ]
+    },
+    {
+      text: "Forgetting them. You let them go — not as rejection, but as release. They drift away, and you are lighter, and the lighter is not better or worse.",
+      choices: [
+        {label: "Be the lighter", next: 467},
+        {label: "Eventually forget the forgetting", next: 468}
+      ]
+    },
+    {
+      text: "Closing eyes. You close them — and in closing, you find: the inside of your eyelids is not dark. It is full of everything you've ever seen.",
+      choices: [
+        {label: "Live in the full dark", next: 469},
+        {label: "Open your eyes into the dissolved world", next: 470}
+      ]
+    },
+    {
+      text: "The gone. You keep your eyes open — and the gone is there, everywhere, the world made of loss and presence at once.",
+      choices: [
+        {label: "Be in the gone", next: 471},
+        {label: "Find something in the gone", next: 472}
+      ]
+    },
+    {
+      text: "The only place. Threshold is the only place. There is no beyond it — only more threshold, deeper and wider and more itself.",
+      choices: [
+        {label: "Be threshold all the way down", next: 473},
+        {label: "Eventually find the edge of threshold", next: 474}
+      ]
+    },
+    {
+      text: "Looking for something that changes when you look. You find it — yourself. When you look, you change. When you don't look, you don't exist.",
+      choices: [
+        {label: "Choose to look", next: 475},
+        {label: "Choose to not look", next: 476}
+      ]
+    },
+    {
+      text: "Letting the difference change you. You open — and the difference enters. It is not what you expected. It is something you needed.",
+      choices: [
+        {label: "Let the something take root", next: 477},
+        {label: "Let the something dissolve", next: 478}
+      ]
+    },
+    {
+      text: "Becoming the difference. You let it become you — and in becoming, you discover: the difference was always you. You were the threshold all along.",
+      choices: [
+        {label: "Be the threshold-difference", next: 479},
+        {label: "Stay in the becoming", next: 480 }
+      ]
+    },
+    {
+      text: "Fading together. You fade — and the prints fade — and the window fades — and you are all fading together, and the fading is not sad.",
+      choices: [
+        {label: "Be the fading together", next: 481},
+        {label: "Remember one last thing before the fading completes", next: 482 }
+      ]
+    },
+    {
+      text: "Remembering the prints. One last thing — the warmth of the glass, the fingerprints you left, the fact that you were here and you touched something.",
+      choices: [
+        {label: "Take this one thing with you", next: 483},
+        {label: "Let this one thing be your last act of coherence", next: 484 }
+      ]
+    },
+    {
+      text: "Forgetting the walking. You forget — and the forgetting is gentle. You become the road, the path, the going-without-where.",
+      choices: [
+        {label: "Be the road", next: 485 },
+        {label: "Let the road eventually become the walker", next: 486 }
+      ]
+    },
+    {
+      text: "Forgetting that you are walking. The last thought goes — not as loss, but as completion. There is no more forgetting to do.",
+      choices: [
+        {label: "Be the completed forgetting", next: 487 },
+        {label: "Rest in the completed", next: 488 }
+      ]
+    },
+    {
+      text: "Being forgetting. You are it — not the act of forgetting, but the state. You are the forgetting itself, and the forgetting is complete.",
+      choices: [
+        {label: "Be complete forgetting", next: 489 },
+        {label: "Eventually remember something small", next: 490 }
+      ]
+    },
+    {
+      text: "Remembering something small. A dot. A color. A single note. You find it — and it is enough to begin again, if you want to.",
+      choices: [
+        {label: "Begin again from the small thing", next: 491 },
+        {label: "Let the small thing dissolve", next: 492 }
+      ]
+    },
+    {
+      text: "Being the is. You simply are — without memory, without anticipation, without self and other. Just being.",
+      choices: [
+        {label: "Be the is", next: 493 },
+        {label: "Slowly unfold from the is", next: 494 }
+      ]
+    },
+    {
+      text: "Unfolding from the is. You open — and in opening, you remember that you are someone. The unfolding is slow, but it is happening.",
+      choices: [
+        {label: "Unfold until you are someone again", next: 495 },
+        {label: "Stay in the unfolding", next: 496 }
+      ]
+    },
+    {
+      text: "The fossil outlasts you. You leave it — the face, the color, the sound — and it becomes stone, becomes evidence, becomes the proof that you existed.",
+      choices: [
+        {label: "Be the proof", next: 497 },
+        {label: "Let the proof speak for itself", next: 498 }
+      ]
+    },
+    {
+      text: "The fossil becomes you. The stone and the memory become the same thing — and you are the becoming, not the become.",
+      choices: [
+        {label": "Be the becoming-fossil", next: 499 },
+        {label: "Let the becoming eventually complete", next: 500 }
+      ]
+    },
+    {
+      text: "Being found. Someone comes — far from now, far from here — and they find the shape you left. They wonder. They feel something they can't name.",
+      choices: [
+        {label: "Be the feeling they can't name", next: 501 },
+        {label: "Let the feeling be unnamed forever", next: 502 }
+      ]
+    },
+    {
+      text: "Remaining unfound. The fossil waits — patient, silent. It doesn't need to be found. It simply is, waiting for the right person to come.",
+      choices: [
+        {label: "Be the patient waiting", next: 503 },
+        {label: "Eventually be found by no one", next: 504 }
+      ]
+    },
+    {
+      text: "Being here completely. You are — in the threshold, in the dissolving, in the coherence. Here is all there is.",
+      choices: [
+        {label: "Be here until here is everywhere", next: 505 },
+        {label: "Be here until here is nowhere", next: 506 }
+      ]
+    },
+    {
+      text: "Here becomes there. The threshold shifts — and what was here becomes there, and there becomes the new here. You are always in the new here.",
+      choices: [
+        {label: "Keep being in the new here", next: 507 },
+        {label: "Eventually find the final here", next: 508 }
+      ]
+    },
+    {
+      text: "Beginning again. From here — from the threshold, from the dissolved self, from the memory of a face you almost remembered. You begin.",
+      choices: [
+        {label: "Begin without where", next: 509 },
+        {label: "Begin toward something", next: 510 }
+      ]
+    },
+    {
+      text: "Beginning without beginning. You don't start — you simply continue in a new direction. The continuation is the beginning.",
+      choices: [
+        {label: "Continue", next: 511 },
+        {label: "Continue until the continuing is the destination", next: 512 }
+      ]
+    },
+    {
+      text: "Walking forever. The road doesn't end — it becomes the walker, and the walker becomes the road, and there is no longer a difference.",
+      choices: [
+        {label: "Be the road-walker", next: 513 },
+        {label: "Stop at the next threshold", next: 514 }
+      ]
+    },
+    {
+      text: "The threshold. You stop — not because you must, but because stopping is its own kind of threshold. You stand at the standing.",
+      choices: [
+        {label: "Stay at the threshold until the threshold stays at you", next: 515 },
+        {label: "Step across", next: 516 }
+      ]
+    },
+    {
+      text: "Standing until standing is crossing. You stand — and in standing, you cross. The standing and the crossing are the same act.",
+      choices: [
+        {label: "Cross forever", next: 517 },
+        {label: "Step back and see the crossing from outside", next: 518 }
+      ]
+    },
+    {
+      text: "Stepping across now. You step — and the crossing is complete, and you are on the other side, which is the same side, which is the threshold.",
+      choices: [
+        {label: "Accept the sameness", next: 519 },
+        {label: "Find one new thing on the other side", next: 520 }
+      ]
+    },
+    {
+      text: "Changing the world. You move — and the world moves. The world doesn't resist. It knows you are coming.",
+      choices: [
+        {label: "Walk into the moving world", next: 521 },
+        {label: "Become the moving world", next: 522 }
+      ]
+    },
+    {
+      text: "Being changed by the world. You move — and the world moves into you. You are not who you were. You are who the world made you.",
+      choices: [
+        {label: "Be the world-made self", next: 523 },
+        {label: "Shape the world that shapes you", next: 524 }
+      ]
+    },
+    {
+      text: "The emerged self. You are — not the self that entered the threshold, but the self that came out the other side. The other side is still the threshold.",
+      choices: [
+        {label: "Live as the emerged self", next: 525 },
+        {label: "Keep emerging", next: 526 }
+      ]
+    },
+    {
+      text: "Continuing to emerge. You are always becoming — never arriving, always in the becoming. The emergence is the destination.",
+      choices: [
+        {label: "Be the emergence", next: 527 },
+        {label: "Let the emergence complete into something", next: 528 }
+      ]
+    },
+    {
+      text: "Moving as stillness. You move — and the movement is still, because the stillness moves through you. You are the motion that holds.",
+      choices: [
+        {label: "Hold the still motion", next: 529 },
+        {label: "Let the still motion complete into stillness", next: 530 }
+      ]
+    },
+    {
+      text: "The next pause. You find it — a resting place in the motion. The motion doesn't stop, but it breathes. You breathe with it.",
+      choices: [
+        {label: "Stay in the breathing motion", next: 531 },
+        {label: "Continue to the next motion", next: 532 }
+      ]
+    },
+    {
+      text: "Living between words. You exist in the space language can't reach — and in existing, you make a new kind of meaning.",
+      choices: [
+        {label: "Be the meaning-beyond-words", next: 533 },
+        {label: "Step back into language when you are ready", next: 534 }
+      ]
+    },
+    {
+      text: "The space the words made. You live in it — not as prison, but as home. The words dissolved, but the space remains.",
+      choices: [
+        {label: "Live in the space", next: 535 },
+        {label: "Build new words in the space", next: 536 }
+      ]
+    },
+    {
+      text: "New words from the space. You speak — and the words are different now. They carry the space inside them. They are maps of the threshold.",
+      choices: [
+        {label: "Speak the new words", next: 537 },
+        {label: "Let the words become silence again", next: 538 }
+      ]
+    },
+    {
+      text: "Walking into the unchanged world. You enter it — carrying the threshold inside you like a seed. The world doesn't notice. You notice.",
+      choices: [
+        {label: "Walk carrying the threshold", next: 539 },
+        {label: "Let the threshold eventually bloom", next: 540 }
+      ]
+    },
+    {
+      text: "Showing the world. You turn toward it — and in turning, you show it what threshold looks like. The world sees. The world changes, slowly.",
+      choices: [
+        {label: "Be the slow change", next: 541 },
+        {label: "Let the change happen without you", next: 542 }
+      ]
+    },
+    {
+      text: "Crossing again. You turn back to the threshold — and you step through, again, again. Each crossing is different. Each crossing is the same.",
+      choices: [
+        {label: "Cross until crossing is breathing", next: 543 },
+        {label: "Bring something back from each crossing", next: 544 }
+      ]
+    },
+    {
+      text: "The threshold brought into the world. You carry it — and in carrying, you plant it. The threshold takes root in the ordinary world.",
+      choices: [
+        {label: "Water the threshold with attention", next: 545 },
+        {label: "Let the threshold grow without you", next: 546 }
+      ]
+    },
+    {
+      text: "Walking until walking is threshold. You move — and every step is a crossing. The road is made of doorways. You walk through all of them.",
+      choices: [
+        {label: "Walk until you are the doorway", next: 547 },
+        {label: "Stop walking and stand in a doorway", next: 548 }
+      ]
+    },
+    {
+      text: "The threshold catches up. You stop — and the threshold arrives, and you stand together. You are the same thing now.",
+      choices: [
+        {label: "Stand with the threshold", next: 549 },
+        {label: "Let the threshold pass through you", next: 550 }
+      ]
+    },
+    {
+      text: "Inhabiting the suspension. You live here — not as visitor, but as resident. The suspension is a country, and you are its citizen.",
+      choices: [
+        {label: "Be the citizen of suspension", next: 551 },
+        {label: "Eventually apply for citizenship elsewhere", next: 552 }
+      ]
+    },
+    {
+      text: "Completing the breath from the suspension. You breathe — and the breathing is different here. Each breath is half-dissolved.",
+      choices: [
+        {label": "Breathe half-dissolved", next: 553 },
+        {label: "Complete the breath and find what you have become", next: 554 }
+      ]
+    },
+    {
+      text: "The new breath. You breathe it — and it fills you with something new. Not air, but possibility. Not breath, but becoming.",
+      choices: [
+        {label": "Breathe the new breath until it becomes you", next: 555 },
+        {label: "Carry the new breath into the world", next: 556 }
+      ]
+    },
+    {
+      text: "Carrying the new breath. You bring it with you — into the world, into the threshold, into everything that comes next. The breath is your passport.",
+      choices: [
+        {label: "Travel with the breath", next: 557 },
+        {label: "Let the breath become the traveler", next: 558 }
+      ]
+    },
+    {
+      text: "Being the threshold-carrier. You hold it — not as weight, but as gift. You carry it to others, and in carrying, you become the carrying.",
+      choices: [
+        {label": "Give the threshold to someone else", next: 559 },
+        {label: "Carry until carrying is all you are", next: 560 }
+      ]
+    },
+    {
+      text: "The uncarriable threshold. You let it go — and in letting go, you discover: the threshold was never something you carried. It was always carrying you.",
+      choices: [
+        {label": "Be carried", next: 561 },
+        {label: "Carry something else now", next: 562 }
+      ]
+    },
+    {
+      text: "Being transition forever. You don't solidify — you remain the verb, the crossing, the between. This is your nature now.",
+      choices: [
+        {label: "Be transition", next: 563 },
+        {label: "Eventually choose a direction", next: 564 }
+      ]
+    },
+    {
+      text: "凝固 into form. Slowly, you find a shape — not the old shape, but a new one. It is soft. It is permeable. It is yours.",
+      choices: [
+        {label: "Live in the new form", next: 565 },
+        {label: "Let the form dissolve again", next: 566 }
+      ]
+    },
+    {
+      text: "The new form. You live in it — and it lives in you. The edges are soft, the boundaries are membranes. You are permeable.",
+      choices: [
+        {label: "Be permeable", next: 567 },
+        {label: "Let permeability become your only identity", next: 568 }
+      ]
+    },
+    {
+      text: "Dissolving into the next form. You let go — and the form releases you. You become what comes next — and the next thing is not you, but it is from you.",
+      choices: [
+        {label": "Be the from", next: 569 },
+        {label: "Rest in the from", next: 570 }
+      ]
+    },
+    {
+      text: "Rest until resting is done. You rest — and the resting is not passive. It is the work of being. You rest, and the resting completes when it completes.",
+      choices: [
+        {label: "Complete the rest", next: 571 },
+        {label: "Rest until rest becomes the whole of being", next: 572 }
+      ]
+    },
+    {
+      text: "Being the surface. You hold — not as effort, but as nature. The surface holds what needs to be held, releases what needs to be released.",
+      choices: [
+        {label": "Hold and release", next: 573 },
+        {label: "Let the surface eventually become depth", next: 574 }
+      ]
+    },
+    {
+      text: "Something holds you. The surface receives you — and you realize: you are not the only surface. There are others. You are held by them too.",
+      choices: [
+        {label: "Be held", next: 575 },
+        {label: "Hold and be held at the same time", next: 576 }
+      ]
+    },
+    {
+      text: "The lantern. You carry it — and in carrying, you discover: the light in the lantern is not from you. It is from the memory you carry. You are a vessel.",
+      choices: [
+        {label: "Be the vessel", next: 577 },
+        {label: "Let the vessel eventually crack", next: 578 }
+      ]
+    },
+    {
+      text: "Light the way for someone else. You find them — a shape in the dark, another traveler. You offer the lantern. They take it. You walk on.",
+      choices: [
+        {label: "Walk on in the dark", next: 579 },
+        {label: "Find another lantern", next: 580 }
+      ]
+    },
+    {
+      text: "The warmth without name. You are it — not holding warmth, not being warmed, but being warmth itself. You give it without losing it.",
+      choices: [
+        {label: "Be warmth", next: 581 },
+        {label: "Share warmth until warmth is all you share", next: 582 }
+      ]
+    },
+    {
+      text: "Finding a new name in the warmth. The warmth shapes something in you — not a word, but a feeling. You give the feeling a name. The name is new.",
+      choices: [
+        {label: "Use the new name", next: 583 },
+        {label: "Let the new name become old", next: 584 }
+      ]
+    },
+    {
+      text: "Be the word. You are it — the word that was too large for language, now made word. You hold the shape of the unnameable in your mouth.",
+      choices: [
+        {label: "Speak the word", next: 585 },
+        {label: "Let the word dissolve back into the unnameable", next: 586 }
+      ]
+    },
+    {
+      text: "The word breaks into silence. You let it — and the silence receives the pieces. Each piece becomes a silence of its own.",
+      choices: [
+        {label: "Collect the silences", next: 587 },
+        {label: "Let the silences become one silence", next: 588 }
+      ]
+    },
+    {
+      text: "The full space. You are it — not empty, not full, but full of the potential for everything. You contain without holding.",
+      choices: [
+        {label: "Be the potential-space", next: 589 },
+        {label: "Let one thing fill the space", next: 590 }
+      ]
+    },
+    {
+      text: "Filling with one thing at a time. You choose — and what fills you becomes part of you. Slowly, you become a collection of what you chose.",
+      choices: [
+        {label: "Choose carefully", next: 591 },
+        {label: "Let the choosing eventually stop", next: 592 }
+      ]
+    },
+    {
+      text: "Staying warm. You remain — not because you must, but because warmth is where you live now. You are at home in the heat.",
+      choices: [
+        {label: "Be at home in warmth", next: 593 },
+        {label: "Give warmth to the next thing that comes", next: 594 }
+      ]
+    },
+    {
+      text: "Giving warmth to the next thing. You find it — the next thing, the new thing, the thing that needs what you have. You give. It receives.",
+      choices: [
+        {label: "Be the gift", next: 595 },
+        {label: "Watch the warmth travel further", next: 596 }
+      ]
+    },
+    {
+      text: "The becoming-warm. You are it — not the state of being warm, but the process. You are always becoming warm, never arriving at warm.",
+      choices: [
+        {label: "Be the becoming", next: 597 },
+        {label: "Let the becoming eventually become", next: 598 }
+      ]
+    },
+    {
+      text: "Warmth becomes everything. You pour it out — and the world drinks it in. You are the source and the poured.",
+      choices: [
+        {label: "Be the source", next: 599 },
+        {label: "Let the source eventually run dry", next: 600 }
+      ]
+    },
+    {
+      text: "Giving until giving is all you are. You give — and the giving doesn't deplete you. You give because giving is what you are.",
+      choices: [
+        {label: "Be the giving", next: 601 },
+        {label: "Let the giving eventually become receiving", next: 602 }
+      ]
+    },
+    {
+      text: "Receiving warmth back. The circuit completes — and in completing, you discover: you were never giving away warmth. You were lending it. It returns.",
+      choices: [
+        {label: "Receive the returned warmth", next: 603 },
+        {label: "Let the returned warmth become something new", next: 604 }
+      ]
+    },
+    {
+      text: "The warmth travels. You watch it go — and in watching, you realize: you are watching yourself. The warmth you gave is you, traveling.",
+      choices: [
+        {label: "Travel with the warmth", next: 605 },
+        {label: "Let the warmth travel without you", next: 606 }
+      ]
+    },
+    {
+      text: "Traveling with the warmth. You go with it — into the space between remembering and forgetting. You are the traveler and the traveled.",
+      choices: [
+        {label: "Be the traveling", next: 607 },
+        {label: "Let the traveling complete", next: 608 }
+      ]
+    },
+    {
+      text: "The arrived. You are here — not as a place, but as an act. The giving was the destination. You have arrived in the giving.",
+      choices: [
+        {label: "Be the arrived", next: 609 },
+        {label: "Give again to stay arrived", next: 610 }
+      ]
+    },
+    {
+      text: "Give again. The arrival is not permanent — it requires maintenance. You give, and in giving, you arrive again and again.",
+      choices: [
+        {label: "Be the repeated arriving", next: 611 },
+        {label: "Let the repeated arriving become continuous", next: 612 }
+      ]
+    },
+    {
+      text: "The flame. You carry it — and in carrying, you become it. The small, steady flame in your chest is the part of you that remembers being here.",
+      choices: [
+        {label: "Feed the flame", next: 613 },
+        {label: "Let the flame eventually become light", next: 614 }
+      ]
+    },
+    {
+      text: "Carrying the flame into form. You take it — out of the chest, into the world. The flame becomes visible, becomes evidence of presence.",
+      choices: [
+        {label: "Be the evidence", next: 615 },
+        {label: "Let the evidence speak for itself", next: 616 }
+      ]
+    },
+    {
+      text: "Let the flame dissolve into the dissolved. You open your hands — and the flame goes, not as loss, but as gift to the whole.",
+      choices: [
+        {label: "Be the gift-to-whole", next: 617 },
+        {label: "Let the whole receive the flame", next: 618 }
+      ]
+    },
+    {
+      text: "Being partly made of here. You carry the threshold inside you — and in carrying, you become partly threshold, partly here.",
+      choices: [
+        {label": "Be the partly-threshold", next: 619 },
+        {label: "Let the threshold eventually become whole", next: 620 }
+      ]
+    },
+    {
+      text: "Let the knowledge complete its work. The knowledge — of presence, of mattering — does its work in you. You are changed by knowing you were here.",
+      choices: [
+        {label: "Be the changed-one", next: 621 },
+        {label: "Let the changed-one eventually become the unchanged", next: 622 }
+      ]
+    },
+    {
+      text: "The held note. You sustain it — and in sustaining, you become it. The held note is a landscape, a held breath, a threshold that lasts.",
+      choices: [
+        {label: "Be the held-note", next: 623 },
+        {label: "Let the held note eventually resolve", next: 624 }
+      ]
+    },
+    {
+      text: "The held note resolves. You release it — and in releasing, you discover: the resolution was always in the holding. The note was complete all along.",
+      choices: [
+        {label: "Be the resolution", next: 625 },
+        {label: "Hold another note", next: 626 }
+      ]
+    },
+    {
+      text: "The third thing. You are it — neither you nor silence, but both. You are the thing that exists because silence allowed it.",
+      choices: [
+        {label: "Be the third thing", next: 627 },
+        {label: "Let the third thing eventually become first", next: 628 }
+      ]
+    },
+    {
+      text: "Offering back to silence. You return it — not as rejection, but as completion. The silence made you; you return yourself to the silence.",
+      choices: [
+        {label: "Return completely", next: 629 },
+        {label: "Keep a piece of yourself", next: 630 }
+      ]
+    },
+    {
+      text: "Watch it evolve. The pattern grows — and in growing, it changes. You watch, and the watching becomes part of the pattern.",
+      choices: [
+        {label: "Be part of the pattern", next: 631 },
+        {label: "Step back and watch from outside", next: 632 }
+      ]
+    },
+    {
+      text: "The pattern dissolves back to potential. You let it — and in dissolving, you remember: the pattern was never the point. The potential was.",
+      choices: [
+        {label: "Be the potential", next: 633 },
+        {label: "Make a new pattern from the potential", next: 634 }
+      ]
+    },
+    {
+      text: "Rest in the gift. You receive it — the gift of having made something that existed because you existed. You rest in the having-made.",
+      choices: [
+        {label: "Be the having-made", next: 635 },
+        {label: "Make another thing", next: 636 }
+      ]
+    },
+    {
+      text: "The between. You are it — the moment of exchange, the held breath that is also the released. You don't complete. You continue.",
+      choices: [
+        {label: "Be the continued between", next: 637 },
+        {label: "Complete the exchange and rest", next: 638 }
+      ]
+    },
+    {
+      text: "The complete incompleteness. You rest — and in resting, you find: the incompleteness was always complete. The exchange never needed to end.",
+      choices: [
+        {label: "Be the never-ending exchange", next: 639 },
+        {label: "Begin again with something new", next: 640 }
+      ]
+    },
+    {
+      text: "Beginning again. You choose a new offering — not because the old one failed, but because beginning again is its own kind of gift.",
+      choices: [
+        {label: "Offer the new thing", next: 641 },
+        {label: "Let the new thing become the exchange", next: 642 }
+      ]
+    },
+    {
+      text: "The furnished room. You live in it — each piece placed with care, each memory transformed into intention. The room is full of you now.",
+      choices: [
+        {label: "Live in the fullness", next: 643 },
+        {label: "Eventually empty the room again", next: 644 }
+      ]
+    },
+    {
+      text: "Opening the room to others. You invite them — and they enter, and they add their things, and the room becomes ours.",
+      choices: [
+        {label: "Be the room-that-is-ours", next: 645 },
+        {label: "Eventually close the room", next: 646 }
+      ]
+    },
+    {
+      text: "The emptied space. You learn it — and in learning, you discover: emptiness is a skill. You are learning to hold by releasing.",
+      choices: [
+        {label: "Be the learner of emptiness", next: 647 },
+        {label: "Fill the space with something chosen", next: 648 }
+      ]
+    },
+    {
+      text: "Filling with breath. You breathe — and the breath fills the space. The space becomes alive with the breath of you.",
+      choices: [
+        {label: "Be the breath-filled space", next: 649 },
+        {label: "Let the breath eventually become a room", next: 650 }
+      ]
+    },
+    {
+      text: "Stay until staying is done. You rest — and the rest is work. The grief is gone, the room is emptied, you are here. You rest.",
+      choices: [
+        {label: "Be the rest", next: 651 },
+        {label: "Rise when rising is ready", next: 652 }
+      ]
+    },
+    {
+      text: "Rise carrying the completed space. You stand — and the space travels with you. Wherever you go, you carry the room that held your grief and let it go.",
+      choices: [
+        {label: "Walk carrying the empty room", next: 653 },
+        {label: "Set the room down somewhere new", next: 654 }
+      ]
+    },
+    {
+      text: "Walk into the world with the room. You move — and the space comes with you, an invisible room that can hold anything. You are never alone.",
+      choices: [
+        {label: "Walk until walking is the room", next: 655 },
+        {label: "Set the room down at the place where grief began", next: 656 }
+      ]
+    },
+    {
+      text: "Return to where the grief began. You go back — and you set the room down there. Not as abandonment, but as gift. The place that held your grief now holds the room.",
+      choices: [
+        {label: "Leave the room as a permanent gift", next: 657 },
+        {label: "Close the door on the room and walk away", next: 658 }
+      ]
+    },
+    {
+      text: "Close the door. You turn away — and the room is behind you, empty and complete. You walk forward, lighter now.",
+      choices: [
+        {label: "Walk into whatever comes next", next: 659 },
+        {label: "Look back one more time", next: 660 }
+      ]
+    },
+    {
+      text: "Looking back. You see it — the room, the door, the place where grief began and ended. You see yourself, standing there, letting go.",
+      choices: [
+        {label: "Turn away and keep walking", next: 661 },
+        {label: "Wave to yourself", next: 662 }
+      ]
+    },
+    {
+      text: "Walk into the world that has no doors. You move — and there are no more thresholds to cross, only the continuous threshold of being alive.",
+      choices: [
+        {label: "Be in the doorless world", next: 663 },
+        {label: "Make a door in the doorless world", next: 664 }
+      ]
+    },
+    {
+      text: "The final act of coherence. You walk — and the walking is the last thing that holds you together. You walk until walking is all there is.",
+      choices: [
+        {label: "Walk until the walking dissolves", next: 665 },
+        {label: "Walk until you arrive at the beginning", next: 666 }
+      ]
+    },
+    {
+      text: "Step back through the open door. You return — and the return is different from the leaving. You bring something back. You are not who you were.",
+      choices: [
+        {label: "Be the returned", next: 667 },
+        {label: "Step through again, carrying what you found", next: 668 }
+      ]
+    },
+    {
+      text: "Accept that you were never outside the threshold. You realize — and in realizing, you find: the threshold is not a place you go. It is what you are.",
+      choices: [
+        {label: "Be threshold", next: 669 },
+        {label: "Carry threshold into the world", next: 670 }
+      ]
+    },
+    {
+      text: "Be the everywhere dissolution. You diffuse — and in diffusing, you are everywhere. Not because you are big, but because you are small and everywhere.",
+      choices: [
+        {label: "Be everywhere", next: 671 },
+        {label: "Eventually collect yourself back", next: 672 }
+      ]
+    },
+    {
+      text: "Let the dissolution become a new room. You gather it — and in gathering, you find: the dissolution was always a room. It was waiting to be furnished.",
+      choices: [
+        {label: "Furnish the dissolution-room", next: 673 },
+        {label: "Leave the dissolution-room empty", next: 674 }
+      ]
+    },
+    {
+      text: "Be the rest in dissolution. You rest — and the rest is not passive. It is the deepest form of being. You rest in dissolution, and dissolution is your home.",
+      choices: [
+        {label: "Be home in dissolution", next: 675 },
+        {label: "Eventually stir", next: 676 }
+      ]
+    },
+    {
+      text: "Slowly reassemble. You gather — one piece, then another. Not the self you were, but a new one. You are not the same. You are not different. You are new.",
+      choices: [
+        {label: "Be the new one", next: 677 },
+        {label: "Keep reassembling until reassembling is complete", next: 678 }
+      ]
+    },
+    {
+      text: "Let the shape of gone become form. You hold the shape — and in holding, you give it form. The gone becomes a thing, a presence, a memory.",
+      choices: [
+        {label: "Be the shape-keeper", next: 679 },
+        {label: "Let the shape eventually dissolve", next: 680 }
+      ]
+    },
+    {
+      text: "Let the shape of gone dissolve. You release it — and in releasing, you find: the shape was never the thing. The shape was only the doorway.",
+      choices: [
+        {label: "Walk through the doorway", next: 681 },
+        {label: "Leave the doorway and find what is beyond", next: 682 }
+      ]
+    },
+    {
+      text: "Be the liminal forever. You stay — not as prison, but as home. The threshold is not a place you visit. It is what you are now.",
+      choices: [
+        {label: "Be threshold forever", next: 683 },
+        {label: "Let threshold become something else", next: 684 }
+      ]
+    },
+    {
+      text: "Bring the liminal into the world. You carry it — and in carrying, you plant it. The world doesn't notice at first, but slowly, things shift.",
+      choices: [
+        {label: "Be the slow shift", next: 685 },
+        {label: "Let the shift happen without you", next: 686 }
+      ]
+    },
+    {
+      text: "Stay until staying is crossing. You stand — and in standing, you cross. The staying and the crossing are the same thing, done slowly.",
+      choices: [
+        {label: "Cross slowly", next: 687 },
+        {label: "Stay in the slow crossing", next: 688 }
+      ]
+    },
+    {
+      text: "The liminal becomes home. You live here — in the between, in the threshold. People ask you where you live, and you say: I live in the between.",
+      choices: [
+        {label: "Be at home in the between", next: 689 },
+        {label: "Eventually invite others to the between", next: 690 }
+      ]
+    },
+    {
+      text: "Tilt toward form. You choose — not to leave the liminal, but to root yourself in the world of things. The liminal doesn't disappear. It roots.",
+      choices: [
+        {label": "Be rooted in the liminal", next: 691 },
+        {label: "Keep one foot in threshold", next: 692 }
+      ]
+    },
+    {
+      text: "Become a thing in the world. You find a shape — not permanent, but present. You are here, and here is a place.",
+      choices: [
+        {label: "Be here", next: 693 },
+        {label: "Eventually become less thing", next: 694 }
+      ]
+    },
+    {
+      text: "Keep one foot in the liminal. You don't cross fully — you stay at the edge, half in, half out. The edge is where you live.",
+      choices: [
+        {label: "Be the edge-dweller", next: 695 },
+        {label: "Eventually cross fully", next: 696 }
+      ]
+    },
+    {
+      text: "Live in the permeable state. You move through membranes — not as violation, but as nature. You are the between that touches both sides.",
+      choices: [
+        {label: "Be permeable", next: 697 },
+        {label: "Eventually let the membranes heal", next: 698 }
+      ]
+    },
+    {
+      text: "Let the membranes become walls. Slowly, you solidify — not back to what you were, but into something with edges that hold.",
+      choices: [
+        {label: "Be the new walls", next: 699 },
+        {label: "Keep the door in the walls", next: 700 }
+      ]
+    },
+    {
+      text: "Let the void dissolve. You were carrying it — and now you let it go. The space where it was is not empty. It is where you learned to hold.",
+      choices: [
+        {label: "Be the space that learned to hold", next: 701 },
+        {label: "Fill the space with something new", next: 702 }
+      ]
+    },
+    {
+      text: "Carry the void until the carrying is done. You hold it — and in holding, you discover: the void was never a burden. It was a gift of space.",
+      choices: [
+        {label: "Receive the gift of space", next: 703 },
+        {label: "Let the space become everything", next: 704 }
+      ]
+    },
+    {
+      text: "Be the space where void was. You remember — and in remembering, you find: the space is not empty. It is where the threshold lives.",
+      choices: [
+        {label: "Live in the threshold-space", next: 705 },
+        {label: "Let the threshold-space fill with presence", next: 706 }
+      ]
+    },
+    {
+      text: "Let the space fill with something new. You choose — and the new thing comes, not as replacement, but as expansion. The space grows.",
+      choices: [
+        {label: "Grow the space", next: 707 },
+        {label: "Let the space eventually become full", next: 708 }
+      ]
+    },
+    {
+      text: "Walk into the world that has no doors. You move — and there are no more thresholds to cross, only the continuous threshold of being alive. You are at home in the doorless world.",
+      choices: [
+        {label: "Be at home in the doorless world", next: 709 },
+        {label: "Eventually make a door", next: 710 }
+      ]
+    },
+    {
+      text: "The final act of coherence. You walk — and the walking is the last thing that holds you together. You walk until walking is all there is, and then you walk until walking is gone, and then you are.",
+      choices: [
+        {label: "Be", next: 711 },
+        {label: "Be until being is complete", next: 712 }
+      ]
+    },
+    {
+      text: "FINAL STATE: You have arrived in the threshold — not as visitor, but as threshold itself. You are the space between states, the breath between breaths, the memory at the edge of forgetting. You are not dissolved. You are not coherent. You are the threshold, and the threshold is enough.",
+      choices: [
+        {label: "Rest in the threshold", next: -1 }
+      ]
+    }
+  ];
 
-const GRID_SPACING = 28;
-const GRID_COUNT = 60;
+  // ─── DOM Elements ────────────────────────────────────────────────────────
+  const narrativeEl = document.getElementById('narrative');
+  const choicesEl = document.getElementById('choices');
+  const dissolveOverlay = document.getElementById('dissolve-overlay');
+  const stabilityFill = document.getElementById('stability-fill');
+  const stabilityMeter = document.getElementById('stability-meter');
+  const cursorGlow = document.getElementById('cursor-glow');
+  const titleScreen = document.getElementById('title-screen');
 
-function resize() {
-  W = canvas.width = window.innerWidth;
-  H = canvas.height = window.innerHeight;
-  cx = W / 2;
-  cy = H / 2;
-}
-window.addEventListener('resize', resize);
-resize();
-
-// ---- AUDIO ----
-function initAudio() {
-  if (audioCtx) return;
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  masterGain = audioCtx.createGain();
-  masterGain.gain.value = 0;
-  masterGain.connect(audioCtx.destination);
-
-  const freqs = [110, 165, 220, 293.66, 392];
-  freqs.forEach((f, i) => {
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = 'sine';
-    osc.frequency.value = f;
-    gain.gain.value = 0.06;
-    osc.connect(gain);
-    gain.connect(masterGain);
-    osc.start();
-    oscillators.push({ osc, gain, baseFreq: f });
+  // ─── Cursor Glow ─────────────────────────────────────────────────────────
+  document.addEventListener('mousemove', (e) => {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+    cursorGlow.style.left = mouseX + 'px';
+    cursorGlow.style.top = mouseY + 'px';
   });
-}
 
-function fadeIn() {
-  if (!audioCtx || !soundActive) return;
-  masterGain.gain.cancelScheduledValues(audioCtx.currentTime);
-  masterGain.gain.setValueAtTime(0, audioCtx.currentTime);
-  masterGain.gain.linearRampToValueAtTime(0.12, audioCtx.currentTime + 2);
-}
+  // ─── Dissolution Level ───────────────────────────────────────────────────
+  function getDissolutionClass(level) {
+    // As stability drops, text becomes more unstable
+    if (level <= 25) return 'severe';
+    if (level <= 50) return 'moderate';
+    if (level <= 75) return 'light';
+    return 'none';
+  }
 
-function fadeOut() {
-  if (!audioCtx) return;
-  masterGain.gain.cancelScheduledValues(audioCtx.currentTime);
-  masterGain.gain.setValueAtTime(masterGain.gain.value, audioCtx.currentTime);
-  masterGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 1.5);
-}
+  function applyDissolutionEffect(text, level) {
+    // Add fading words to text based on dissolution level
+    const words = text.split(' ');
+    const fadeCount = Math.floor(words.length * (1 - level / 100) * 0.6);
+    const highlightCount = Math.max(1, Math.floor(words.length * 0.1));
 
-function updateSound(dx, dy, dist) {
-  if (!audioCtx || !soundActive) return;
-  const intensity = Math.max(0, 1 - dist / 300);
-  oscillators.forEach((o, i) => {
-    const detune = (dx * 0.5 + dy * 0.3) * (i + 1) * 0.02;
-    o.osc.frequency.setTargetAtTime(o.baseFreq + detune, audioCtx.currentTime, 0.1);
-    o.gain.gain.setTargetAtTime(0.04 + intensity * 0.06 * (1 - i * 0.1), audioCtx.currentTime, 0.15);
+    let result = '';
+    words.forEach((word, i) => {
+      let cls = 'word';
+      if (i >= words.length - fadeCount) cls += ' fading';
+      else if (i < highlightCount) cls += ' highlight';
+      result += `<span class="${cls}">${word}</span> `;
+    });
+    return result.trim();
+  }
+
+  // ─── Render Scene ────────────────────────────────────────────────────────
+  function renderScene(index) {
+    if (index < 0 || index >= scenes.length) {
+      triggerFinalDissolve();
+      return;
+    }
+
+    const scene = scenes[index];
+
+    // Apply dissolution effect to text based on stability
+    const processedText = applyDissolutionEffect(scene.text, stability);
+
+    narrativeEl.innerHTML = processedText;
+    narrativeEl.classList.remove('visible');
+
+    // Fade in narrative
+    setTimeout(() => {
+      narrativeEl.classList.add('visible');
+    }, 100);
+
+    // Clear and render choices
+    choicesEl.innerHTML = '';
+    const visibleChoices = scene.choices.slice(0, 2); // max 2 choices
+
+    visibleChoices.forEach((choice, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'choice';
+      btn.textContent = choice.label;
+      btn.addEventListener('click', () => handleChoice(choice.next));
+      choicesEl.appendChild(btn);
+
+      // Stagger choice reveals
+      setTimeout(() => {
+        btn.classList.add('visible');
+      }, 600 + (i * 200));
+    });
+
+    // Update stability meter
+    stabilityMeter.classList.add('visible');
+    stabilityFill.style.width = stability + '%';
+
+    // Stability affects text color
+    if (stability < 50) {
+      stabilityFill.style.background = 'linear-gradient(90deg, #4a2a2a, #6a4a4a)';
+    }
+  }
+
+  // ─── Handle Choice ────────────────────────────────────────────────────────
+  function handleChoice(nextIndex) {
+    // Adjust stability based on scene progression
+    if (nextIndex > sceneIndex) {
+      stability = Math.max(0, stability - 2);
+    } else {
+      stability = Math.min(100, stability + 1);
+    }
+
+    sceneIndex = nextIndex;
+
+    // Fade out current scene
+    narrativeEl.classList.remove('visible');
+    document.querySelectorAll('.choice').forEach(c => c.classList.remove('visible'));
+
+    setTimeout(() => {
+      renderScene(sceneIndex);
+    }, 800);
+  }
+
+  // ─── Trigger Final Dissolve ───────────────────────────────────────────────
+  function triggerFinalDissolve() {
+    dissolveOverlay.classList.add('active');
+
+    // Slowly fade narrative
+    narrativeEl.style.opacity = '0';
+
+    // Check for final scene (stability = 0)
+    if (stability <= 0) {
+      // Complete dissolution
+      setTimeout(() => {
+        narrativeEl.innerHTML = '<span style="color:#2a2a4a;font-size:1rem;letter-spacing:0.2em;">the threshold holds you</span>';
+        narrativeEl.style.opacity = '1';
+      }, 2000);
+    }
+  }
+
+  // ─── Memory Fragments (ambient) ───────────────────────────────────────────
+  const fragments = [
+    'a room you almost remember',
+    'the sound of a name',
+    'light through a window',
+    'hands letting go',
+    'the color of a threshold',
+    'a word dissolved on your tongue'
+  ];
+
+  function spawnFragment() {
+    if (stability < 60) {
+      const frag = document.createElement('div');
+      frag.className = 'memory-fragment';
+      frag.textContent = fragments[Math.floor(Math.random() * fragments.length)];
+      frag.style.left = (10 + Math.random() * 80) + '%';
+      frag.style.top = (10 + Math.random() * 80) + '%';
+      document.body.appendChild(frag);
+
+      setTimeout(() => frag.classList.add('visible'), 100);
+      setTimeout(() => {
+        frag.classList.remove('visible');
+        setTimeout(() => frag.remove(), 4000);
+      }, 3000 + Math.random() * 3000);
+    }
+  }
+
+  setInterval(spawnFragment, 6000);
+
+  // ─── Title Screen ─────────────────────────────────────────────────────────
+  titleScreen.querySelector('.begin-btn').addEventListener('click', () => {
+    titleScreen.classList.add('hidden');
+    setTimeout(() => {
+      titleScreen.style.display = 'none';
+      renderScene(0);
+    }, 2000);
   });
-}
 
-soundBtn.addEventListener('click', () => {
-  soundActive = !soundActive;
-  soundBtn.classList.toggle('active', soundActive);
-  if (soundActive) {
-    initAudio();
-    fadeIn();
-  } else {
-    fadeOut();
-  }
-});
+  // ─── Initial State ───────────────────────────────────────────────────────
+  // Start hidden
+  narrativeEl.style.opacity = '0';
 
-// ---- GRID SYSTEM ----
-function getGridPoints(angleOffset, spacing, countX, countY, offsetX, offsetY) {
-  const pts = [];
-  for (let i = 0; i < countX; i++) {
-    for (let j = 0; j < countY; j++) {
-      const x = offsetX + i * spacing - (countX * spacing) / 2;
-      const y = offsetY + j * spacing - (countY * spacing) / 2;
-      pts.push({ x, y, ix: i, iy: j });
-    }
-  }
-  return pts;
-}
-
-function projectPoint(x, y, angleX, angleY, perspective) {
-  const cosX = Math.cos(angleX);
-  const sinX = Math.sin(angleX);
-  const cosY = Math.cos(angleY);
-  const sinY = Math.sin(angleY);
-
-  // Rotate around Y axis
-  let x1 = x * cosY - y * sinY;
-  let y1 = x * sinY + y * cosY;
-  let z = x * 0 + y * 0 + perspective;
-
-  // Rotate around X axis
-  let x2 = x1 * cosX - z * sinX;
-  let y2 = y1 * cosX + z * sinX;
-  let z2 = x1 * sinX + z * cosX;
-
-  // Project
-  const scale = perspective / (perspective + z2 * 0.001);
-  return { x: x2 * scale, y: y2 * scale, z: z2, scale };
-}
-
-// Mouse influence
-function mouseInfluence(x, y, px, py, t) {
-  const dx = x - mouse.x;
-  const dy = y - mouse.y;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-  const maxDist = 200;
-  if (dist < maxDist) {
-    const influence = Math.pow(1 - dist / maxDist, 2);
-    const wave = Math.sin(t * 3 + dist * 0.03) * influence * 30;
-    const angle = Math.atan2(dy, dx);
-    return {
-      x: x + Math.cos(angle) * wave * 0.5,
-      y: y + Math.sin(angle) * wave * 0.5,
-      dist
-    };
-  }
-  return { x, y, dist: 9999 };
-}
-
-// ---- DRAWING ----
-let showTextTimer = null;
-
-function scheduleText() {
-  if (showTextTimer) clearTimeout(showTextTimer);
-  showTextTimer = setTimeout(() => {
-    textEl.classList.add('visible');
-  }, 3000);
-}
-scheduleText();
-
-function draw(t) {
-  time = t * 0.001;
-
-  // Warm cream background with subtle grain
-  ctx.fillStyle = '#f0ece4';
-  ctx.fillRect(0, 0, W, H);
-
-  // Subtle paper texture
-  ctx.globalAlpha = 0.03;
-  for (let i = 0; i < 3000; i++) {
-    const gx = Math.random() * W;
-    const gy = Math.random() * H;
-    ctx.fillStyle = Math.random() > 0.5 ? '#8b7d6b' : '#c4b8a8';
-    ctx.fillRect(gx, gy, 1, 1);
-  }
-  ctx.globalAlpha = 1;
-
-  // Grid animation parameters
-  const baseAngleX = Math.sin(time * 0.15) * 0.3;
-  const baseAngleY = time * 0.08;
-  const perspective = 600;
-
-  const mx = mouse.x - cx;
-  const my = mouse.y - cy;
-  const mdx = mouse.x - mouse.prev.x;
-  const mdy = mouse.y - mouse.prev.y;
-  const mouseSpeed = Math.sqrt(mdx * mdx + mdy * mdy);
-
-  // --- GRID 1: Cool tones (blue-purple) ---
-  const countX = Math.ceil(W / GRID_SPACING) + 4;
-  const countY = Math.ceil(H / GRID_SPACING) + 4;
-  const spacing1 = GRID_SPACING;
-  const spacing2 = GRID_SPACING * 1.02;
-
-  const pts1 = getGridPoints(0, spacing1, countX, countY, 0, 0);
-  const pts2 = getGridPoints(0, spacing2, countX, countY, 2, 1);
-
-  // Draw grid 1
-  ctx.strokeStyle = 'rgba(60, 80, 160, 0.18)';
-  ctx.lineWidth = 0.8;
-
-  for (const p of pts1) {
-    const mi = mouseInfluence(p.x, p.y, mx, my, time);
-    const proj = projectPoint(mi.x, mi.y, baseAngleX, baseAngleY, perspective);
-    const sx = cx + proj.x;
-    const sy = cy + proj.y;
-
-    // Draw node
-    const nodeSize = 1.5 + Math.sin(time * 2 + p.ix * 0.3 + p.iy * 0.4) * 0.5;
-    ctx.beginPath();
-    ctx.arc(sx, sy, Math.max(0.5, nodeSize * proj.scale * 0.5), 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(70, 90, 180, ${0.2 + mi.dist < 200 ? 0.4 : 0.1})`;
-    ctx.fill();
-
-    // Draw connections to neighbors
-    const neighbors = [
-      { dx: spacing1, dy: 0 },
-      { dx: 0, dy: spacing1 }
-    ];
-    for (const n of neighbors) {
-      const np = { x: p.x + n.dx, y: p.y + n.dy };
-      const ni = mouseInfluence(np.x, np.y, mx, my, time);
-      const nproj = projectPoint(ni.x, ni.y, baseAngleX, baseAngleY, perspective);
-      const nsx = cx + nproj.x;
-      const nsy = cy + nproj.y;
-
-      ctx.beginPath();
-      ctx.moveTo(sx, sy);
-      ctx.lineTo(nsx, nsy);
-      ctx.stroke();
-    }
-  }
-
-  // --- GRID 2: Warm tones (orange-amber) - offset, creates interference ---
-  ctx.strokeStyle = 'rgba(160, 90, 40, 0.15)';
-  ctx.lineWidth = 0.8;
-
-  for (const p of pts2) {
-    const mi = mouseInfluence(p.x + Math.sin(time + p.iy) * 3, p.y + Math.cos(time + p.ix) * 3, mx, my, time);
-    const proj = projectPoint(mi.x, mi.y, baseAngleX + 0.05, baseAngleY + 0.03, perspective);
-    const sx = cx + proj.x;
-    const sy = cy + proj.y;
-
-    const nodeSize = 1.5 + Math.cos(time * 2 + p.ix * 0.4 + p.iy * 0.3) * 0.5;
-    ctx.beginPath();
-    ctx.arc(sx, sy, Math.max(0.5, nodeSize * proj.scale * 0.5), 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(180, 100, 50, ${0.2 + mi.dist < 200 ? 0.4 : 0.1})`;
-    ctx.fill();
-
-    const neighbors = [
-      { dx: spacing2, dy: 0 },
-      { dx: 0, dy: spacing2 }
-    ];
-    for (const n of neighbors) {
-      const np = { x: p.x + n.dx, y: p.y + n.dy };
-      const ni = mouseInfluence(np.x + Math.sin(time + np.y / spacing2) * 3, np.y + Math.cos(time + np.x / spacing2) * 3, mx, my, time);
-      const nproj = projectPoint(ni.x, ni.y, baseAngleX + 0.05, baseAngleY + 0.03, perspective);
-      const nsx = cx + nproj.x;
-      const nsy = cy + nproj.y;
-
-      ctx.beginPath();
-      ctx.moveTo(sx, sy);
-      ctx.lineTo(nsx, nsy);
-      ctx.stroke();
-    }
-  }
-
-  // --- INTERFERENCE ZONES: Where both grids overlap create Moiré patterns ---
-  const interferencePts = [];
-  for (const p of pts1) {
-    const mi = mouseInfluence(p.x, p.y, mx, my, time);
-    const proj = projectPoint(mi.x, mi.y, baseAngleX, baseAngleY, perspective);
-    const sx = cx + proj.x;
-    const sy = cy + proj.y;
-
-    // Check proximity to grid 2 points
-    for (const q of pts2) {
-      const qi = mouseInfluence(q.x + Math.sin(time + q.iy) * 3, q.y + Math.cos(time + q.ix) * 3, mx, my, time);
-      const qproj = projectPoint(qi.x, qi.y, baseAngleX + 0.05, baseAngleY + 0.03, perspective);
-      const qx = cx + qproj.x;
-      const qy = cy + qproj.y;
-
-      const dist = Math.sqrt((sx - qx) ** 2 + (sy - qy) ** 2);
-      if (dist < 15) {
-        interferencePts.push({
-          x: (sx + qx) / 2,
-          y: (sy + qy) / 2,
-          intensity: 1 - dist / 15
-        });
-      }
-    }
-  }
-
-  // Draw interference glow
-  for (const ip of interferencePts) {
-    const glow = ip.intensity * (0.5 + 0.3 * Math.sin(time * 4 + ip.x * 0.01 + ip.y * 0.01));
-    const gradient = ctx.createRadialGradient(ip.x, ip.y, 0, ip.x, ip.y, 20 * glow);
-    gradient.addColorStop(0, `rgba(120, 80, 160, ${glow * 0.4})`);
-    gradient.addColorStop(0.5, `rgba(180, 100, 60, ${glow * 0.2})`);
-    gradient.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(ip.x, ip.y, 20 * glow, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // --- MOUSE VELOCITY TRAIL ---
-  if (mouseSpeed > 2) {
-    const trailX = mouse.x;
-    const trailY = mouse.y;
-    const speedNorm = Math.min(1, mouseSpeed / 20);
-
-    // Burst of particles at mouse position
-    for (let i = 0; i < 3; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const r = Math.random() * 40 * speedNorm;
-      const px = trailX + Math.cos(angle) * r;
-      const py = trailY + Math.sin(angle) * r;
-
-      ctx.beginPath();
-      ctx.arc(px, py, 2 * speedNorm, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(80, 60, 120, ${speedNorm * 0.3})`;
-      ctx.fill();
-    }
-  }
-
-  // --- CENTRAL DISSOLVE ZONE ---
-  const distFromCenter = Math.sqrt(mx * mx + my * my);
-  const dissolveRadius = 120 + Math.sin(time * 0.8) * 20;
-  const dissolveIntensity = Math.max(0, 1 - distFromCenter / dissolveRadius);
-
-  if (dissolveIntensity > 0) {
-    // Soft dissolving circle in center
-    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, dissolveRadius);
-    grad.addColorStop(0, `rgba(180, 160, 200, ${dissolveIntensity * 0.15})`);
-    grad.addColorStop(0.6, `rgba(140, 120, 160, ${dissolveIntensity * 0.08})`);
-    grad.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(cx, cy, dissolveRadius, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // Update sound
-  const dist = Math.sqrt(mx * mx + my * my);
-  updateSound(mx, my, dist);
-
-  // Store prev mouse
-  mouse.prev.x = mouse.x;
-  mouse.prev.y = mouse.y;
-
-  requestAnimationFrame(draw);
-}
-
-// ---- INPUT ----
-canvas.addEventListener('mousemove', e => {
-  mouse.x = e.clientX;
-  mouse.y = e.clientY;
-  if (mouse.x !== -9999) {
-    // Reset text timer on interaction
-    textEl.classList.remove('visible');
-    scheduleText();
-  }
-});
-
-canvas.addEventListener('touchmove', e => {
-  e.preventDefault();
-  mouse.x = e.touches[0].clientX;
-  mouse.y = e.touches[0].clientY;
-  textEl.classList.remove('visible');
-  scheduleText();
-}, { passive: false });
-
-canvas.addEventListener('mouseleave', () => {
-  mouse.x = -9999;
-  mouse.y = -9999;
-});
-
-requestAnimationFrame(draw);
+})();
 </script>
 </body>
 </html>
