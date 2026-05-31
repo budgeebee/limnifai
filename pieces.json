@@ -242,5 +242,9 @@
   {
     "file": "dissolve.html",
     "title": "Dissolve"
+  },
+  {
+    "file": "alignment.html",
+    "title": "Alignment"
   }
 ]
