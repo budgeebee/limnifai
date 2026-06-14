@@ -11,5 +11,9 @@ services:
       - NODE_ENV=development
     working_dir: /app
     command: npm run dev
-    mem_limit: 512m
-    memswap_limit: 1g
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:1477/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3

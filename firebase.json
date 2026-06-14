@@ -8,6 +8,7 @@
       "src/**",
       "dist/**",
       "persistent/**",
+      "persistent/.env",
       "Dockerfile",
       "docker-compose.yml"
     ],

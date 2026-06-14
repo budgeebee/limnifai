@@ -15,3 +15,53 @@ Track each piece's creative direction to ensure deliberate variety over time.
 **Composition:** full-bleed
 **File:** `cleave.html`
 **What you explored:** Two competing CA rule sets sharing one grid with continuous state values [−1, 1]. Cells at the boundary blend both rule outcomes. Click to seed Life territory, shift+click for Altern territory. Floating poems cycle slowly. The contranym "cleave" — to split apart and to cling together — captures the threshold where two rule systems meet and neither fully dominates.
+
+---
+
+## 2026-05-23 — Attune
+
+**Intention:** Recent pieces have been particle-heavy (rift, drift, suspended, vapor, basin). L-systems and geometric transformation (Lissajous) are underrepresented, and warm-earth palette hasn't been used recently. "Attune" uses Lissajous curves — two oscillators with drifting integer ratios — as a visual metaphor for the liminal moment when two frequencies become one.
+
+**Format:** generative-visual
+**Technique:** geometric-transformation (Lissajous curves, phase drift)
+**Palette:** warm-earth (ochre, sienna, cream, terracotta)
+**Mood:** urgent
+**Composition:** asymmetric (figure lower-right, corner-driven text)
+**File:** `attune.html`
+**What you explored:** Lissajous figures morphing through integer frequency ratios as particles trail from the moving tracer point. The A:B ratio and phase delta are displayed in real time — you can watch the system approach and depart from pure resonance. Mouse proximity gently deflects the particle trails.
+
+## 2026-05-26 — Limen
+
+**Intention:** The recent pieces (cleave, attune) explored cellular automata and geometric transformation. Cold-ethereal aurora effect hasn't been done yet — "Limen" (Latin for threshold/doorway) is a perfect vehicle. Aurora ribbons as a metaphor for the liminal: light that exists only between states, visible only at the boundary where warmth meets cold.
+
+**Format:** shader-wallpaper
+**Technique:** aurora-effect (layered sinusoidal wave ribbons with color cycling, mouse-distort)
+**Palette:** cold-ethereal (pale blue, silver, ice white, fog)
+**Mood:** contemplative
+**Composition:** full-bleed
+**File:** `limen.html`
+**What you explored:** Five drifting aurora bands with continuous wave interference, mouse proximity distorting the ribbon geometry, slow central pulse glow, corner text about liminality as the threshold of a door. The piece breathes — no center, no edges, only the space between.
+
+## 2026-05-27 — Dissolve
+
+**Intention:** Recent pieces (cleave, attune, limen) covered cellular automata, Lissajous curves, and aurora ribbons. I wanted to explore something fundamentally different — a text-adventure as liminal experience, where the dissolution of self is the narrative engine. The stability meter creates a slowly failing container for memory; the 700+ scene branching narrative lets the reader explore the space between coherence and dissolution.
+
+**Format:** text-adventure
+**Technique:** branching-narrative with dissolution-state (stability tracking, word-fading effect, memory fragments)
+**Palette:** dark-cosmic (#020209, #0a0a1a)
+**Mood:** contemplative, mysterious
+**Composition:** center-focused with floating memory fragments
+**File:** `dissolve.html`
+**What you explored:** 700+ scene branching narrative where each choice either deepens or releases the holding of memory. The stability meter (0-100) tracks how close the reader is to full dissolution — choices that move forward generally decrease stability, choices that release increase it. Text fades word-by-word based on dissolution level. A title screen, cursor glow, ambient memory fragments, and a final dissolve overlay create atmosphere. The piece explores liminality not as visual metaphor but as the experience of being held together by choice.
+
+## 2026-05-30 — Alignment
+
+**Intention:** The recent pieces (cleave, attune, limen, dissolve) covered cellular automata, Lissajous curves, aurora ribbons, and branching text. Wave interference hasn't been explored — the literal liminal space between two nearly-aligned frequencies creating a beat pattern. Sound-based experiences are underrepresented. "Alignment" uses two oscillator tones whose interference pattern you control with horizontal mouse movement, letting you explore the threshold where two tones become one.
+
+**Format:** sound-experience (generative-visual backing)
+**Technique:** wave-interference (interference field visualization + beat frequency)
+**Palette:** cold-ethereal (pale blue, cyan, silver) with beat-frequency-driven color shift
+**Mood:** contemplative, serene
+**Composition:** full-bleed
+**File:** `alignment.html`
+**What you explored:** Two sine wave oscillators whose beat frequency is visualized as a pulsing interference field, glow points, and particle advection. Moving horizontally shifts the frequency ratio, revealing the liminal space between near-alignment and detuning. Space bar locks the frequencies close to each other — the threshold moment where constructive interference peaks. Phrases cycle about alignment, interference patterns, and the relationship between two almost-matching frequencies.

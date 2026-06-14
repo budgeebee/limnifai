@@ -73,8 +73,14 @@
         let current = -1;
 
         async function init() {
-            const res = await fetch('/pieces.json');
-            pieces = await res.json();
+            const cached = sessionStorage.getItem('pieces');
+            if (cached) {
+                pieces = JSON.parse(cached);
+            } else {
+                const res = await fetch('/pieces.json');
+                pieces = await res.json();
+                sessionStorage.setItem('pieces', JSON.stringify(pieces));
+            }
             shuffle();
         }
 
