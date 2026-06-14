@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Verge</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #f5e6f0;
+    overflow: hidden;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    cursor: crosshair;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  canvas { display: block; }
+  #hint {
+    position: fixed;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(180, 150, 170, 0.45);
+    font-size: 13px;
+    letter-spacing: 0.35em;
+    pointer-events: none;
+    transition: opacity 2s ease;
+    z-index: 10;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hint">move through the threshold</div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const hint = document.getElementById('hint');
+
+let W, H, mouseX = -200, mouseY = -200, mouseActive = false;
+let t = 0;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+canvas.addEventListener('mousemove', e => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+  mouseActive = true;
+});
+canvas.addEventListener('mouseleave', () => { mouseActive = false; });
+
+// ── Poetic fragments for edge placement ──
+const poems = [
+  "the space between",
+  "not yet not still",
+  "at the verge of",
+  "almost becoming",
+  "half-remembered",
+  "what was almost",
+  "before the name",
+  "after the light",
+  "threshold breath",
+  "unfinished word",
+  "lingering note",
+  "between the lines",
+  "almost morning",
+  "nearly spoken",
+  "edge of waking",
+  "the pause before",
+  "dissolving form",
+  "suspended there",
+  "liminal quiet",
+  "where light bends"
+];
+
+// ── Morpher: seamless pastel-dream gradient background ──
+class GradientMorpher {
+  constructor() {
+    this.stops = [
+      { r: 245, g: 220, b: 235, dr: 0.12, dg: -0.08, db: 0.06 }, // soft pink
+      { r: 220, g: 210, b: 240, dr: -0.05, dg: 0.09, db: -0.07 }, // lavender
+      { r: 240, g: 225, b: 210, dr: 0.04, dg: -0.06, db: 0.08 }, // peach
+      { r: 210, g: 235, b: 225, dr: -0.07, dg: 0.05, db: -0.04 }, // mint
+    ];
+    this.offsets = this.stops.map((_, i) => (i / this.stops.length) * Math.PI * 2);
+    this.baseHue = 310;
+  }
+
+  update(dt) {
+    for (let s of this.stops) {
+      s.r += s.dr * dt * 0.3;
+      s.g += s.dg * dt * 0.3;
+      s.b += s.db * dt * 0.3;
+      if (s.r > 248) s.dr = -Math.abs(s.dr);
+      if (s.r < 200) s.dr = Math.abs(s.dr);
+      if (s.g > 240) s.dg = -Math.abs(s.dg);
+      if (s.g < 200) s.dg = Math.abs(s.dg);
+      if (s.b > 245) s.db = -Math.abs(s.db);
+      if (s.b < 200) s.db = Math.abs(s.db);
+    }
+    for (let i = 0; i < this.offsets.length; i++) {
+      this.offsets[i] += 0.08 * dt;
+    }
+  }
+
+  draw(ctx) {
+    const grad = ctx.createLinearGradient(0, 0, W * 0.7, H * 0.8);
+    for (let i = 0; i < this.stops.length; i++) {
+      const s = this.stops[i];
+      const pos = (Math.sin(this.offsets[i]) * 0.3 + 0.5) * (i + 1) / (this.stops.length + 1) + 0.05;
+      grad.addColorStop(Math.min(1, Math.max(0, pos)), `rgb(${Math.round(s.r)},${Math.round(s.g)},${Math.round(s.b)})`);
+    }
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // subtle radial overlay
+    const overlay = ctx.createRadialGradient(W * 0.5, H * 0.5, Math.min(W, H) * 0.1, W * 0.5, H * 0.5, Math.min(W, H) * 0.75);
+    overlay.addColorStop(0, 'rgba(255,250,245,0.25)');
+    overlay.addColorStop(0.5, 'rgba(235,220,240,0.08)');
+    overlay.addColorStop(1, 'rgba(200,195,210,0.15)');
+    ctx.fillStyle = overlay;
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
+// ── Letter particle ──
+class Letter {
+  constructor(char, homeX, homeY, index, total) {
+    this.char = char;
+    this.homeX = homeX;
+    this.homeY = homeY;
+    this.x = homeX + (Math.random() - 0.5) * 80;
+    this.y = homeY + (Math.random() - 0.5) * 40;
+    this.vx = 0;
+    this.vy = 0;
+    this.index = index;
+    this.total = total;
+    this.phase = Math.random() * Math.PI * 2;
+    this.opacity = 0.35 + Math.random() * 0.55;
+    this.size = 16 + Math.random() * 8;
+    this.wobbleAmp = 0.3 + Math.random() * 0.6;
+    this.driftSeed = Math.random() * 1000;
+    this.repelForce = 0;
+  }
+
+  update(dt, mouseX, mouseY, mouseActive) {
+    // noise-based drift
+    const nx = Math.sin(t * 0.4 + this.driftSeed) * this.wobbleAmp;
+    const ny = Math.cos(t * 0.35 + this.driftSeed + 1.3) * this.wobbleAmp;
+
+    // spring back toward home
+    const dx = this.homeX - this.x;
+    const dy = this.homeY - this.y;
+    const springK = 0.015;
+    this.vx += dx * springK * dt;
+    this.vy += dy * springK * dt;
+
+    // noise drift
+    this.vx += nx * 0.06 * dt;
+    this.vy += ny * 0.06 * dt;
+
+    // mouse repel
+    if (mouseActive) {
+      const mdx = this.x - mouseX;
+      const mdy = this.y - mouseY;
+      const dist = Math.sqrt(mdx * mdx + mdy * mdy);
+      if (dist < 160) {
+        const force = (1 - dist / 160) * 2.5;
+        this.vx += (mdx / (dist + 0.01)) * force * dt;
+        this.vy += (mdy / (dist + 0.01)) * force * dt;
+        this.repelForce = Math.max(this.repelForce, force);
+      }
+    }
+
+    // damping
+    this.vx *= 0.94;
+    this.vy *= 0.94;
+
+    this.x += this.vx;
+    this.y += this.vy;
+
+    // decay repel
+    this.repelForce *= 0.92;
+
+    // Opacity pulse
+    this.opacity = 0.35 + Math.sin(t * 0.7 + this.phase) * 0.2 + 0.35;
+    if (this.repelForce > 0.1) {
+      this.opacity *= (1 - this.repelForce * 0.5);
+    }
+    this.opacity = Math.max(0.08, Math.min(0.85, this.opacity));
+  }
+
+  draw(ctx, t) {
+    ctx.save();
+    ctx.translate(this.x, this.y);
+
+    // slight rotation from drift
+    const rot = Math.sin(t * 0.5 + this.driftSeed) * 0.08 + this.vx * 0.04;
+    ctx.rotate(rot);
+
+    // letter blur increases when repelled
+    const blur = this.repelForce * 3;
+    ctx.filter = blur > 0.3 ? `blur(${blur.toFixed(1)}px)` : 'none';
+
+    // render letter
+    const r = 180 + Math.sin(this.phase + t * 0.3) * 20;
+    const g = 140 + Math.cos(this.phase + t * 0.25) * 25;
+    const b = 175 + Math.sin(this.phase + t * 0.35) * 20;
+    ctx.fillStyle = `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b)},${this.opacity.toFixed(2)})`;
+    ctx.font = `${this.size}px Georgia, serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(this.char, 0, 0);
+
+    // ghost echo for scattered letters
+    if (this.repelForce > 0.3) {
+      const echoAlpha = this.opacity * 0.25 * this.repelForce;
+      ctx.fillStyle = `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b)},${echoAlpha.toFixed(2)})`;
+      ctx.font = `${this.size * 1.3}px Georgia, serif`;
+      ctx.fillText(this.char, (Math.random() - 0.5) * 4, (Math.random() - 0.5) * 4);
+    }
+
+    ctx.restore();
+  }
+}
+
+// ── Word: collection of letters ──
+class Word {
+  constructor(text, cx, cy, radius, angleStart, angleSpan) {
+    this.text = text;
+    this.letters = [];
+    const chars = text.replace(/\s/g, '').split('');
+    const total = chars.length;
+    for (let i = 0; i < total; i++) {
+      const frac = total > 1 ? i / (total - 1) : 0.5;
+      const angle = angleStart + frac * angleSpan;
+      const homeX = cx + Math.cos(angle) * radius;
+      const homeY = cy + Math.sin(angle) * radius;
+      this.letters.push(new Letter(chars[i], homeX, homeY, i, total));
+    }
+  }
+
+  update(dt, mx, my, ma) {
+    for (let l of this.letters) l.update(dt, mx, my, ma);
+  }
+
+  draw(ctx, t) {
+    for (let l of this.letters) l.draw(ctx, t);
+  }
+}
+
+// ── Build edge-dominant composition ──
+const words = [];
+const gradientMorpher = new GradientMorpher();
+
+function placeWords() {
+  words.length = 0;
+  const margin = 50;
+  const pad = 30;
+
+  // top edge — words spread horizontally
+  const topY = margin + pad;
+  const topWords = shuffleSlice(poems, 6);
+  const topSpacing = (W - margin * 2) / (topWords.length + 1);
+  for (let i = 0; i < topWords.length; i++) {
+    const cx = margin + topSpacing * (i + 1);
+    const textLen = topWords[i].replace(/\s/g, '').length;
+    const r = 20 + textLen * 6;
+    words.push(new Word(topWords[i], cx, topY, r, -0.3, 0.6));
+  }
+
+  // bottom edge
+  const botY = H - margin - pad;
+  const botWords = shuffleSlice(poems.filter(w => !topWords.includes(w)), 5);
+  const botSpacing = (W - margin * 2) / (botWords.length + 1);
+  for (let i = 0; i < botWords.length; i++) {
+    const cx = margin + botSpacing * (i + 1);
+    const textLen = botWords[i].replace(/\s/g, '').length;
+    const r = 18 + textLen * 6;
+    words.push(new Word(botWords[i], cx, botY, r, Math.PI - 0.6, 0.6));
+  }
+
+  // left edge
+  const usedForSides = [...topWords, ...botWords];
+  const leftWords = shuffleSlice(poems.filter(w => !usedForSides.includes(w)), 4);
+  const leftSpacing = (H - margin * 2) / (leftWords.length + 1);
+  for (let i = 0; i < leftWords.length; i++) {
+    const cy = margin + leftSpacing * (i + 1);
+    words.push(new Word(leftWords[i], margin + pad, cy, 30, -Math.PI / 2 - 0.5, 1.0));
+  }
+
+  // right edge
+  const usedAll = [...usedForSides, ...leftWords];
+  const rightWords = shuffleSlice(poems.filter(w => !usedAll.includes(w)), 4);
+  const rightSpacing = (H - margin * 2) / (rightWords.length + 1);
+  for (let i = 0; i < rightWords.length; i++) {
+    const cy = margin + rightSpacing * (i + 1);
+    words.push(new Word(rightWords[i], W - margin - pad, cy, 30, Math.PI / 2 - 0.5, 1.0));
+  }
+
+  // one center fragment — the threshold itself
+  const centerText = "verge";
+  const centerChars = centerText.split('');
+  const centerRadius = 35;
+  for (let i = 0; i < centerChars.length; i++) {
+    const angle = (i / centerChars.length) * Math.PI * 2 - Math.PI / 2;
+    const hx = W * 0.5 + Math.cos(angle) * centerRadius;
+    const hy = H * 0.5 + Math.sin(angle) * centerRadius;
+    const l = new Letter(centerChars[i], hx, hy, i, centerChars.length);
+    l.size = 22 + Math.random() * 4;
+    l.opacity = 0.4;
+    words.push(new Word("", 0, 0, 0, 0, 0)); // dummy
+    words[words.length - 1].letters = [l];
+  }
+}
+
+function shuffleSlice(arr, n) {
+  const shuffled = [...arr].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, n);
+}
+
+placeWords();
+
+// Frame timing
+let lastTime = performance.now();
+let totalElapsed = 0;
+
+function frame(now) {
+  requestAnimationFrame(frame);
+
+  let raw = (now - lastTime) / 1000;
+  if (raw <= 0 || raw > 0.2) raw = 0.016;
+  lastTime = now;
+  const dt = Math.min(raw, 0.05);
+  totalElapsed += dt;
+  t = totalElapsed;
+
+  // Update morphing gradient
+  gradientMorpher.update(dt);
+
+  // Draw background
+  ctx.clearRect(0, 0, W, H);
+  gradientMorpher.draw(ctx);
+
+  // Update & draw all letter particles
+  for (let w of words) {
+    w.update(dt, mouseX, mouseY, mouseActive);
+    w.draw(ctx, t);
+  }
+
+  // Subtle center pulse
+  const pulse = 0.15 + Math.sin(t * 0.4) * 0.08;
+  const pulseGrad = ctx.createRadialGradient(W * 0.5, H * 0.5, 0, W * 0.5, H * 0.5, 120);
+  pulseGrad.addColorStop(0, `rgba(250,235,245,${pulse.toFixed(3)})`);
+  pulseGrad.addColorStop(1, 'rgba(240,220,235,0)');
+  ctx.fillStyle = pulseGrad;
+  ctx.fillRect(W * 0.5 - 120, H * 0.5 - 120, 240, 240);
+
+  // Fade hint
+  if (totalElapsed > 6) {
+    hint.style.opacity = Math.max(0, 1 - (totalElapsed - 6) * 0.5);
+  }
+}
+
+// Handle resize gracefully
+window.addEventListener('resize', () => {
+  resize();
+  placeWords();
+});
+
+// Start
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
