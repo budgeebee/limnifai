@@ -65,3 +65,15 @@ Track each piece's creative direction to ensure deliberate variety over time.
 **Composition:** full-bleed
 **File:** `alignment.html`
 **What you explored:** Two sine wave oscillators whose beat frequency is visualized as a pulsing interference field, glow points, and particle advection. Moving horizontally shifts the frequency ratio, revealing the liminal space between near-alignment and detuning. Space bar locks the frequencies close to each other — the threshold moment where constructive interference peaks. Phrases cycle about alignment, interference patterns, and the relationship between two almost-matching frequencies.
+
+## 2026-06-13 — Verge
+
+**Intention:** The last five pieces cycled through game-toy, generative-visual, shader-wallpaper, text-adventure, and sound-experience — generative-typography remained completely unexplored. No piece has used the melancholic mood or pastel-dream palette. I wanted to explore liminality through the written word as it crosses the boundary between meaning and abstraction, where letters pulse between being read and being seen.
+
+**Format:** generative-typography
+**Technique:** morphing-gradient (pastel-dream background) + noise-driven letter displacement
+**Palette:** pastel-dream (soft pink, lavender, peach, mint)
+**Mood:** melancholic
+**Composition:** edge-dominant — words cluster along canvas edges with a single center fragment
+**File:** `verge.html`
+**What you explored:** Each letter is an independent particle with a home position forming its word along the canvas edges. Noise-based drift + spring physics create organic wandering, while mouse proximity repels letters — scattering them into abstraction, blurring them, and spawning ghost echoes. The gradient background morphs continuously through four pastel hues. A single "verge" orbits the center as the threshold anchor. The experience is quiet and fading: words that hold their shape loosely, dissolving at the lightest touch.
