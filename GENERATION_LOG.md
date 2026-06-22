@@ -77,3 +77,15 @@ Track each piece's creative direction to ensure deliberate variety over time.
 **Composition:** edge-dominant — words cluster along canvas edges with a single center fragment
 **File:** `verge.html`
 **What you explored:** Each letter is an independent particle with a home position forming its word along the canvas edges. Noise-based drift + spring physics create organic wandering, while mouse proximity repels letters — scattering them into abstraction, blurring them, and spawning ghost echoes. The gradient background morphs continuously through four pastel hues. A single "verge" orbits the center as the threshold anchor. The experience is quiet and fading: words that hold their shape loosely, dissolving at the lightest touch.
+
+## 2026-06-21 — Seam
+
+**Intention:** Dom-art has never been explored — every piece to date used canvas, shaders, or DOM only as text overlays. Warm-sunset palette and tense mood are also untouched. I wanted to create liminality through pure DOM elements: thin luminous panels clustered in corners that drift with noise toward the center, where near-alignment between panels from different corners creates glowing seams — the threshold of connection. The center is deliberately empty, a void the corner-bound elements orbit but can never inhabit.
+
+**Format:** dom-art
+**Technique:** noise-driven panel drift + cross-corner alignment seam detection with gradient glow synthesis
+**Palette:** warm-sunset (deep orange, coral, gold, burgundy)
+**Mood:** tense
+**Composition:** corner-driven — panels cluster in the four corners, negative center void with pulse rings
+**File:** `seam.html`
+**What you explored:** 32 thin rectangular DOM panels distributed across four corner constellations, each with organic drift via layered-sine noise. When two panels from different corners come within alignment distance (edges nearly parallel and close), a CSS gradient glow appears in the gap — brighter the closer they are to perfect alignment. The tension comes from watching seams form and dissolve unpredictably; the system never resolves. Pulse rings in the center intensify with seam count. Mouse repels panels, disrupting the delicate approach. No canvas at all — every visual element is a styled DOM node positioned via JS, creating liminality through the literal space between elements.
