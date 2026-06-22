@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Seam</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a0804;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    cursor: crosshair;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #stage {
+    position: fixed;
+    inset: 0;
+  }
+  .panel {
+    position: absolute;
+    background: linear-gradient(135deg, var(--pc1), var(--pc2));
+    border-radius: 1px;
+    opacity: 0.85;
+    transition: opacity 0.6s ease;
+    will-change: transform, left, top, opacity;
+  }
+  .panel.near {
+    opacity: 1;
+  }
+  .seam-glow {
+    position: absolute;
+    pointer-events: none;
+    border-radius: 2px;
+    will-change: transform, left, top, opacity;
+    z-index: 0;
+  }
+  .poem-line {
+    position: absolute;
+    color: rgba(200, 100, 60, 0.55);
+    font-size: 13px;
+    letter-spacing: 0.35em;
+    pointer-events: none;
+    transition: opacity 1.2s ease;
+    will-change: opacity;
+    z-index: 5;
+  }
+  .center-void-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: rgba(180, 90, 50, 0.3);
+    font-size: 11px;
+    letter-spacing: 0.5em;
+    text-align: center;
+    pointer-events: none;
+    z-index: 4;
+    transition: opacity 2s ease;
+  }
+  .pulse-ring {
+    position: absolute;
+    border: 0.5px solid rgba(220, 120, 60, 0.25);
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 1;
+    will-change: transform, opacity;
+  }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+
+<script>
+// ── Seam: dom-art exploring liminality through corner-bound panels ──
+// Palette: warm-sunset (deep orange, coral, gold, burgundy)
+// Mood: tense — panels drift toward alignment, the seam glows, never locks
+// Composition: corner-driven — content clusters in corners, void center
+
+const stage = document.getElementById('stage');
+const PANEL_COUNT = 32;
+const CORNERS = 4;
+const PER_CORNER = PANEL_COUNT / CORNERS;
+const ALIGN_THRESHOLD = 62;    // px — how close edges must be to glow
+const ANGLE_THRESHOLD = 0.12;  // rad — how parallel for seam detection
+const REPEL_RADIUS = 160;      // px — mouse repel range
+const REPEL_FORCE = 2.8;
+const DRIFT_SPEED = 0.0004;
+const SPRING_STIFFNESS = 0.0008;
+
+// Warm-sunset palette presets
+const warmSunset = [
+  ['#d4441e', '#b82e0e'], // deep orange
+  ['#e8653a', '#c1300a'], // bright coral
+  ['#f4a340', '#d47220'], // gold
+  ['#6b1a0a', '#8b2010'], // burgundy
+  ['#e8904a', '#c06020'], // amber-gold
+  ['#d4582e', '#a82018'], // burnt orange
+  ['#f0c050', '#d89030'], // warm gold
+  ['#c04020', '#7a140c'], // deep rust
+];
+
+// Each panel has a home corner (0=TL, 1=TR, 2=BL, 3=BR)
+function cornerHome(i) {
+  const per = PER_CORNER;
+  const pool = Math.floor(i / per);
+  const cx = (pool === 0 || pool === 2) ? 0.15 : 0.85;
+  const cy = (pool === 0 || pool === 1) ? 0.15 : 0.85;
+  const ox = (i % per) / (per - 1);
+  const oy = ((i * 7 + 3) % per) / (per - 1);
+  return {
+    cx, cy,
+    ox: (ox - 0.5) * 0.22,
+    oy: (oy - 0.5) * 0.22,
+    pool,
+  };
+}
+
+// Panel state
+const panels = [];
+const seamGlows = [];
+const poemLines = [];
+const pulseRings = [];
+
+// Simplex-like noise via layered sine (no external deps)
+function noise2D(x, y) {
+  let v = 0;
+  const layers = [
+    [1.0, 1.0, 0.0],
+    [2.1, 0.7, 1.3],
+    [3.7, 0.4, 2.7],
+    [7.3, 0.2, 4.1],
+  ];
+  for (const [freq, amp, phase] of layers) {
+    v += Math.sin(x * freq + phase) * Math.cos(y * freq * 0.8 + phase * 0.7) * amp;
+    v += Math.cos(x * freq * 0.6 - phase * 0.3) * Math.sin(y * freq * 1.3 + phase) * amp * 0.6;
+  }
+  return v / layers.reduce((s, l) => s + l[1] * 1.6, 0);
+}
+
+// Create DOM elements
+function createPanels() {
+  for (let i = 0; i < PANEL_COUNT; i++) {
+    const home = cornerHome(i);
+    const el = document.createElement('div');
+    el.className = 'panel';
+    const palette = warmSunset[i % warmSunset.length];
+    el.style.setProperty('--pc1', palette[0]);
+    el.style.setProperty('--pc2', palette[1]);
+    const w = 6 + Math.random() * 20;
+    const h = 55 + Math.random() * 90;
+    el.style.width = w + 'px';
+    el.style.height = h + 'px';
+    el.style.transformOrigin = 'center center';
+    stage.appendChild(el);
+
+    // Initial position within corner bounds
+    const wx = window.innerWidth;
+    const wy = window.innerHeight;
+    const bx = home.cx * wx + home.ox * wx;
+    const by = home.cy * wy + home.oy * wy;
+    const angle = (poolToAngle(home.pool) + (Math.random() - 0.5) * 0.4);
+
+    panels.push({
+      el,
+      home,
+      x: bx,
+      y: by,
+      angle,
+      w, h,
+      baseAngle: poolToAngle(home.pool),
+      targetX: bx,
+      targetY: by,
+      noiseSeed: Math.random() * 1000,
+      paletteIdx: i % warmSunset.length,
+      pool: home.pool,
+    });
+  }
+}
+
+function poolToAngle(pool) {
+  // Each corner pool has a preferred orientation
+  // TL: ~45°, TR: ~135°, BL: ~-45°, BR: ~-135°
+  return [Math.PI / 4, Math.PI * 3 / 4, -Math.PI / 4, -Math.PI * 3 / 4][pool];
+}
+
+// Create center pulse rings
+function createPulseRings() {
+  for (let i = 0; i < 3; i++) {
+    const ring = document.createElement('div');
+    ring.className = 'pulse-ring';
+    ring.style.left = '50%';
+    ring.style.top = '50%';
+    ring.style.transform = 'translate(-50%, -50%)';
+    ring.style.width = (100 + i * 80) + 'px';
+    ring.style.height = (100 + i * 80) + 'px';
+    ring.style.opacity = '0';
+    stage.appendChild(ring);
+    pulseRings.push({ el: ring, phase: i * 2.1 });
+  }
+}
+
+// Create seam glow elements (max possible seams)
+function createSeamGlows() {
+  for (let i = 0; i < 24; i++) {
+    const el = document.createElement('div');
+    el.className = 'seam-glow';
+    el.style.opacity = '0';
+    stage.appendChild(el);
+    seamGlows.push({ el, active: false });
+  }
+}
+
+// Create poem line elements
+const poemFragments = [
+  'the seam between',
+  'almost touching',
+  'not yet',
+  'hovering at',
+  'the gap remembers',
+  'what almost was',
+  'held apart',
+  'threshold breath',
+  'nearly aligned',
+  'the space between corners',
+  'converging',
+  'never quite',
+  'this close',
+  'the pull of',
+  'edge to edge',
+];
+
+function createPoemLines() {
+  for (let i = 0; i < 6; i++) {
+    const el = document.createElement('div');
+    el.className = 'poem-line';
+    el.style.opacity = '0';
+    el.textContent = poemFragments[i % poemFragments.length];
+    stage.appendChild(el);
+    poemLines.push({
+      el,
+      textIdx: i % poemFragments.length,
+      x: 0, y: 0,
+      phase: i * 1.7,
+      opacity: 0,
+      targetOpacity: 0,
+    });
+  }
+}
+
+// Center text
+function createCenterText() {
+  const el = document.createElement('div');
+  el.className = 'center-void-text';
+  el.textContent = 'SEAM';
+  stage.appendChild(el);
+  return el;
+}
+
+// ── Main update ──
+const mouse = { x: -999, y: -999, active: false };
+let time = 0;
+const wx = () => window.innerWidth;
+const wy = () => window.innerHeight;
+
+function update(timestamp) {
+  time = timestamp * 0.001;
+  const W = wx(), H = wy();
+
+  // Update panel positions
+  for (const p of panels) {
+    const noiseX = noise2D(time * DRIFT_SPEED * 30 + p.noiseSeed, p.noiseSeed * 0.7) * 120;
+    const noiseY = noise2D(time * DRIFT_SPEED * 25 + p.noiseSeed * 0.6, p.noiseSeed * 1.1) * 100;
+    const noiseA = noise2D(p.noiseSeed * 0.3, time * DRIFT_SPEED * 18) * 0.25;
+
+    p.targetX = p.home.cx * W + p.home.ox * W + noiseX;
+    p.targetY = p.home.cy * H + p.home.oy * H + noiseY;
+    p.angle = p.baseAngle + noiseA;
+
+    // Mouse repel
+    if (mouse.active) {
+      const dx = p.x - mouse.x;
+      const dy = p.y - mouse.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < REPEL_RADIUS && dist > 1) {
+        const force = (1 - dist / REPEL_RADIUS) * REPEL_FORCE;
+        p.targetX += (dx / dist) * force * 30;
+        p.targetY += (dy / dist) * force * 30;
+        p.angle += (dx / dist) * force * 0.08;
+      }
+    }
+
+    // Spring toward target
+    p.x += (p.targetX - p.x) * 0.04;
+    p.y += (p.targetY - p.y) * 0.04;
+
+    // Clamp to screen
+    p.x = Math.max(p.w / 2, Math.min(W - p.w / 2, p.x));
+    p.y = Math.max(p.h / 2, Math.min(H - p.h / 2, p.y));
+
+    // Render
+    p.el.style.left = p.x + 'px';
+    p.el.style.top = p.y + 'px';
+    p.el.style.transform = `translate(-50%, -50%) rotate(${p.angle}rad)`;
+  }
+
+  // Detect seams between panels from DIFFERENT corners
+  let glowIdx = 0;
+  const activeSeams = [];
+
+  // Reset seam states
+  for (const sg of seamGlows) sg.active = false;
+
+  for (let i = 0; i < panels.length; i++) {
+    for (let j = i + 1; j < panels.length; j++) {
+      const a = panels[i], b = panels[j];
+      if (a.pool === b.pool) continue; // only cross-corner seams
+
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const angleDiff = Math.abs(((a.angle - b.angle) % Math.PI + Math.PI) % Math.PI);
+
+      // Check if angles are nearly parallel or anti-parallel
+      const isParallel = angleDiff < ANGLE_THRESHOLD || Math.abs(angleDiff - Math.PI) < ANGLE_THRESHOLD;
+
+      if (dist < ALIGN_THRESHOLD + Math.max(a.h, b.h) * 0.5 && isParallel && dist > 15) {
+        activeSeams.push({ a, b, dist, angleDiff, poolPair: `${a.pool}-${b.pool}` });
+      }
+    }
+  }
+
+  // Sort seams by proximity (closest = brightest)
+  activeSeams.sort((s1, s2) => s1.dist - s2.dist);
+
+  // Render seam glows
+  for (const seam of activeSeams.slice(0, seamGlows.length)) {
+    const sg = seamGlows[glowIdx];
+    sg.active = true;
+    const mx = (seam.a.x + seam.b.x) / 2;
+    const my = (seam.a.y + seam.b.y) / 2;
+    const intensity = Math.max(0, 1 - seam.dist / ALIGN_THRESHOLD);
+    const glowDist = seam.dist;
+    const glowAngle = Math.atan2(seam.a.y - seam.b.y, seam.a.x - seam.b.x);
+
+    sg.el.style.left = mx + 'px';
+    sg.el.style.top = my + 'px';
+    sg.el.style.width = glowDist * 2.5 + 'px';
+    sg.el.style.height = (2 + intensity * 5) + 'px';
+    sg.el.style.transform = `translate(-50%, -50%) rotate(${glowAngle}rad)`;
+    sg.el.style.opacity = intensity * 0.85;
+    sg.el.style.background = `linear-gradient(90deg,
+      transparent 0%,
+      rgba(255,160,60,${intensity * 0.8}) 15%,
+      rgba(255,200,80,${intensity}) 50%,
+      rgba(255,120,40,${intensity * 0.7}) 85%,
+      transparent 100%)`;
+    sg.el.style.boxShadow = `0 0 ${6 + intensity * 20}px rgba(255,150,40,${intensity * 0.9})`;
+    glowIdx++;
+  }
+
+  // Fade inactive seam glows
+  for (; glowIdx < seamGlows.length; glowIdx++) {
+    const sg = seamGlows[glowIdx];
+    sg.el.style.opacity = Math.max(0, parseFloat(sg.el.style.opacity) - 0.03);
+  }
+
+  // Update poem lines — place near active seams or fade
+  for (let i = 0; i < poemLines.length; i++) {
+    const pl = poemLines[i];
+    if (activeSeams.length > 0 && i < activeSeams.length) {
+      const seam = activeSeams[i];
+      pl.x = (seam.a.x + seam.b.x) / 2;
+      pl.y = (seam.a.y + seam.b.y) / 2 - 28;
+      pl.targetOpacity = Math.min(0.6, (1 - seam.dist / ALIGN_THRESHOLD) * 0.8);
+    } else {
+      pl.targetOpacity = Math.max(0, pl.targetOpacity - 0.008);
+    }
+    pl.opacity += (pl.targetOpacity - pl.opacity) * 0.06;
+    pl.el.style.left = pl.x + 'px';
+    pl.el.style.top = pl.y + 'px';
+    pl.el.style.opacity = pl.opacity;
+    pl.el.style.transform = 'translate(-50%, -50%)';
+  }
+
+  // Rotate poem fragments when seams change
+  if (activeSeams.length > 0 && Math.floor(time * 4) % 7 === 0) {
+    for (const pl of poemLines) {
+      pl.textIdx = (pl.textIdx + 1) % poemFragments.length;
+      pl.el.textContent = poemFragments[pl.textIdx];
+    }
+  }
+
+  // Pulse rings — intensify with seam count
+  const seamCount = activeSeams.length;
+  const globalIntensity = Math.min(1, seamCount / 6);
+  for (const ring of pulseRings) {
+    const pulse = Math.sin(time * 1.3 + ring.phase) * 0.5 + 0.5;
+    const scale = 1 + pulse * 0.3 + globalIntensity * 0.5;
+    ring.el.style.transform = `translate(-50%, -50%) scale(${scale})`;
+    ring.el.style.opacity = (0.12 + globalIntensity * 0.35 + pulse * 0.1).toFixed(2);
+    ring.el.style.borderColor = `rgba(240,140,50,${0.15 + globalIntensity * 0.3})`;
+  }
+
+  // Center text pulse
+  centerEl.style.opacity = (0.18 + globalIntensity * 0.4).toFixed(2);
+
+  // Panel near-class toggle
+  for (let i = 0; i < panels.length; i++) {
+    const p = panels[i];
+    const isNearSeam = activeSeams.some(s => s.a === p || s.b === p);
+    if (isNearSeam && !p.el.classList.contains('near')) {
+      p.el.classList.add('near');
+    } else if (!isNearSeam && p.el.classList.contains('near')) {
+      p.el.classList.remove('near');
+    }
+  }
+
+  requestAnimationFrame(update);
+}
+
+// ── Event handlers ──
+document.addEventListener('mousemove', (e) => {
+  mouse.x = e.clientX;
+  mouse.y = e.clientY;
+  mouse.active = true;
+});
+
+document.addEventListener('mouseleave', () => {
+  mouse.active = false;
+});
+
+document.addEventListener('touchmove', (e) => {
+  mouse.x = e.touches[0].clientX;
+  mouse.y = e.touches[0].clientY;
+  mouse.active = true;
+}, { passive: true });
+
+document.addEventListener('touchend', () => {
+  mouse.active = false;
+});
+
+window.addEventListener('resize', () => {
+  // Panels will drift to new positions naturally via springs
+});
+
+// ── Initialize ──
+createPanels();
+createSeamGlows();
+createPoemLines();
+createPulseRings();
+const centerEl = createCenterText();
+requestAnimationFrame(update);
+
+// ── Keyboard: press 'f' to briefly freeze, 'r' to randomize noise seeds ──
+let frozen = false;
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'f') {
+    frozen = !frozen;
+    if (frozen) {
+      for (const p of panels) {
+        p.noiseSeed += 10000; // shift noise to different region
+      }
+    }
+  }
+  if (e.key === 'r') {
+    for (const p of panels) {
+      p.noiseSeed = Math.random() * 2000;
+    }
+  }
+});
+</script>
+</body>
+</html>
