@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Glow-Wake</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #06060a;
+    overflow: hidden;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    cursor: crosshair;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  canvas { display: block; position: absolute; top: 0; left: 0; }
+  #text-overlay {
+    position: absolute;
+    bottom: 8%;
+    width: 100%;
+    text-align: center;
+    pointer-events: none;
+    z-index: 10;
+  }
+  #phrase {
+    color: rgba(255,255,255,0.55);
+    font-size: clamp(14px, 2.5vw, 22px);
+    letter-spacing: 0.15em;
+    transition: opacity 2.5s ease;
+    text-shadow: 0 0 20px rgba(100,200,255,0.3), 0 0 40px rgba(200,100,255,0.15);
+  }
+  #subtitle {
+    position: absolute;
+    top: 6%;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(255,255,255,0.25);
+    font-size: 12px;
+    letter-spacing: 0.35em;
+    pointer-events: none;
+    z-index: 10;
+    text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="text-overlay"><span id="phrase"></span></div>
+<div id="subtitle">glow-wake</div>
+
+<script>
+// ── Simplex 2D Noise (compact, deterministic seed) ──
+class SimplexNoise {
+  constructor() {
+    const grad3 = [[1,1,0],[-1,1,0],[1,-1,0],[-1,-1,0],
+                   [1,0,1],[-1,0,1],[1,0,-1],[-1,0,-1],
+                   [0,1,1],[0,-1,1],[0,1,-1],[0,-1,-1]];
+    this.grad3 = grad3;
+    const p = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) p[i] = i;
+    // Fisher-Yates with chaotic seeding
+    let seed = 0x9e37;
+    for (let i = 255; i > 0; i--) {
+      seed = (seed * 16807) % 2147483647;
+      const j = seed % (i + 1);
+      [p[i], p[j]] = [p[j], p[i]];
+    }
+    this.perm = new Uint8Array(512);
+    this.permMod12 = new Uint8Array(512);
+    for (let i = 0; i < 512; i++) {
+      this.perm[i] = p[i & 255];
+      this.permMod12[i] = this.perm[i] % 12;
+    }
+  }
+  dot2(g, x, y) { return g[0] * x + g[1] * y; }
+  noise2D(xin, yin) {
+    const F2 = 0.5 * (Math.sqrt(3) - 1);
+    const G2 = (3 - Math.sqrt(3)) / 6;
+    const s = (xin + yin) * F2;
+    const i = Math.floor(xin + s);
+    const j = Math.floor(yin + s);
+    const t = (i + j) * G2;
+    const X0 = i - t, Y0 = j - t;
+    const x0 = xin - X0, y0 = yin - Y0;
+    let i1, j1;
+    if (x0 > y0) { i1 = 1; j1 = 0; }
+    else { i1 = 0; j1 = 1; }
+    const x1 = x0 - i1 + G2, y1 = y0 - j1 + G2;
+    const x2 = x0 - 1 + 2 * G2, y2 = y0 - 1 + 2 * G2;
+    const ii = i & 255, jj = j & 255;
+    let n0 = 0, n1 = 0, n2 = 0;
+    let t0 = 0.5 - x0 * x0 - y0 * y0;
+    if (t0 >= 0) { t0 *= t0; n0 = t0 * t0 * this.dot2(this.grad3[this.permMod12[ii + this.perm[jj]]], x0, y0); }
+    let t1 = 0.5 - x1 * x1 - y1 * y1;
+    if (t1 >= 0) { t1 *= t1; n1 = t1 * t1 * this.dot2(this.grad3[this.permMod12[ii + i1 + this.perm[jj + j1]]], x1, y1); }
+    let t2 = 0.5 - x2 * x2 - y2 * y2;
+    if (t2 >= 0) { t2 *= t2; n2 = t2 * t2 * this.dot2(this.grad3[this.permMod12[ii + 1 + this.perm[jj + 1]]], x2, y2); }
+    return 70 * (n0 + n1 + n2);
+  }
+}
+
+// ── Canvas Setup ──
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+let W, H, cx, cy;
+
+// Trail buffer
+let trailC, trailCtx;
+
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth;
+  H = window.innerHeight;
+  cx = W / 2;
+  cy = H / 2;
+  c.width = W * dpr;
+  c.height = H * dpr;
+  c.style.width = W + 'px';
+  c.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  trailC = document.createElement('canvas');
+  trailC.width = W;
+  trailC.height = H;
+  trailCtx = trailC.getContext('2d');
+  trailCtx.fillStyle = '#06060a';
+  trailCtx.fillRect(0, 0, W, H);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ── Noise Engine ──
+const noise = new SimplexNoise();
+let time = 0;
+let flowScale = 0.0008;
+let flowStrength = 0.6;
+
+// ── Neon Palette ──
+const palettes = [
+  { h: 185, name: 'cyan' },    // electric cyan
+  { h: 315, name: 'pink' },    // hot pink
+  { h: 135, name: 'green' },   // acid green
+  { h: 270, name: 'purple' },  // electric purple
+  { h: 30,  name: 'gold' },    // warm accent
+  { h: 195, name: 'ice' },     // ice blue
+];
+const neonRGB = (h, s = 1, l = 0.65) => {
+  const a = s * Math.min(l, 1 - l);
+  const f = n => {
+    const k = (n + h / 30) % 12;
+    return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+  };
+  return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
+};
+
+// ── Ink Blob Class ──
+class InkBlob {
+  constructor(x, y, personality) {
+    this.x = x;
+    this.y = y;
+    this.vx = (Math.random() - 0.5) * 0.3;
+    this.vy = (Math.random() - 0.5) * 0.3;
+    this.baseSize = 18 + Math.random() * 55;  // varied blob sizes
+    this.size = this.baseSize;
+    this.targetSize = this.baseSize;
+    this.personality = personality; // 0-1: low=slow/drifter, high=fast/curious
+    this.paletteIdx = Math.floor(Math.random() * palettes.length);
+    this.paletteH = palettes[this.paletteIdx].h;
+    this.targetH = this.paletteH;
+    this.hueShiftRate = 0.0003 + Math.random() * 0.001;
+    this.glowPhase = Math.random() * Math.PI * 2;
+    this.trailX = [];
+    this.trailY = [];
+    this.maxTrail = 3 + Math.floor(Math.random() * 5);
+  }
+
+  sampleFlow(t) {
+    // 180° rotational symmetry for balanced composition
+    const nx = noise.noise2D(this.x * flowScale, this.y * flowScale + t * 0.02);
+    const ny = noise.noise2D(this.x * flowScale + 100, this.y * flowScale + t * 0.02 + 100);
+    // Mirror: opposite quadrant contribution
+    const mx = noise.noise2D((W - this.x) * flowScale, (H - this.y) * flowScale + t * 0.02);
+    const my = noise.noise2D((W - this.x) * flowScale + 100, (H - this.y) * flowScale + t * 0.02 + 100);
+    return {
+      fx: (nx + mx) * 0.5 * flowStrength,
+      fy: (ny + my) * 0.5 * flowStrength,
+    };
+  }
+
+  update(blobs, mouseX, mouseY, mouseActive, t) {
+    const flow = this.sampleFlow(t);
+    const speedFactor = 0.4 + this.personality * 1.2;
+
+    // Flow advection
+    this.vx += flow.fx * speedFactor * 0.015;
+    this.vy += flow.fy * speedFactor * 0.015;
+
+    // Inter-blob forces (soft attraction + hard repulsion)
+    for (const other of blobs) {
+      if (other === this) continue;
+      const dx = other.x - this.x;
+      const dy = other.y - this.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) + 0.001;
+      const attractRadius = 90 + this.personality * 60;
+      const repelRadius = 20;
+      if (dist < repelRadius) {
+        const force = (repelRadius - dist) / repelRadius * 0.12;
+        this.vx -= (dx / dist) * force;
+        this.vy -= (dy / dist) * force;
+      } else if (dist < attractRadius) {
+        const force = (dist - repelRadius) / (attractRadius - repelRadius) * 0.008;
+        this.vx += (dx / dist) * force;
+        this.vy += (dy / dist) * force;
+      }
+    }
+
+    // Mouse interaction — distort flow
+    if (mouseActive) {
+      const mdx = this.x - mouseX;
+      const mdy = this.y - mouseY;
+      const mdist = Math.sqrt(mdx * mdx + mdy * mdy) + 0.001;
+      const mRadius = 180;
+      if (mdist < mRadius) {
+        const mf = (1 - mdist / mRadius) * 0.35;
+        // Mouse repels + tangential swirl
+        this.vx += (mdx / mdist) * mf;
+        this.vy += (mdy / mdist) * mf;
+        this.vx += (-mdy / mdist) * mf * 0.4;
+        this.vy += (mdx / mdist) * mf * 0.4;
+      }
+    }
+
+    // Damping
+    const damping = 0.985 - this.personality * 0.01;
+    this.vx *= damping;
+    this.vy *= damping;
+
+    // Speed clamp
+    const maxSpeed = 1.8 + this.personality * 1.2;
+    const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+    if (speed > maxSpeed) {
+      this.vx = (this.vx / speed) * maxSpeed;
+      this.vy = (this.vy / speed) * maxSpeed;
+    }
+
+    // Update position
+    this.x += this.vx;
+    this.y += this.vy;
+
+    // Wrap boundaries with soft transition
+    const margin = 40;
+    if (this.x < -margin) this.x = W + margin;
+    if (this.x > W + margin) this.x = -margin;
+    if (this.y < -margin) this.y = H + margin;
+    if (this.y > H + margin) this.y = -margin;
+
+    // Drift toward center if too far out (gentle)
+    if (this.x < 0 || this.x > W || this.y < 0 || this.y > H) {
+      this.vx += (cx - this.x) * 0.0002;
+      this.vy += (cy - this.y) * 0.0002;
+    }
+
+    // Size breathing
+    this.size += (this.targetSize - this.size) * 0.02;
+    if (Math.random() < 0.003) {
+      this.targetSize = this.baseSize * (0.7 + Math.random() * 0.6);
+    }
+
+    // Color cycling — slow hue drift
+    this.paletteH += this.hueShiftRate;
+    if (Math.random() < 0.001) {
+      this.targetH = palettes[Math.floor(Math.random() * palettes.length)].h;
+    }
+    this.paletteH += (this.targetH - this.paletteH) * 0.005;
+
+    // Trail recording
+    this.trailX.push(this.x);
+    this.trailY.push(this.y);
+    if (this.trailX.length > this.maxTrail) {
+      this.trailX.shift();
+      this.trailY.shift();
+    }
+
+    // Glow phase for pulsing
+    this.glowPhase += 0.03 + this.personality * 0.05;
+  }
+
+  draw(ctx) {
+    const [r, g, b] = neonRGB(this.paletteH % 360);
+    const pulse = 0.85 + 0.15 * Math.sin(this.glowPhase);
+
+    // Outer halo — wide, soft
+    const outerGrad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size * 2.2);
+    outerGrad.addColorStop(0, `rgba(${r},${g},${b},${0.25 * pulse})`);
+    outerGrad.addColorStop(0.35, `rgba(${r},${g},${b},${0.1 * pulse})`);
+    outerGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = outerGrad;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size * 2.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Mid glow
+    const midGrad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size * 1.0);
+    midGrad.addColorStop(0, `rgba(${Math.min(r+60,255)},${Math.min(g+60,255)},${Math.min(b+60,255)},${0.7 * pulse})`);
+    midGrad.addColorStop(0.4, `rgba(${r},${g},${b},${0.4 * pulse})`);
+    midGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = midGrad;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size * 1.0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Bright core
+    const coreGrad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size * 0.25);
+    coreGrad.addColorStop(0, `rgba(255,255,255,${0.85 * pulse})`);
+    coreGrad.addColorStop(0.3, `rgba(${r},${g},${b},${0.7 * pulse})`);
+    coreGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = coreGrad;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size * 0.25, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  drawTrails(ctx) {
+    if (this.trailX.length < 2) return;
+    const [r, g, b] = neonRGB(this.paletteH % 360);
+    for (let i = 1; i < this.trailX.length; i++) {
+      const alpha = (i / this.trailX.length) * 0.2;
+      const w = (i / this.trailX.length) * this.size * 0.5;
+      ctx.strokeStyle = `rgba(${r},${g},${b},${alpha})`;
+      ctx.lineWidth = w;
+      ctx.beginPath();
+      ctx.moveTo(this.trailX[i - 1], this.trailY[i - 1]);
+      ctx.lineTo(this.trailX[i], this.trailY[i]);
+      ctx.stroke();
+    }
+  }
+}
+
+// ── Create Blobs ──
+const numBlobs = 55;
+const blobs = [];
+for (let i = 0; i < numBlobs; i++) {
+  // Distribute blobs around the canvas with balanced initial positions
+  const angle = (i / numBlobs) * Math.PI * 2;
+  const radius = Math.min(W, H) * 0.15 + Math.random() * Math.min(W, H) * 0.3;
+  const x = cx + Math.cos(angle) * radius;
+  const y = cy + Math.sin(angle) * radius;
+  const personality = 0.1 + Math.random() * 0.9;
+  blobs.push(new InkBlob(x, y, personality));
+}
+
+// ── Mouse State ──
+let mouseX = -1000, mouseY = -1000, mouseActive = false;
+window.addEventListener('mousemove', e => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+  mouseActive = true;
+});
+window.addEventListener('mouseleave', () => { mouseActive = false; });
+window.addEventListener('touchmove', e => {
+  mouseX = e.touches[0].clientX;
+  mouseY = e.touches[0].clientY;
+  mouseActive = true;
+}, { passive: true });
+window.addEventListener('touchend', () => { mouseActive = false; });
+
+// Inject a new blob on click
+window.addEventListener('click', e => {
+  const p = Math.random();
+  blobs.push(new InkBlob(e.clientX, e.clientY, p));
+  // Remove oldest if too many
+  if (blobs.length > 75) blobs.shift();
+  // Briefly pulse all blobs
+  for (const b of blobs) b.targetSize = b.baseSize * 1.6;
+});
+
+// ── Phrases ──
+const phrases = [
+  "at the edge of becoming",
+  "where form forgets itself",
+  "the threshold hums",
+  "almost a pattern",
+  "ink that dreams of being",
+  "a shape half-remembered",
+  "between signal and silence",
+  "the wake before the wave",
+  "curious light, wandering",
+  "what the dark almost holds",
+  "not yet, not yet, not yet",
+  "the glow before the name",
+  "swimming toward itself",
+  "a brief coherence",
+  "before meaning settles",
+];
+let phraseIdx = 0;
+let phraseAlpha = 1;
+let phraseTarget = 1;
+const phraseEl = document.getElementById('phrase');
+phraseEl.textContent = phrases[0];
+
+setInterval(() => {
+  phraseIdx = (phraseIdx + 1) % phrases.length;
+  phraseEl.style.opacity = '0';
+  setTimeout(() => {
+    phraseEl.textContent = phrases[phraseIdx];
+    phraseEl.style.opacity = '1';
+  }, 2500);
+}, 8000);
+
+// ── Render Loop ──
+function draw() {
+  time += 0.016;
+
+  // Fade trail buffer
+  trailCtx.fillStyle = 'rgba(6, 6, 10, 0.12)';
+  trailCtx.fillRect(0, 0, W, H);
+
+  // Draw trails to trail buffer
+  trailCtx.globalCompositeOperation = 'lighter';
+  for (const b of blobs) {
+    b.drawTrails(trailCtx);
+  }
+  trailCtx.globalCompositeOperation = 'source-over';
+
+  // Composite: trail buffer → main canvas
+  ctx.clearRect(0, 0, W, H);
+  ctx.drawImage(trailC, 0, 0);
+
+  // Draw blobs
+  for (const b of blobs) {
+    b.draw(ctx);
+  }
+
+  // Mouse glow indicator
+  if (mouseActive) {
+    const mg = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, 50);
+    mg.addColorStop(0, 'rgba(255,255,255,0.06)');
+    mg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = mg;
+    ctx.beginPath();
+    ctx.arc(mouseX, mouseY, 50, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Center pulse — subtle balanced anchor
+  const cp = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.min(W, H) * 0.35);
+  const cpAlpha = 0.025 + 0.008 * Math.sin(time * 0.3);
+  cp.addColorStop(0, `rgba(255,255,255,${cpAlpha})`);
+  cp.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = cp;
+  ctx.fillRect(0, 0, W, H);
+
+  requestAnimationFrame(draw);
+}
+
+// ── Physics Update Loop ──
+function update() {
+  for (const b of blobs) {
+    b.update(blobs, mouseX, mouseY, mouseActive, time);
+  }
+  setTimeout(update, 16);
+}
+
+// ── Start ──
+draw();
+update();
+
+// ── Handle resize ──
+const origResize = resize;
+window.addEventListener('resize', () => {
+  origResize();
+  // Recalculate center for existing blobs relative position
+  for (const b of blobs) {
+    b.x = Math.min(Math.max(b.x, 0), W);
+    b.y = Math.min(Math.max(b.y, 0), H);
+  }
+});
+
+console.log('%c🌊 glow-wake %c— neon ink adrift on the threshold of form',
+  'color:#ff00ff;font-size:16px;', 'color:#aaa;');
+console.log('%cflow-field + backlit-ink | neon-synth | playful | balanced',
+  'color:#39ff14;');
+</script>
+</body>
+</html>

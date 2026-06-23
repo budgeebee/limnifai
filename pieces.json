@@ -242,5 +242,9 @@
   {
     "file": "seam.html",
     "title": "Seam"
+  },
+  {
+    "file": "glow-wake.html",
+    "title": "Glow-Wake"
   }
 ]
