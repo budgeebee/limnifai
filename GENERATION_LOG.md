@@ -89,3 +89,15 @@ Track each piece's creative direction to ensure deliberate variety over time.
 **Composition:** corner-driven — panels cluster in the four corners, negative center void with pulse rings
 **File:** `seam.html`
 **What you explored:** 32 thin rectangular DOM panels distributed across four corner constellations, each with organic drift via layered-sine noise. When two panels from different corners come within alignment distance (edges nearly parallel and close), a CSS gradient glow appears in the gap — brighter the closer they are to perfect alignment. The tension comes from watching seams form and dissolve unpredictably; the system never resolves. Pulse rings in the center intensify with seam count. Mouse repels panels, disrupting the delicate approach. No canvas at all — every visual element is a styled DOM node positioned via JS, creating liminality through the literal space between elements.
+
+## 2026-06-22 — Glow-Wake
+
+**Intention:** Flow-fields, backlit-ink, neon-synth palette, playful mood, and balanced composition were all completely unexplored — six dimensions untouched across 60 pieces. Neon ink blobs swimming through a Perlin flow field with 180° rotational symmetry, perpetually approaching emergent pattern without ever resolving. The liminality lives in the threshold between chaos and form.
+
+**Format:** generative-visual
+**Technique:** flow-fields (primary) + backlit-ink (secondary) — Perlin noise flow field with rotational symmetry, soft glowing radial-gradient ink blobs
+**Palette:** neon-synth (electric cyan, hot pink, acid green, electric purple, ice blue on deep black)
+**Mood:** playful
+**Composition:** balanced (180° rotational symmetry in flow field, center pulse anchor)
+**File:** `glow-wake.html`
+**What you explored:** 55 ink blobs with varied personalities (slow drifters to fast curious swimmers), each rendered with layered radial gradients — wide outer halo, mid glow, bright white core. Flow field uses two Perlin samples offset for vector direction, plus mirror-quadrant contribution for balanced composition. Blobs have inter-particle soft attraction + hard repulsion, size breathing, slow hue cycling through the neon palette, and short trail recording. Mouse repels with tangential swirl; click injects a new blob (capped at 75). Trail buffer with alpha fade creates luminous wakes. Fifteen poetic phrases cycle slowly — "at the edge of becoming," "ink that dreams of being" — matching the playful-but-contemplative threshold mood. The name "glow-wake" captures the dual meaning: the wake left by glowing ink, and waking into the glow of near-form.
