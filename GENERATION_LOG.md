@@ -101,3 +101,15 @@ Track each piece's creative direction to ensure deliberate variety over time.
 **Composition:** balanced (180° rotational symmetry in flow field, center pulse anchor)
 **File:** `glow-wake.html`
 **What you explored:** 55 ink blobs with varied personalities (slow drifters to fast curious swimmers), each rendered with layered radial gradients — wide outer halo, mid glow, bright white core. Flow field uses two Perlin samples offset for vector direction, plus mirror-quadrant contribution for balanced composition. Blobs have inter-particle soft attraction + hard repulsion, size breathing, slow hue cycling through the neon palette, and short trail recording. Mouse repels with tangential swirl; click injects a new blob (capped at 75). Trail buffer with alpha fade creates luminous wakes. Fifteen poetic phrases cycle slowly — "at the edge of becoming," "ink that dreams of being" — matching the playful-but-contemplative threshold mood. The name "glow-wake" captures the dual meaning: the wake left by glowing ink, and waking into the glow of near-form.
+
+## 2026-06-23 — Kindle
+
+**Intention:** Reaction-diffusion has never been explored, high-contrast-bw palette is untouched, and joyful mood is completely absent from the collection. Gray-Scott Turing patterns are literally about the threshold between uniformity and pattern — the liminal space where form kindles from formlessness. The viewer's mouse position navigates the phase space between dissolution, spots, stripes, and waves.
+
+**Format:** generative-visual
+**Technique:** reaction-diffusion (Gray-Scott model, 5-point Laplacian stencil, forward Euler integration)
+**Palette:** high-contrast-bw with warm golden accent at threshold brightness
+**Mood:** joyful
+**Composition:** center-focused (seed blooms outward, mouse explores parameter phase space)
+**File:** `kindle.html`
+**What you explored:** 160×120 Gray-Scott grid rendered at 4× scale with 3 steps per frame. Mouse X controls feed rate (F: 0.02–0.08), mouse Y controls kill rate (K: 0.045–0.07) — letting the viewer sweep through the full phase diagram: dissolution, spots, stripes, waves, and mitotic chaos. Auto-seeding revives fading patterns with fresh perturbations. High-contrast rendering shifts from near-black depths through warm grays to a golden-white accent at the brightest Turing structures. Fifteen poetic phrases cycle with slow fades. "Kindle" — to catch fire, to begin — captures the precise threshold moment when pattern ignites from the uniform gray, joyful and inevitable.
