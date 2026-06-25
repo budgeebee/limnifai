@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Interstices — Census of Between-Spaces</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background:#2b2d2a;
+  color:#c5bfb3;
+  font-family:'Georgia','Times New Roman',serif;
+  overflow:hidden;
+  height:100vh;
+  width:100vw;
+  display:flex;
+}
+#panel {
+  width:280px;
+  min-width:280px;
+  height:100vh;
+  background:rgba(37,40,35,0.95);
+  border-right:1px solid rgba(169,158,140,0.2);
+  padding:32px 24px;
+  display:flex;
+  flex-direction:column;
+  gap:24px;
+  z-index:10;
+  backdrop-filter:blur(4px);
+}
+#panel h1 {
+  font-size:14px;
+  font-weight:400;
+  letter-spacing:4px;
+  text-transform:uppercase;
+  color:#8b8575;
+  border-bottom:1px solid rgba(169,158,140,0.3);
+  padding-bottom:12px;
+}
+#panel h2 {
+  font-size:22px;
+  font-weight:400;
+  color:#b8aa94;
+  line-height:1.3;
+  margin-top:-8px;
+}
+.stat-row {
+  display:flex;
+  justify-content:space-between;
+  font-size:11px;
+  letter-spacing:1px;
+  color:#7a7568;
+  border-bottom:1px dotted rgba(169,158,140,0.15);
+  padding:6px 0;
+}
+.stat-row .val {
+  color:#a89a84;
+  font-variant-numeric:tabular-nums;
+}
+.legend {
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+.legend-item {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  font-size:10px;
+  letter-spacing:0.5px;
+  color:#7a7568;
+}
+.legend-swatch {
+  width:10px;
+  height:10px;
+  border-radius:2px;
+}
+#detail {
+  flex:1;
+  display:flex;
+  flex-direction:column;
+  justify-content:flex-end;
+}
+#detail-question {
+  font-size:11px;
+  letter-spacing:1.5px;
+  text-transform:uppercase;
+  color:#6b675c;
+  margin-bottom:8px;
+}
+#detail-text {
+  font-size:13px;
+  line-height:1.7;
+  color:#b8aa94;
+  font-style:italic;
+  opacity:0.6;
+  transition:opacity 0.5s;
+}
+#detail-category {
+  font-size:10px;
+  letter-spacing:1px;
+  color:#7a7568;
+  margin-top:8px;
+}
+#detail-clarity {
+  font-size:10px;
+  color:#6b675c;
+  margin-top:4px;
+}
+#canvas-wrap {
+  flex:1;
+  position:relative;
+  cursor:crosshair;
+}
+canvas {
+  display:block;
+  width:100%;
+  height:100%;
+}
+#tooltip {
+  position:absolute;
+  pointer-events:none;
+  background:rgba(37,40,35,0.92);
+  border:1px solid rgba(169,158,140,0.3);
+  padding:12px 16px;
+  max-width:240px;
+  font-size:12px;
+  line-height:1.6;
+  color:#c5bfb3;
+  opacity:0;
+  transition:opacity 0.2s;
+  border-radius:2px;
+}
+#overlay-text {
+  position:absolute;
+  bottom:32px;
+  right:32px;
+  font-size:10px;
+  letter-spacing:2px;
+  color:rgba(169,158,140,0.25);
+  text-align:right;
+  pointer-events:none;
+}
+</style>
+</head>
+<body>
+
+<div id="panel">
+  <h1>Census No. 47</h1>
+  <h2>Between-<br>Spaces</h2>
+  <div>
+    <div class="stat-row"><span>Responses</span><span class="val" id="stat-total">—</span></div>
+    <div class="stat-row"><span>Categories</span><span class="val">4</span></div>
+    <div class="stat-row"><span>Mean Clarity</span><span class="val" id="stat-clarity">—</span></div>
+    <div class="stat-row"><span>Active Thresholds</span><span class="val" id="stat-active">—</span></div>
+  </div>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-swatch" style="background:#7a8b6c"></span>Proximity</div>
+    <div class="legend-item"><span class="legend-swatch" style="background:#a8796b"></span>Temporal</div>
+    <div class="legend-item"><span class="legend-swatch" style="background:#6b7a8a"></span>Spatial</div>
+    <div class="legend-item"><span class="legend-swatch" style="background:#8a7b5c"></span>Existential</div>
+  </div>
+  <div id="detail">
+    <div id="detail-question">— hover a territory —</div>
+    <div id="detail-text"></div>
+    <div id="detail-category"></div>
+    <div id="detail-clarity"></div>
+  </div>
+</div>
+
+<div id="canvas-wrap">
+  <canvas id="c"></canvas>
+  <div id="tooltip"></div>
+  <div id="overlay-text">the data exists<br>only at the borders</div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const wrap = document.getElementById('canvas-wrap');
+const tooltip = document.getElementById('tooltip');
+
+const detailText = document.getElementById('detail-text');
+const detailCategory = document.getElementById('detail-category');
+const detailClarity = document.getElementById('detail-clarity');
+const statTotal = document.getElementById('stat-total');
+const statClarity = document.getElementById('stat-clarity');
+const statActive = document.getElementById('stat-active');
+
+const CATEGORIES = ['proximity','temporal','spatial','existential'];
+const CAT_LABELS = { proximity:'Proximity', temporal:'Temporal', spatial:'Spatial', existential:'Existential' };
+const PALETTE = {
+  proximity: { r:122, g:139, b:108 },
+  temporal:  { r:168, g:121, b:107 },
+  spatial:   { r:107, g:122, b:138 },
+  existential:{ r:138, g:123, b:92 }
+};
+
+const RESPONSES = [
+  "I stood in the doorway of my childhood bedroom and couldn't remember which side I belonged to.",
+  "The airport terminal at 3am — no arrivals, no departures, just fluorescent light holding its breath.",
+  "Between the last note of a song and the first silence, I felt something dissolve.",
+  "Waiting for a message that has already been read but not yet answered.",
+  "The gas station at dusk, when the pumps glow but no cars come, and the attendant stares at nothing.",
+  "I was between one version of myself and another, and for a moment I was neither.",
+  "The hallway in a hospital where everyone walks too slowly or too fast — never at a normal pace.",
+  "A parking lot after the store closes, where the lines still mean something but no one obeys them.",
+  "The pause between inhale and exhale where the body forgets it needs to breathe.",
+  "An elevator between floors — the number stopped changing, and for three seconds I was nowhere.",
+  "Standing at the edge of a conversation, not in it but not quite out of it either.",
+  "The hotel lobby at checkout time, when the room key is still warm but the door has already forgotten you.",
+  "I sat on a bench between two streetlamps, in the exact middle where neither light could reach.",
+  "The space after a question mark, before an answer forms — pure possibility, already fading.",
+  "A train platform at midnight, when the schedule board goes blank and every destination becomes imaginary.",
+  "Between sleep and waking, I heard my own name spoken in a language I used to know.",
+  "The moment a wave pulls back and the sand is neither wet nor dry, just suspended in-between.",
+  "I was crossing a bridge when I realized I couldn't remember which shore I had left.",
+  "The threshold of a door I've walked through a thousand times — today it felt like entering a stranger's life.",
+  "A waiting room where the magazines are three years old and time pools like water in a cupped hand.",
+  "Between the flash and the photograph developing, a version of me existed that no one would ever see.",
+  "The bus stop at twilight when the schedule says 'out of service' but you keep waiting anyway.",
+  "I held two contradictory thoughts at once and the space between them felt like a third truth.",
+  "The lobby of a building that is being demolished — not yet gone, no longer a place.",
+  "A phone booth with a dial tone but no one on the other end, the hum itself a kind of presence.",
+  "Between the lightning and the thunder, the whole world held its breath with me.",
+  "The corridor in a museum between two exhibits, where you're still feeling the last room before seeing the next.",
+  "I was not sad and not happy — I was in the country between them, and it had its own weather.",
+  "The staircase that leads neither up nor down because you've forgotten why you started climbing.",
+  "A mirror in an empty room, reflecting only the space where someone used to stand.",
+  "Between the question and the answer, a lifetime fit inside a heartbeat.",
+  "The sidewalk at dawn, when the streetlights haven't turned off yet but the sun is already arguing.",
+  "I reached the end of a book and sat in the silence after the last page, still living in its world.",
+  "A doorway in a dream that I keep walking toward but never through — I wake up still approaching.",
+  "The pause in a phone call when both people know what needs to be said but neither says it."
+];
+
+const N = 35;
+let sites = [];
+let mouseX = -100, mouseY = -100;
+let time = 0;
+let hoveredIdx = -1;
+let dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+// offscreen buffer for Voronoi
+let offCanvas, offCtx;
+let needsVoronoi = true;
+
+function resize() {
+  const rect = wrap.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  canvas.style.width = rect.width + 'px';
+  canvas.style.height = rect.height + 'px';
+  offCanvas = document.createElement('canvas');
+  offCanvas.width = Math.floor(rect.width * 0.5);
+  offCanvas.height = Math.floor(rect.height * 0.5);
+  offCtx = offCanvas.getContext('2d');
+  needsVoronoi = true;
+}
+
+function initSites() {
+  sites = [];
+  const W = offCanvas.width;
+  const H = offCanvas.height;
+  for (let i = 0; i < N; i++) {
+    const cat = CATEGORIES[i % 4];
+    sites.push({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      ox: Math.random() * W,
+      oy: Math.random() * H,
+      phaseX: Math.random() * Math.PI * 2,
+      phaseY: Math.random() * Math.PI * 2,
+      freqX: 0.0003 + Math.random() * 0.0007,
+      freqY: 0.0003 + Math.random() * 0.0007,
+      amp: 40 + Math.random() * 80,
+      text: RESPONSES[i % RESPONSES.length],
+      category: cat,
+      clarity: 0.2 + Math.random() * 0.8,
+      baseR: PALETTE[cat].r,
+      baseG: PALETTE[cat].g,
+      baseB: PALETTE[cat].b
+    });
+  }
+  statTotal.textContent = N;
+  let meanClarity = sites.reduce((s, site) => s + site.clarity, 0) / N;
+  statClarity.textContent = (meanClarity * 100).toFixed(0) + '%';
+  statActive.textContent = N;
+}
+
+function sinNoise(x, y, phase, freq) {
+  return Math.sin(x * freq + phase) * Math.cos(y * freq * 1.3 + phase * 0.7);
+}
+
+function updateSites() {
+  const W = offCanvas.width;
+  const H = offCanvas.height;
+  for (let i = 0; i < N; i++) {
+    const s = sites[i];
+    s.ox += sinNoise(s.ox, s.oy, s.phaseX, s.freqX) * 0.15;
+    s.oy += sinNoise(s.oy, s.ox, s.phaseY, s.freqY) * 0.15;
+    // boundary bounce
+    if (s.ox < -s.amp) s.ox = -s.amp;
+    if (s.ox > W + s.amp) s.ox = W + s.amp;
+    if (s.oy < -s.amp) s.oy = -s.amp;
+    if (s.oy > H + s.amp) s.oy = H + s.amp;
+    s.x = s.ox + sinNoise(s.ox, s.oy, s.phaseX + time * 0.0002, s.freqX) * s.amp;
+    s.y = s.oy + sinNoise(s.oy, s.ox, s.phaseY + time * 0.0002, s.freqY) * s.amp;
+    s.x = Math.max(0, Math.min(W - 1, s.x));
+    s.y = Math.max(0, Math.min(H - 1, s.y));
+  }
+  needsVoronoi = true;
+}
+
+function renderVoronoi() {
+  const W = offCanvas.width;
+  const H = offCanvas.height;
+  const img = offCtx.createImageData(W, H);
+  const data = img.data;
+  const xs = new Float64Array(N);
+  const ys = new Float64Array(N);
+  const rs = new Float64Array(N);
+  const gs = new Float64Array(N);
+  const bs = new Float64Array(N);
+  for (let i = 0; i < N; i++) {
+    xs[i] = sites[i].x;
+    ys[i] = sites[i].y;
+    rs[i] = sites[i].baseR;
+    gs[i] = sites[i].baseG;
+    bs[i] = sites[i].baseB;
+  }
+
+  for (let py = 0; py < H; py++) {
+    for (let px = 0; px < W; px++) {
+      let bestDist = Infinity;
+      let bestIdx = 0;
+      let secondDist = Infinity;
+      for (let i = 0; i < N; i++) {
+        const dx = px - xs[i];
+        const dy = py - ys[i];
+        const d = dx * dx + dy * dy;
+        if (d < bestDist) {
+          secondDist = bestDist;
+          bestDist = d;
+          bestIdx = i;
+        } else if (d < secondDist) {
+          secondDist = d;
+        }
+      }
+      const boundaryDist = Math.sqrt(secondDist) - Math.sqrt(bestDist);
+      const boundaryFactor = Math.max(0, 1 - boundaryDist / 4);
+
+      let r = rs[bestIdx];
+      let g = gs[bestIdx];
+      let bl = bs[bestIdx];
+
+      // Darken base for depth
+      const shade = 0.55 + 0.25 * (Math.sin(px * 0.01 + py * 0.007 + time * 0.0001) * 0.5 + 0.5);
+      r *= shade;
+      g *= shade;
+      bl *= shade;
+
+      // Add boundary glow
+      if (boundaryFactor > 0) {
+        const glow = boundaryFactor * 18;
+        r += glow;
+        g += glow;
+        bl += glow;
+      }
+
+      const idx = (py * W + px) * 4;
+      data[idx] = Math.min(255, r);
+      data[idx + 1] = Math.min(255, g);
+      data[idx + 2] = Math.min(255, bl);
+      data[idx + 3] = 255;
+    }
+  }
+  offCtx.putImageData(img, 0, 0);
+  needsVoronoi = false;
+}
+
+function draw() {
+  const cw = canvas.width;
+  const ch = canvas.height;
+  ctx.clearRect(0, 0, cw, ch);
+
+  // Draw offscreen buffer scaled up
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(offCanvas, 0, 0, cw, ch);
+
+  // Draw subtle cell site markers
+  const scaleX = cw / offCanvas.width;
+  const scaleY = ch / offCanvas.height;
+  for (let i = 0; i < N; i++) {
+    const s = sites[i];
+    const sx = s.x * scaleX;
+    const sy = s.y * scaleY;
+    const pulse = 0.3 + 0.2 * Math.sin(time * 0.003 + i * 0.7);
+    ctx.beginPath();
+    ctx.arc(sx, sy, 2.5 * pulse, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255,255,255,${0.15 + pulse * 0.15})`;
+    ctx.fill();
+  }
+
+  // Highlight hovered cell
+  if (hoveredIdx >= 0) {
+    const hs = sites[hoveredIdx];
+    const hx = hs.x * scaleX;
+    const hy = hs.y * scaleY;
+    // glow ring
+    const glowGrad = ctx.createRadialGradient(hx, hy, 0, hx, hy, 60);
+    glowGrad.addColorStop(0, 'rgba(255,255,255,0.08)');
+    glowGrad.addColorStop(0.5, 'rgba(255,255,255,0.03)');
+    glowGrad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = glowGrad;
+    ctx.fillRect(hx - 60, hy - 60, 120, 120);
+
+    // pulse ring
+    const ringPulse = 0.5 + 0.5 * Math.sin(time * 0.005);
+    ctx.beginPath();
+    ctx.arc(hx, hy, 8 + ringPulse * 4, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(200,180,160,${0.3 + ringPulse * 0.3})`;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
+  // Vignette
+  const vig = ctx.createRadialGradient(cw / 2, ch / 2, cw * 0.35, cw / 2, ch / 2, cw * 0.75);
+  vig.addColorStop(0, 'rgba(0,0,0,0)');
+  vig.addColorStop(0.7, 'rgba(0,0,0,0.1)');
+  vig.addColorStop(1, 'rgba(0,0,0,0.45)');
+  ctx.fillStyle = vig;
+  ctx.fillRect(0, 0, cw, ch);
+}
+
+function findNearestSite(mx, my) {
+  const scaleX = canvas.width / offCanvas.width;
+  const scaleY = canvas.height / offCanvas.height;
+  const tx = mx / scaleX;
+  const ty = my / scaleY;
+  let bestDist = Infinity;
+  let bestIdx = -1;
+  for (let i = 0; i < N; i++) {
+    const dx = tx - sites[i].x;
+    const dy = ty - sites[i].y;
+    const d = dx * dx + dy * dy;
+    if (d < bestDist) {
+      bestDist = d;
+      bestIdx = i;
+    }
+  }
+  return { idx: bestIdx, dist: Math.sqrt(bestDist) };
+}
+
+canvas.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  mouseX = e.clientX - rect.left;
+  mouseY = e.clientY - rect.top;
+  const { idx, dist } = findNearestSite(mouseX * dpr, mouseY * dpr);
+  const scaleFactor = rect.width / offCanvas.width;
+  const proxThreshold = 25 * scaleFactor;
+
+  if (idx !== hoveredIdx) {
+    hoveredIdx = idx;
+    if (idx >= 0 && dist < proxThreshold) {
+      const s = sites[idx];
+      tooltip.textContent = '"' + s.text + '"';
+      tooltip.style.opacity = '1';
+      tooltip.style.left = Math.min(mouseX + 16, rect.width - 250) + 'px';
+      tooltip.style.top = Math.min(mouseY - 60, rect.height - 100) + 'px';
+      detailText.textContent = s.text;
+      detailText.style.opacity = '1';
+      detailCategory.textContent = CAT_LABELS[s.category] + ' · Respondent #' + (idx + 1);
+      detailClarity.textContent = 'Clarity Index: ' + (s.clarity * 100).toFixed(1) + '%';
+    } else {
+      tooltip.style.opacity = '0';
+      detailText.style.opacity = '0.3';
+      detailText.textContent = '';
+      detailCategory.textContent = '';
+      detailClarity.textContent = '';
+    }
+  }
+
+  if (hoveredIdx >= 0 && dist < proxThreshold) {
+    const s = sites[hoveredIdx];
+    tooltip.textContent = '"' + s.text + '"';
+    tooltip.style.left = Math.min(mouseX + 16, rect.width - 250) + 'px';
+    tooltip.style.top = Math.min(mouseY - 60, rect.height - 100) + 'px';
+  }
+});
+
+canvas.addEventListener('mouseleave', () => {
+  mouseX = -100;
+  mouseY = -100;
+  hoveredIdx = -1;
+  tooltip.style.opacity = '0';
+  detailText.style.opacity = '0.3';
+  detailText.textContent = '';
+  detailCategory.textContent = '';
+  detailClarity.textContent = '';
+});
+
+// Touch support
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  mouseX = e.touches[0].clientX - rect.left;
+  mouseY = e.touches[0].clientY - rect.top;
+  const { idx, dist } = findNearestSite(mouseX * dpr, mouseY * dpr);
+  const scaleFactor = rect.width / offCanvas.width;
+  if (idx >= 0 && dist < 25 * scaleFactor) {
+    if (idx !== hoveredIdx) {
+      hoveredIdx = idx;
+      const s = sites[idx];
+      detailText.textContent = s.text;
+      detailText.style.opacity = '1';
+      detailCategory.textContent = CAT_LABELS[s.category] + ' · Respondent #' + (idx + 1);
+      detailClarity.textContent = 'Clarity Index: ' + (s.clarity * 100).toFixed(1) + '%';
+    }
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', () => {
+  hoveredIdx = -1;
+});
+
+window.addEventListener('resize', () => {
+  resize();
+  initSites();
+});
+
+function loop() {
+  time++;
+  updateSites();
+  if (needsVoronoi) renderVoronoi();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// Init
+resize();
+initSites();
+renderVoronoi();
+draw();
+loop();
+</script>
+</body>
+</html>
