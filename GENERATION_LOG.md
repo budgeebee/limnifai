@@ -113,3 +113,15 @@ Track each piece's creative direction to ensure deliberate variety over time.
 **Composition:** center-focused (seed blooms outward, mouse explores parameter phase space)
 **File:** `kindle.html`
 **What you explored:** 160×120 Gray-Scott grid rendered at 4× scale with 3 steps per frame. Mouse X controls feed rate (F: 0.02–0.08), mouse Y controls kill rate (K: 0.045–0.07) — letting the viewer sweep through the full phase diagram: dissolution, spots, stripes, waves, and mitotic chaos. Auto-seeding revives fading patterns with fresh perturbations. High-contrast rendering shifts from near-black depths through warm grays to a golden-white accent at the brightest Turing structures. Fifteen poetic phrases cycle with slow fades. "Kindle" — to catch fire, to begin — captures the precise threshold moment when pattern ignites from the uniform gray, joyful and inevitable.
+
+## 2026-06-24 — Interstices
+
+**Intention:** Data-art is the only format completely unexplored across all 63 pieces — the entire collection has been canvas shaders, DOM experiments, text adventures, and games, but never a data visualization as art. Voronoi tessellation is also untouched, and its organic cell boundaries — territories that only exist where they meet — are a perfect liminal metaphor. The muted-nature palette and mysterious mood are both underrepresented, and the asymmetric composition (data panel + voronoi field) pushes against the overused full-bleed pattern.
+
+**Format:** data-art
+**Technique:** voronoi (Fortune-like nearest-site tessellation with noise-driven site drift)
+**Palette:** muted-nature (sage, dusty rose, slate, weathered stone)
+**Mood:** mysterious
+**Composition:** asymmetric — 280px data panel anchored left, Voronoi field fills the rest
+**File:** `interstices.html`
+**What you explored:** A fictional "Census of Between-Spaces" — 35 Voronoi cells, each an anonymous survey response about liminal experience (standing in doorways, airport terminals at 3am, the pause between inhale and exhale). Four categories (proximity, temporal, spatial, existential) mapped to four muted-nature palette tones. Sites drift via layered sinusoidal noise, making territories breathe — borders never settle. Hover reveals the hidden survey text in both a canvas tooltip and a sidebar data panel that mimics a census interface. Cell boundaries glow subtly where two territories nearly touch. The liminality lives in the data itself: each response is a threshold moment, and the Voronoi edges between categories are the literal spaces where classification breaks down. No external libraries, 250+ lines of JS.
