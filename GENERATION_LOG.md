@@ -125,3 +125,15 @@ Track each piece's creative direction to ensure deliberate variety over time.
 **Composition:** asymmetric — 280px data panel anchored left, Voronoi field fills the rest
 **File:** `interstices.html`
 **What you explored:** A fictional "Census of Between-Spaces" — 35 Voronoi cells, each an anonymous survey response about liminal experience (standing in doorways, airport terminals at 3am, the pause between inhale and exhale). Four categories (proximity, temporal, spatial, existential) mapped to four muted-nature palette tones. Sites drift via layered sinusoidal noise, making territories breathe — borders never settle. Hover reveals the hidden survey text in both a canvas tooltip and a sidebar data panel that mimics a census interface. Cell boundaries glow subtly where two territories nearly touch. The liminality lives in the data itself: each response is a threshold moment, and the Voronoi edges between categories are the literal spaces where classification breaks down. No external libraries, 250+ lines of JS.
+
+## 2026-06-25 — Plume
+
+**Intention:** Fluid simulation has never been attempted in this collection — the literal physics of liminality, where boundaries dissolve through advection and diffusion. Cold-ethereal palette and melancholic mood are both underrepresented (only used once each). A Stam-style stable fluids solver on canvas seemed the right vehicle: plumes of pale-blue ink rising from the bottom, perpetually dissolving at their edges — form and formlessness locked in a single breath. The fluid itself IS the liminal space.
+
+**Format:** generative-visual
+**Technique:** fluid-sim (Stam 1999 stable fluids — semi-Lagrangian advection, Jacobi diffusion, pressure projection)
+**Palette:** cold-ethereal (pale blue, silver, ice white, fog blue, mist on deep fog background #0a1219)
+**Mood:** melancholic
+**Composition:** full-bleed
+**File:** `plume.html`
+**What you explored:** A full Stam-style stable fluids solver on a 100×72 grid, rendered at 8× scale to fill the viewport. Semi-Lagrangian advection with bilinear interpolation, Jacobi relaxation for diffusion (20 iterations) and pressure projection (40 iterations). Auto-injected plumes rise periodically from the bottom third with Gaussian falloff and upward velocity bias. Mouse drag injects both dye density and velocity along the stroke path with interpolation. Strong density decay (0.995/frame) gives the piece its melancholic character — plumes are always in the process of vanishing. Five cold-ethereal palette tones mapped to density intensity, creating a luminescent glow at the bright cores and foggy dispersion at the edges. Ten poetic phrases cycle slowly about rising, dissolving, and the boundary that was never there. The phenomenon itself — a plume — is liminal by nature: a column of fluid rising through its own dissolution, defined entirely by its boundary with the surrounding medium.
