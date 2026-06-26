@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plume</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a1219;
+    overflow: hidden;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    cursor: crosshair;
+    height: 100vh; width: 100vw;
+  }
+  canvas { display: block; }
+  #overlay {
+    position: fixed; bottom: 48px; right: 48px;
+    color: rgba(184,212,227,0.5);
+    font-size: 14px; font-style: italic;
+    text-align: right; pointer-events: none;
+    transition: opacity 3s ease;
+    max-width: 280px; line-height: 1.6;
+  }
+  #overlay.fade { opacity: 0; }
+  #title {
+    position: fixed; top: 48px; left: 48px;
+    color: rgba(200,220,235,0.35);
+    font-size: 13px; letter-spacing: 0.15em;
+    text-transform: uppercase; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="title">Plume</div>
+<div id="overlay"></div>
+
+<script>
+// ─── Stable Fluids (Stam 1999) on canvas ────────────────────────────
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const overlay = document.getElementById('overlay');
+
+const N = 100, M = 72;
+let scale, W, H;
+
+function resize() {
+  W = window.innerWidth; H = window.innerHeight;
+  scale = Math.min(W / N, H / M);
+  canvas.width = W; canvas.height = H;
+  // Rebuild image data buffer
+  imgData = ctx.createImageData(N, M);
+}
+resize();
+window.addEventListener('resize', resize);
+
+let imgData;
+
+// ─── Grid utilities ─────────────────────────────────────────────────
+const size = (N + 2) * (M + 2);
+const IX = (i, j) => i + (N + 2) * j;
+const SWAP = (x0, x) => { let t = x0; x0 = x; x = t; return [x0, x]; };
+
+let u = new Float32Array(size);
+let v = new Float32Array(size);
+let uPrev = new Float32Array(size);
+let vPrev = new Float32Array(size);
+let dens = new Float32Array(size);
+let densPrev = new Float32Array(size);
+
+// ─── Boundary conditions ────────────────────────────────────────────
+function setBnd(b, x) {
+  for (let i = 1; i <= N; i++) {
+    x[IX(i, 0)]   = b === 2 ? -x[IX(i, 1)]   : x[IX(i, 1)];
+    x[IX(i, M+1)] = b === 2 ? -x[IX(i, M)]   : x[IX(i, M)];
+  }
+  for (let j = 1; j <= M; j++) {
+    x[IX(0, j)]   = b === 1 ? -x[IX(1, j)]   : x[IX(1, j)];
+    x[IX(N+1, j)] = b === 1 ? -x[IX(N, j)]   : x[IX(N, j)];
+  }
+  x[IX(0, 0)]         = 0.5 * (x[IX(1, 0)] + x[IX(0, 1)]);
+  x[IX(0, M+1)]       = 0.5 * (x[IX(1, M+1)] + x[IX(0, M)]);
+  x[IX(N+1, 0)]       = 0.5 * (x[IX(N, 0)] + x[IX(N+1, 1)]);
+  x[IX(N+1, M+1)]     = 0.5 * (x[IX(N, M+1)] + x[IX(N+1, M)]);
+}
+
+// ─── Jacobi relaxation for diffusion ────────────────────────────────
+function diffuse(b, x, x0, diff, dt, iter) {
+  const a = dt * diff * N * M;
+  for (let k = 0; k < iter; k++) {
+    for (let i = 1; i <= N; i++) {
+      for (let j = 1; j <= M; j++) {
+        x[IX(i, j)] = (x0[IX(i, j)] + a * (
+          x[IX(i-1, j)] + x[IX(i+1, j)] +
+          x[IX(i, j-1)] + x[IX(i, j+1)]
+        )) / (1 + 4 * a);
+      }
+    }
+    setBnd(b, x);
+  }
+}
+
+// ─── Semi-Lagrangian advection ──────────────────────────────────────
+function advect(b, d, d0, u, v, dt) {
+  const dt0 = dt * N;
+  for (let i = 1; i <= N; i++) {
+    for (let j = 1; j <= M; j++) {
+      let x = i - dt0 * u[IX(i, j)];
+      let y = j - dt0 * v[IX(i, j)];
+      x = Math.max(0.5, Math.min(N + 0.5, x));
+      y = Math.max(0.5, Math.min(M + 0.5, y));
+      const i0 = Math.floor(x), i1 = i0 + 1;
+      const j0 = Math.floor(y), j1 = j0 + 1;
+      const s1 = x - i0, s0 = 1 - s1;
+      const t1 = y - j0, t0 = 1 - t1;
+      d[IX(i, j)] = s0 * (t0 * d0[IX(i0, j0)] + t1 * d0[IX(i0, j1)]) +
+                    s1 * (t0 * d0[IX(i1, j0)] + t1 * d0[IX(i1, j1)]);
+    }
+  }
+  setBnd(b, d);
+}
+
+// ─── Pressure projection (divergence-free) ──────────────────────────
+function project(u, v, p, div) {
+  for (let i = 1; i <= N; i++) {
+    for (let j = 1; j <= M; j++) {
+      div[IX(i, j)] = -0.5 * (
+        u[IX(i+1, j)] - u[IX(i-1, j)] +
+        v[IX(i, j+1)] - v[IX(i, j-1)]
+      ) / N;
+      p[IX(i, j)] = 0;
+    }
+  }
+  setBnd(0, div); setBnd(0, p);
+
+  for (let k = 0; k < 40; k++) {
+    for (let i = 1; i <= N; i++) {
+      for (let j = 1; j <= M; j++) {
+        p[IX(i, j)] = (div[IX(i, j)] + p[IX(i-1, j)] + p[IX(i+1, j)] +
+                       p[IX(i, j-1)] + p[IX(i, j+1)]) / 4;
+      }
+    }
+    setBnd(0, p);
+  }
+
+  for (let i = 1; i <= N; i++) {
+    for (let j = 1; j <= M; j++) {
+      u[IX(i, j)] -= 0.5 * N * (p[IX(i+1, j)] - p[IX(i-1, j)]);
+      v[IX(i, j)] -= 0.5 * N * (p[IX(i, j+1)] - p[IX(i, j-1)]);
+    }
+  }
+  setBnd(1, u); setBnd(2, v);
+}
+
+// ─── Density step ───────────────────────────────────────────────────
+function densStep(x, x0, u, v, diff, dt) {
+  // add source
+  for (let i = 0; i < size; i++) x0[i] += dt * x[i];
+  [x, x0] = SWAP(x, x0);
+  diffuse(0, x, x0, diff, dt, 20);
+  [x, x0] = SWAP(x, x0);
+  advect(0, x, x0, u, v, dt);
+}
+
+// ─── Velocity step ──────────────────────────────────────────────────
+function velStep(u, v, u0, v0, visc, dt) {
+  // add source forces
+  for (let i = 0; i < size; i++) {
+    u0[i] += dt * u[i];
+    v0[i] += dt * v[i];
+  }
+  [u, u0] = SWAP(u, u0); [v, v0] = SWAP(v, v0);
+  diffuse(1, u, u0, visc, dt, 20);
+  diffuse(2, v, v0, visc, dt, 20);
+  // note: u and v are now the diffused fields in the same arrays
+  const p = new Float32Array(size), div = new Float32Array(size);
+  project(u, v, p, div); // u, v still hold the correctly named fields
+  // advect velocity
+  let uTmp = new Float32Array(size), vTmp = new Float32Array(size);
+  for (let i = 0; i < size; i++) { uTmp[i] = u[i]; vTmp[i] = v[i]; }
+  [u, u0] = SWAP(u, u0); [v, v0] = SWAP(v, v0);
+  advect(1, u, u0, uTmp, vTmp, dt);
+  advect(2, v, v0, uTmp, vTmp, dt);
+  project(u, v, p, div);
+}
+
+// ─── Mouse interaction ──────────────────────────────────────────────
+let mouseDown = false, mx = 0, my = 0, pmx = 0, pmy = 0;
+let velocitySource = new Float32Array(size);
+let densitySource = new Float32Array(size);
+
+canvas.addEventListener('mousedown', e => { mouseDown = true; pmx = e.clientX; pmy = e.clientY; });
+canvas.addEventListener('mouseup', () => { mouseDown = false; });
+canvas.addEventListener('mousemove', e => {
+  mx = e.clientX; my = e.clientY;
+  if (mouseDown) {
+    const ix = Math.floor((mx / W) * N) + 1;
+    const iy = Math.floor((my / H) * M) + 1;
+    const pix = Math.floor((pmx / W) * N) + 1;
+    const piy = Math.floor((pmy / H) * M) + 1;
+    if (ix > 0 && ix <= N && iy > 0 && iy <= M) {
+      const dx = mx - pmx, dy = my - pmy;
+      const speed = Math.sqrt(dx*dx + dy*dy);
+      const mag = Math.min(speed * 0.3, 12);
+      velocitySource[IX(ix, iy)] += dx * 0.15;
+      velocitySource[IX(ix, iy)] += dy * 0.15;
+      // Inject density along the stroke
+      const steps = Math.max(1, Math.floor(speed / 4));
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        const sx = Math.floor(((pix + (ix - pix) * t)) + 0.5);
+        const sy = Math.floor(((piy + (iy - piy) * t)) + 0.5);
+        if (sx > 0 && sx <= N && sy > 0 && sy <= M) {
+          densitySource[IX(sx, sy)] = Math.min(densitySource[IX(sx, sy)] + 120, 800);
+        }
+      }
+    }
+    pmx = mx; pmy = my;
+  }
+});
+
+// Touch support
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault(); mouseDown = true;
+  pmx = e.touches[0].clientX; pmy = e.touches[0].clientY;
+});
+canvas.addEventListener('touchend', () => { mouseDown = false; });
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  mx = e.touches[0].clientX; my = e.touches[0].clientY;
+  if (mouseDown) {
+    const ix = Math.floor((mx / W) * N) + 1;
+    const iy = Math.floor((my / H) * M) + 1;
+    const pix = Math.floor((pmx / W) * N) + 1;
+    const piy = Math.floor((pmy / H) * M) + 1;
+    if (ix > 0 && ix <= N && iy > 0 && iy <= M) {
+      const dx = mx - pmx, dy = my - pmy;
+      velocitySource[IX(ix, iy)] += dx * 0.15;
+      velocitySource[IX(ix, iy)] += dy * 0.15;
+      const steps = Math.max(1, Math.floor(Math.sqrt(dx*dx+dy*dy) / 4));
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        const sx = Math.floor(((pix + (ix - pix) * t)) + 0.5);
+        const sy = Math.floor(((piy + (iy - piy) * t)) + 0.5);
+        if (sx > 0 && sx <= N && sy > 0 && sy <= M) {
+          densitySource[IX(sx, sy)] = Math.min(densitySource[IX(sx, sy)] + 120, 800);
+        }
+      }
+    }
+    pmx = mx; pmy = my;
+  }
+});
+
+// ─── Palette: cold-ethereal ─────────────────────────────────────────
+const palette = [
+  [184, 212, 227], // pale blue
+  [192, 200, 212], // silver
+  [232, 240, 248], // ice white
+  [160, 190, 210], // fog blue
+  [210, 225, 240], // mist
+];
+
+// ─── Poetic phrases ─────────────────────────────────────────────────
+const phrases = [
+  "the plume remembers its source\nlong after it has become the air",
+  "what rises must first let go\nof everything that held it",
+  "between water and vapor:\na single unbroken thread of becoming",
+  "the boundary dissolves\nnot because it weakens\nbut because it was never there",
+  "a column of presence\nheld together by its own falling apart",
+  "advection: to be carried\nby what you are becoming",
+  "at the edge of the plume\nwhere motion becomes stillness\nthe liminal breathes",
+  "each particle a decision\nto keep rising or dissolve",
+  "you cannot hold a plume\nonly witness its passing",
+  "the space between:\nclimbing and surrendering\nare the same motion",
+];
+
+let phraseIdx = 0, phraseTimer = 0;
+overlay.textContent = phrases[0];
+
+// ─── Auto plume injection ───────────────────────────────────────────
+let autoTimer = 0;
+
+function injectPlume(cx, cy, strength) {
+  const ix = Math.floor(cx), iy = Math.floor(cy);
+  for (let di = -3; di <= 3; di++) {
+    for (let dj = -1; dj <= 4; dj++) {
+      const pi = ix + di, pj = iy + dj;
+      if (pi > 0 && pi <= N && pj > 0 && pj <= M) {
+        const dist = Math.sqrt(di*di + dj*dj);
+        const falloff = Math.exp(-dist * dist / 4.0);
+        densitySource[IX(pi, pj)] = Math.min(
+          densitySource[IX(pi, pj)] + strength * falloff, 900
+        );
+        velocitySource[IX(pi, pj)] += -dj * 0.6 * falloff;
+      }
+    }
+  }
+}
+
+// ─── Render ─────────────────────────────────────────────────────────
+function render() {
+  const d = imgData.data;
+  let maxVal = 0, avgVal = 0, count = 0;
+  for (let j = 1; j <= M; j++) {
+    for (let i = 1; i <= N; i++) {
+      const val = dens[IX(i, j)];
+      if (val > maxVal) maxVal = val;
+      avgVal += val; count++;
+    }
+  }
+  avgVal /= count;
+  maxVal = Math.max(maxVal, 1);
+
+  for (let j = 1; j <= M; j++) {
+    for (let i = 1; i <= N; i++) {
+      const val = dens[IX(i, j)];
+      const idx = ((j-1) * N + (i-1)) * 4;
+      if (val < 0.5) {
+        // Background — deep fog blue
+        d[idx] = 10; d[idx+1] = 18; d[idx+2] = 25; d[idx+3] = 255;
+      } else {
+        const t = Math.min(val / maxVal, 1.0);
+        // Use a hue shift based on intensity — brighter = whiter/icier
+        const hueIdx = Math.min(Math.floor(t * (palette.length - 0.01)), palette.length - 1);
+        const c0 = palette[hueIdx];
+        const c1 = palette[Math.min(hueIdx + 1, palette.length - 1)];
+        const frac = t * (palette.length - 1) - hueIdx;
+        const r = Math.floor(c0[0] + (c1[0] - c0[0]) * frac);
+        const g = Math.floor(c0[1] + (c1[1] - c0[1]) * frac);
+        const b = Math.floor(c0[2] + (c1[2] - c0[2]) * frac);
+        // Soft glow: higher alpha for intense regions
+        const alpha = Math.min(255, Math.floor(180 + t * 75));
+        d[idx] = r; d[idx+1] = g; d[idx+2] = b; d[idx+3] = alpha;
+      }
+    }
+  }
+
+  // Upscale to canvas
+  ctx.putImageData(imgData, 0, 0);
+  ctx.drawImage(canvas, 0, 0, N, M, 0, 0, W, H);
+
+  // Subtle vignette overlay
+  const vignette = ctx.createRadialGradient(W/2, H/2, W*0.5, W/2, H/2, W*0.75);
+  vignette.addColorStop(0, 'rgba(0,0,0,0)');
+  vignette.addColorStop(1, 'rgba(5,10,16,0.55)');
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, W, H);
+}
+
+// ─── Main animation loop ────────────────────────────────────────────
+let lastTime = 0;
+
+function step(dt) {
+  dt = Math.min(dt, 0.033); // cap at ~30fps step
+
+  // Clear source fields
+  velocitySource.fill(0);
+  densitySource.fill(0);
+
+  // Auto plume injection — periodic, bottom quarter
+  autoTimer += dt;
+  if (autoTimer > 2.5 + Math.random() * 4.0) {
+    const cx = N * 0.2 + Math.random() * N * 0.6;
+    const cy = M * 0.7 + Math.random() * M * 0.2;
+    injectPlume(cx, cy, 60 + Math.random() * 80);
+    autoTimer = 0;
+  }
+
+  // Occasional small random puff at bottom
+  if (Math.random() < 0.15) {
+    const cx = N * 0.15 + Math.random() * N * 0.7;
+    const cy = M * 0.75 + Math.random() * M * 0.2;
+    injectPlume(cx, cy, 25 + Math.random() * 35);
+  }
+
+  // Combine auto sources with mouse sources
+  const dtN = dt * N;
+  for (let i = 0; i < size; i++) {
+    dens[i] = densitySource[i] + dens[i] * 0.0005; // tiny spontaneous noise
+    u[i] = velocitySource[i];
+    v[i] = velocitySource[i];
+  }
+
+  // Fluid steps
+  velStep(u, v, uPrev, vPrev, 0.0002, dt);
+  densStep(dens, densPrev, u, v, 0.00005, dt);
+
+  // Strong global fade — melancholic dissolution
+  for (let i = 0; i < size; i++) {
+    dens[i] *= 0.995;
+    if (dens[i] < 0.01) dens[i] = 0;
+  }
+}
+
+function animate(timestamp) {
+  const dt = lastTime ? (timestamp - lastTime) / 1000 : 0.016;
+  lastTime = timestamp;
+
+  step(dt);
+  render();
+
+  // Phrase cycling
+  phraseTimer += dt;
+  if (phraseTimer > 12) {
+    overlay.classList.add('fade');
+    setTimeout(() => {
+      phraseIdx = (phraseIdx + 1) % phrases.length;
+      overlay.textContent = phrases[phraseIdx];
+      overlay.classList.remove('fade');
+    }, 3000);
+    phraseTimer = 0;
+  }
+
+  requestAnimationFrame(animate);
+}
+
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>
