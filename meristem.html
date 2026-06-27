@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Meristem</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a0e06;
+    overflow: hidden;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    cursor: default;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  canvas { display: block; position: fixed; top: 0; left: 0; }
+  #overlay {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 10;
+  }
+  .poem {
+    position: absolute;
+    color: #c4a265;
+    font-size: 14px;
+    line-height: 1.7;
+    opacity: 0;
+    transition: opacity 4s ease;
+    text-shadow: 0 0 12px rgba(180, 120, 40, 0.3);
+    pointer-events: none;
+  }
+  .poem.visible { opacity: 0.7; }
+  .title-overlay {
+    position: absolute;
+    bottom: 28px;
+    right: 36px;
+    color: #8b5e3c;
+    font-size: 13px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    opacity: 0.6;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="overlay">
+  <div class="poem visible" id="poem1" style="top:18%;left:12%">at the tip of every branch<br>a cell that has not yet<br>decided what to become</div>
+  <div class="poem" id="poem2" style="top:42%;left:6%;max-width:180px">the root knows<br>only what the tip<br>has not yet spoken</div>
+  <div class="poem" id="poem3" style="top:65%;left:15%">between leaf and thorn<br>an uncommitted hour</div>
+  <div class="poem" id="poem4" style="top:28%;left:58%">every meristem<br>is a held breath</div>
+  <div class="poem" id="poem5" style="top:52%;left:62%;max-width:170px">one cell divides<br>and the world<br>splits open</div>
+  <div class="poem" id="poem6" style="top:8%;left:55%;max-width:160px">the space between<br>what grows<br>and what might</div>
+  <div class="title-overlay">meristem</div>
+</div>
+<script>
+"use strict";
+
+// ── Canvas Setup ──────────────────────────────────────────
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+let W, H;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  ctx.fillStyle = "#1a0e06";
+  ctx.fillRect(0, 0, W, H);
+}
+window.addEventListener("resize", resize);
+resize();
+
+// ── Mouse ──────────────────────────────────────────────────
+const mouse = { x: W, y: H, active: false };
+canvas.addEventListener("mousemove", e => {
+  mouse.x = e.clientX;
+  mouse.y = e.clientY;
+  mouse.active = true;
+});
+canvas.addEventListener("mouseleave", () => { mouse.active = false; });
+canvas.addEventListener("touchmove", e => {
+  mouse.x = e.touches[0].clientX;
+  mouse.y = e.touches[0].clientY;
+  mouse.active = true;
+}, { passive: true });
+canvas.addEventListener("touchend", () => { mouse.active = false; });
+
+// ── L-System Engine ────────────────────────────────────────
+// Stochastic context-free L-system.
+// Axiom: X
+// Rules:
+//   X → F[+X]F[-X]+X     (bifurcation, p ≈ 0.55)
+//   X → F[+X]-X          (single branch left, p ≈ 0.20)
+//   X → F[-X]+X          (single branch right, p ≈ 0.15)
+//   X → FX               (continue straight, p ≈ 0.06)
+//   X → F                (terminate, p ≈ 0.04, higher near edges)
+//   F → FF               (always)
+
+function edgePressure(x, y, W, H) {
+  // Returns 0–1: how "close" a point is to canvas edges (pressure to terminate)
+  const margin = 120;
+  const distRight = Math.max(0, W - x - margin) / margin;
+  const distTop = Math.max(0, y - margin) / margin;
+  const distLeft = Math.max(0, x - margin) / margin;
+  const distBottom = Math.max(0, H - y - margin) / margin;
+  return Math.max(0, Math.min(1, 1 - Math.min(distRight, distTop, distLeft, distBottom)));
+}
+
+function generateLSystem(depth, startX, startY, startAngle) {
+  const chars = [];
+  const stateStack = [];
+  const positions = [];
+  let x = startX, y = startY, angle = startAngle;
+
+  // Track current stack depth for recursive probability adjustment
+  let stackDepth = 0;
+
+  function iterate(symbol, remainingDepth) {
+    if (remainingDepth <= 0) {
+      chars.push(symbol);
+      return;
+    }
+
+    if (symbol === 'X') {
+      const press = edgePressure(x, y, W, H);
+      const r = Math.random();
+
+      // Edge pressure increases termination probability
+      const termProb = 0.04 + press * 0.35;
+      const contProb = 0.06 * (1 - press);
+      const bifProb = 0.55 * (1 - press * 0.7);
+      const leftProb = 0.20;
+      const rightProb = 0.15;
+
+      if (r < termProb) {
+        chars.push('F');
+      } else if (r < termProb + contProb) {
+        iterate('F', remainingDepth - 1);
+        iterate('X', remainingDepth - 1);
+      } else if (r < termProb + contProb + bifProb) {
+        iterate('F', remainingDepth - 1);
+        chars.push('[');
+        chars.push('+');
+        iterate('X', remainingDepth - 1);
+        chars.push(']');
+        iterate('F', remainingDepth - 1);
+        chars.push('[');
+        chars.push('-');
+        iterate('X', remainingDepth - 1);
+        chars.push(']');
+        chars.push('+');
+        iterate('X', remainingDepth - 1);
+      } else if (r < termProb + contProb + bifProb + leftProb) {
+        iterate('F', remainingDepth - 1);
+        chars.push('[');
+        chars.push('+');
+        iterate('X', remainingDepth - 1);
+        chars.push(']');
+        chars.push('-');
+        iterate('X', remainingDepth - 1);
+      } else {
+        iterate('F', remainingDepth - 1);
+        chars.push('[');
+        chars.push('-');
+        iterate('X', remainingDepth - 1);
+        chars.push(']');
+        chars.push('+');
+        iterate('X', remainingDepth - 1);
+      }
+    } else if (symbol === 'F') {
+      chars.push('F');
+      // Occasionally double
+      if (Math.random() < 0.7 && remainingDepth > 0) {
+        chars.push('F');
+      }
+    } else {
+      chars.push(symbol);
+    }
+  }
+
+  iterate('X', depth);
+
+  // Interpret turtle graphics
+  const segments = [];
+  const buds = [];
+  let cx = startX, cy = startY;
+  let ca = startAngle;
+  let depthTracker = 0;
+
+  const saved = [];
+
+  for (let i = 0; i < chars.length; i++) {
+    const c = chars[i];
+    if (c === 'F') {
+      // Check edge pressure for this position
+      const press = edgePressure(cx, cy, W, H);
+      const segLen = 3 + Math.random() * 4 - press * 2;
+      const nx = cx + Math.cos(ca) * segLen;
+      const ny = cy + Math.sin(ca) * segLen;
+
+      // Clamp to canvas
+      const cnx = Math.max(-20, Math.min(W + 20, nx));
+      const cny = Math.max(-20, Math.min(H + 20, ny));
+
+      segments.push({
+        x1: cx, y1: cy,
+        x2: cnx, y2: cny,
+        depth: depthTracker,
+        press: press
+      });
+
+      cx = cnx;
+      cy = cny;
+    } else if (c === '+') {
+      const press = edgePressure(cx, cy, W, H);
+      const baseAngle = 22 + Math.random() * 8;
+      ca += (baseAngle * Math.PI / 180) * (0.8 + press * 0.4);
+    } else if (c === '-') {
+      const press = edgePressure(cx, cy, W, H);
+      const baseAngle = 22 + Math.random() * 8;
+      ca -= (baseAngle * Math.PI / 180) * (0.8 + press * 0.4);
+    } else if (c === '[') {
+      saved.push({ x: cx, y: cy, a: ca, d: depthTracker });
+      depthTracker++;
+    } else if (c === ']') {
+      if (saved.length > 0) {
+        const s = saved.pop();
+        // Register bud at the tip before popping
+        buds.push({
+          x: cx, y: cy,
+          depth: depthTracker,
+          age: 0
+        });
+        cx = s.x;
+        cy = s.y;
+        ca = s.a;
+        depthTracker = s.d;
+      }
+    }
+  }
+
+  // Add terminal bud
+  if (segments.length > 0) {
+    buds.push({
+      x: segments[segments.length - 1].x2,
+      y: segments[segments.length - 1].y2,
+      depth: depthTracker,
+      age: 0
+    });
+  }
+
+  return { segments, buds, chars };
+}
+
+// ── Multiple Trees ─────────────────────────────────────────
+const trees = [];
+
+function createTree(index) {
+  // Trees originate from bottom-right quadrant with varied angles
+  const originX = W * 0.65 + Math.random() * W * 0.33;
+  const originY = H * 0.55 + Math.random() * H * 0.45;
+  // Angle: generally pointing up-left (between 210° and 330°, where 270° is straight up)
+  const baseAngle = (Math.random() * 100 - 50 + 270) * Math.PI / 180;
+
+  return {
+    originX, originY, baseAngle,
+    depth: 5 + Math.floor(Math.random() * 3),
+    data: null,
+    regenerationTimer: 0,
+    regenerationInterval: 180 + Math.random() * 300, // frames between regenerations
+    id: index,
+    growthProgress: 0, // 0→1 for animation
+    growthSpeed: 0.008 + Math.random() * 0.015,
+    fullyGrown: false,
+    age: 0,
+    sway: Math.random() * Math.PI * 2
+  };
+}
+
+// Create 5 trees
+for (let i = 0; i < 5; i++) {
+  trees.push(createTree(i));
+}
+
+// ── Particle System for Buds ───────────────────────────────
+const budParticles = [];
+
+function spawnBudParticle(bud, tree) {
+  if (budParticles.length > 200) return;
+  budParticles.push({
+    x: bud.x, y: bud.y,
+    vx: (Math.random() - 0.5) * 0.3,
+    vy: (Math.random() - 0.8) * 0.8 - 0.3,
+    life: 1,
+    decay: 0.003 + Math.random() * 0.01,
+    size: 1 + Math.random() * 2.5,
+    hue: 25 + Math.random() * 20, // warm: ochre → sienna
+    depth: bud.depth
+  });
+}
+
+// ── Poetic Phrase Cycling ──────────────────────────────────
+const poemEls = [
+  document.getElementById("poem1"),
+  document.getElementById("poem2"),
+  document.getElementById("poem3"),
+  document.getElementById("poem4"),
+  document.getElementById("poem5"),
+  document.getElementById("poem6"),
+];
+let poemIndex = 0;
+let poemTimer = 0;
+const POEM_INTERVAL = 240; // frames (~8s at 30fps)
+
+// ── Color Palette ──────────────────────────────────────────
+// warm-earth: ochre, sienna, cream, terracotta
+const BG = "#1a0e06";        // deep sepia-black
+const BRANCH_BASE = { r: 139, g: 94, b: 60 };   // sienna
+const BRANCH_TIP = { r: 196, g: 162, b: 101 };   // ochre-cream
+const BUD_COLOR = "#d4a76a";  // warm cream
+const BUD_GLOW = "#c48844";   // terracotta glow
+const BG_AMBIENT = "#2a1a0e"; // ambient warm
+
+function lerpColor(c1, c2, t) {
+  return {
+    r: Math.round(c1.r + (c2.r - c1.r) * t),
+    g: Math.round(c1.g + (c2.g - c1.g) * t),
+    b: Math.round(c1.b + (c2.b - c1.b) * t)
+  };
+}
+
+// ── Render Loop ────────────────────────────────────────────
+let frame = 0;
+let globalSway = 0;
+
+function draw() {
+  frame++;
+  globalSway = Math.sin(frame * 0.003) * 0.04;
+
+  // ── Background ───────────────────────────────────────────
+  // Subtle warm ambient glow from the bottom-right
+  ctx.fillStyle = BG;
+  ctx.fillRect(0, 0, W, H);
+
+  // Warm radial glow from bottom-right quadrant
+  const glowGrad = ctx.createRadialGradient(W * 0.75, H * 0.75, W * 0.1, W * 0.75, H * 0.75, W * 0.9);
+  glowGrad.addColorStop(0, "rgba(60,35,15,0.25)");
+  glowGrad.addColorStop(0.5, "rgba(40,20,8,0.12)");
+  glowGrad.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = glowGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  // ── Trees ────────────────────────────────────────────────
+  trees.forEach((tree, ti) => {
+    tree.age++;
+    tree.sway += 0.01 + Math.random() * 0.005;
+
+    // Regeneration
+    if (tree.fullyGrown && tree.age > tree.regenerationInterval) {
+      tree.fullyGrown = false;
+      tree.growthProgress = 0;
+      tree.data = null;
+      tree.age = 0;
+      tree.regenerationInterval = 180 + Math.random() * 300;
+    }
+
+    if (!tree.data) {
+      // Mouse influence on origin angle
+      let angleOffset = 0;
+      if (mouse.active) {
+        const dx = mouse.x - tree.originX;
+        const dy = mouse.y - tree.originY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < W * 0.6) {
+          angleOffset = Math.atan2(dy, dx) * 0.15 * (1 - dist / (W * 0.6));
+        }
+      }
+      tree.data = generateLSystem(
+        tree.depth,
+        tree.originX,
+        tree.originY,
+        tree.baseAngle + angleOffset + globalSway * (ti * 0.5 + 0.5)
+      );
+    }
+
+    // Growth animation
+    if (!tree.fullyGrown) {
+      tree.growthProgress += tree.growthSpeed;
+      if (tree.growthProgress >= 1) {
+        tree.growthProgress = 1;
+        tree.fullyGrown = true;
+      }
+    }
+
+    const { segments, buds } = tree.data;
+    const totalSegments = segments.length;
+    const visibleSegments = Math.floor(totalSegments * easeInOut(tree.growthProgress));
+
+    // ── Draw segments ──────────────────────────────────────
+    for (let i = 0; i < visibleSegments; i++) {
+      const seg = segments[i];
+      const t = seg.depth / 6; // depth 0..6 normalized
+      const color = lerpColor(BRANCH_BASE, BRANCH_TIP, t * 0.7 + seg.press * 0.3);
+
+      // Mouse distortion on drawn segments
+      let sx1 = seg.x1, sy1 = seg.y1, sx2 = seg.x2, sy2 = seg.y2;
+      if (mouse.active) {
+        const distortRadius = 180;
+        const d1 = Math.hypot(mouse.x - seg.x1, mouse.y - seg.y1);
+        const d2 = Math.hypot(mouse.x - seg.x2, mouse.y - seg.y2);
+        if (d1 < distortRadius) {
+          const f = (1 - d1 / distortRadius) * 0.3;
+          sx1 += (seg.x1 - mouse.x) * f;
+          sy1 += (seg.y1 - mouse.y) * f;
+        }
+        if (d2 < distortRadius) {
+          const f = (1 - d2 / distortRadius) * 0.3;
+          sx2 += (seg.x2 - mouse.x) * f;
+          sy2 += (seg.y2 - mouse.y) * f;
+        }
+      }
+
+      // Tree sway
+      const swayOffset = Math.sin(frame * 0.02 + seg.depth * 0.8 + tree.sway) * seg.depth * 0.6;
+      sx1 += swayOffset * 0.3;
+      sy1 += swayOffset * 0.1;
+      sx2 += swayOffset * 0.3;
+      sy2 += swayOffset * 0.1;
+
+      const alpha = 0.5 + t * 0.5;
+      const width = 2.8 - t * 2.2;
+
+      ctx.beginPath();
+      ctx.moveTo(sx1, sy1);
+      ctx.lineTo(sx2, sy2);
+      ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${alpha})`;
+      ctx.lineWidth = width;
+      ctx.lineCap = "round";
+      ctx.stroke();
+
+      // Thin highlight overlay for depth feel
+      if (width > 0.4) {
+        ctx.beginPath();
+        ctx.moveTo(sx1 + 0.5, sy1 + 0.5);
+        ctx.lineTo(sx2 + 0.5, sy2 + 0.5);
+        ctx.strokeStyle = `rgba(${Math.min(255,color.r+40)},${Math.min(255,color.g+30)},${Math.min(255,color.b+20)},${alpha*0.3})`;
+        ctx.lineWidth = width * 0.35;
+        ctx.stroke();
+      }
+    }
+
+    // ── Draw buds (only on grown segments) ─────────────────
+    const totalBuds = buds.length;
+    let budsDrawn = 0;
+    // Count buds that are on visible segments
+    for (let i = 0; i < totalBuds; i++) {
+      // Bud visibility follows growth progress
+      if (i / totalBuds <= tree.growthProgress) {
+        budsDrawn++;
+      }
+    }
+
+    for (let i = 0; i < Math.min(budsDrawn, buds.length); i++) {
+      const bud = buds[i];
+      bud.age++;
+
+      const pulseSize = 2 + Math.sin(frame * 0.08 + bud.depth * 1.5 + i) * 1.2;
+      const t = bud.depth / 6;
+
+      // Mouse proximity brightens buds
+      let budBrightness = 0.5 + Math.sin(frame * 0.06 + i * 1.3) * 0.3;
+      if (mouse.active) {
+        const db = Math.hypot(mouse.x - bud.x, mouse.y - bud.y);
+        if (db < 140) {
+          budBrightness += (1 - db / 140) * 0.5;
+        }
+      }
+
+      // Bud glow
+      const glowGrad = ctx.createRadialGradient(bud.x, bud.y, 0, bud.x, bud.y, pulseSize * 3);
+      glowGrad.addColorStop(0, `rgba(212,167,106,${0.9 * budBrightness})`);
+      glowGrad.addColorStop(0.4, `rgba(196,136,68,${0.5 * budBrightness})`);
+      glowGrad.addColorStop(1, "rgba(196,136,68,0)");
+      ctx.fillStyle = glowGrad;
+      ctx.beginPath();
+      ctx.arc(bud.x, bud.y, pulseSize * 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Bud core
+      ctx.beginPath();
+      ctx.arc(bud.x, bud.y, pulseSize, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(235,200,150,${0.85 * budBrightness})`;
+      ctx.fill();
+
+      // Spawn occasional particles from buds
+      if (bud.age % 6 === 0 && Math.random() < 0.3) {
+        spawnBudParticle(bud, tree);
+      }
+    }
+
+    // ── Root node glow ─────────────────────────────────────
+    const rootGlow = ctx.createRadialGradient(
+      tree.originX, tree.originY, 0,
+      tree.originX, tree.originY, 30
+    );
+    rootGlow.addColorStop(0, "rgba(180,110,40,0.5)");
+    rootGlow.addColorStop(1, "rgba(180,110,40,0)");
+    ctx.fillStyle = rootGlow;
+    ctx.beginPath();
+    ctx.arc(tree.originX, tree.originY, 30, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // ── Bud Particles ────────────────────────────────────────
+  for (let i = budParticles.length - 1; i >= 0; i--) {
+    const p = budParticles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.life -= p.decay;
+
+    if (p.life <= 0) {
+      budParticles.splice(i, 1);
+      continue;
+    }
+
+    // Mouse attract
+    if (mouse.active) {
+      const dm = Math.hypot(mouse.x - p.x, mouse.y - p.y);
+      if (dm < 200) {
+        const f = (1 - dm / 200) * 0.04;
+        p.vx += (mouse.x - p.x) * f / dm * 0.5;
+        p.vy += (mouse.y - p.y) * f / dm * 0.5;
+      }
+    }
+
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(220,170,100,${p.life * 0.6})`;
+    ctx.fill();
+  }
+
+  // ── Subtle grain overlay ─────────────────────────────────
+  ctx.fillStyle = "rgba(0,0,0,0.03)";
+  ctx.fillRect(0, 0, W, H);
+
+  // ── Vignette ─────────────────────────────────────────────
+  const vignetteGrad = ctx.createRadialGradient(W / 2, H / 2, W * 0.5, W / 2, H / 2, W * 0.85);
+  vignetteGrad.addColorStop(0, "rgba(0,0,0,0)");
+  vignetteGrad.addColorStop(1, "rgba(0,0,0,0.45)");
+  ctx.fillStyle = vignetteGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  // ── Poem Cycling ─────────────────────────────────────────
+  poemTimer++;
+  if (poemTimer > POEM_INTERVAL) {
+    poemTimer = 0;
+    poemEls.forEach(el => el.classList.remove("visible"));
+    poemEls[poemIndex].classList.add("visible");
+    poemIndex = (poemIndex + 1) % poemEls.length;
+  }
+
+  requestAnimationFrame(draw);
+}
+
+function easeInOut(t) {
+  return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+}
+
+// ── Start ──────────────────────────────────────────────────
+draw();
+
+// ── Handle resize: regenerate trees ────────────────────────
+let resizeDebounce;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeDebounce);
+  resizeDebounce = setTimeout(() => {
+    resize();
+    trees.length = 0;
+    for (let i = 0; i < 5; i++) {
+      trees.push(createTree(i));
+    }
+  }, 400);
+});
+</script>
+</body>
+</html>
