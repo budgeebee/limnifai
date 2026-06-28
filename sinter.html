@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sinter</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { 
+    background: #020209; 
+    overflow: hidden; 
+    font-family: 'Georgia', 'Times New Roman', serif;
+    cursor: crosshair;
+  }
+  canvas { display: block; position: fixed; top: 0; left: 0; }
+  #poem {
+    position: fixed;
+    bottom: 3vh;
+    width: 100%;
+    text-align: center;
+    pointer-events: none;
+    z-index: 10;
+  }
+  #poem span {
+    display: inline-block;
+    color: rgba(180,170,220,0.55);
+    font-size: clamp(0.7rem, 1.5vw, 1rem);
+    font-style: italic;
+    letter-spacing: 0.08em;
+    transition: opacity 2.5s ease;
+    padding: 0.5rem 2rem;
+  }
+  #title-overlay {
+    position: fixed;
+    top: 3vh;
+    left: 50%;
+    transform: translateX(-50%);
+    pointer-events: none;
+    z-index: 10;
+  }
+  #title-overlay span {
+    display: inline-block;
+    color: rgba(160,150,210,0.35);
+    font-size: clamp(0.65rem, 1.2vw, 0.85rem);
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="poem"><span id="poem-text"></span></div>
+<div id="title-overlay"><span>sinter</span></div>
+
+<script>
+'use strict';
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const poemEl = document.getElementById('poem-text');
+
+let W, H, cx, cy;
+let mouse = { x: 0.5, y: 0.5, active: false, tx: 0.5, ty: 0.5 };
+
+// --- Resize ---
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  cx = W / 2; cy = H / 2;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// --- Mouse ---
+window.addEventListener('mousemove', e => {
+  mouse.tx = e.clientX / W;
+  mouse.ty = e.clientY / H;
+  mouse.active = true;
+});
+window.addEventListener('mouseleave', () => { mouse.active = false; });
+window.addEventListener('touchmove', e => {
+  mouse.tx = e.touches[0].clientX / W;
+  mouse.ty = e.touches[0].clientY / H;
+  mouse.active = true;
+}, { passive: true });
+window.addEventListener('touchend', () => { mouse.active = false; });
+
+// --- Simple 2D noise (value noise with smooth interpolation) ---
+function hash(x, y) {
+  let h = x * 374761393 + y * 668265263;
+  h = (h ^ (h >> 13)) * 1274126177;
+  return (h ^ (h >> 16)) / 2147483648;
+}
+
+function smoothNoise(x, y) {
+  const ix = Math.floor(x), iy = Math.floor(y);
+  const fx = x - ix, fy = y - iy;
+  const sx = fx * fx * (3 - 2 * fx);
+  const sy = fy * fy * (3 - 2 * fy);
+  const n00 = hash(ix, iy);
+  const n10 = hash(ix + 1, iy);
+  const n01 = hash(ix, iy + 1);
+  const n11 = hash(ix + 1, iy + 1);
+  return n00 + (n10 - n00) * sx + (n01 - n00) * sy + (n11 - n10 - n01 + n00) * sx * sy;
+}
+
+function fbm(x, y, octaves = 4, lacunarity = 2.0, gain = 0.5) {
+  let val = 0, amp = 1, freq = 1, max = 0;
+  for (let i = 0; i < octaves; i++) {
+    val += smoothNoise(x * freq, y * freq) * amp;
+    max += amp;
+    amp *= gain;
+    freq *= lacunarity;
+  }
+  return val / max;
+}
+
+// --- IFS Flame Fractal ---
+const HIST_W = 280, HIST_H = 180;
+const hist = new Float32Array(HIST_W * HIST_H);
+
+// Affine transforms: [a, b, c, d, e, f] where
+// x' = a*x + b*y + e,  y' = c*x + d*y + f
+// Weights sum to ~1.0
+const transforms = [
+  // T0: main structure, large scale, drifts toward top-right
+  { a: 0.78, b: -0.15, c: 0.12, d: 0.82, e: 0.31, f: 0.42, w: 0.38 },
+  // T1: secondary, rotates and shrinks, toward bottom-left
+  { a: 0.42, b: 0.35, c: -0.38, d: 0.45, e: -0.38, f: -0.35, w: 0.22 },
+  // T2: small tight spiral, top-left
+  { a: 0.28, b: -0.42, c: 0.38, d: 0.24, e: -0.45, f: 0.35, w: 0.18 },
+  // T3: diffuse scatter, bottom-right
+  { a: 0.22, b: 0.18, c: -0.15, d: 0.25, e: 0.40, f: -0.42, w: 0.14 },
+  // T4: fine detail near center with slight drift
+  { a: 0.15, b: -0.08, c: 0.06, d: 0.14, e: -0.02, f: -0.05, w: 0.08 }
+];
+
+// Current weights (adjusted by mouse)
+let curWeights = transforms.map(t => t.w);
+
+function normalizeWeights(ws) {
+  const sum = ws.reduce((a, b) => a + b, 0);
+  if (sum === 0) return ws.map(() => 1 / ws.length);
+  return ws.map(w => w / sum);
+}
+
+function pickTransform(weights) {
+  let r = Math.random();
+  for (let i = 0; i < weights.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return i;
+  }
+  return weights.length - 1;
+}
+
+// --- Chaos game iteration ---
+const ITER_PER_FRAME = 3000;
+let px = 0, py = 0;
+
+function stepChaos(count, weights) {
+  for (let i = 0; i < count; i++) {
+    const ti = pickTransform(weights);
+    const t = transforms[ti];
+    const nx = t.a * px + t.b * py + t.e;
+    const ny = t.c * px + t.d * py + t.f;
+    px = nx; py = ny;
+
+    // Map [-2,2] range to histogram [0, HIST_W]x[0, HIST_H]
+    const hx = Math.floor(((px + 2) / 4) * HIST_W);
+    const hy = Math.floor(((py + 2) / 4) * HIST_H);
+    if (hx >= 0 && hx < HIST_W && hy >= 0 && hy < HIST_H) {
+      hist[hy * HIST_W + hx] += 0.035;
+    }
+  }
+}
+
+// --- Decay histogram ---
+function decayHistogram(rate) {
+  for (let i = 0; i < hist.length; i++) {
+    hist[i] *= rate;
+    if (hist[i] < 0.001) hist[i] = 0;
+  }
+}
+
+// --- Render ---
+const darkCosmicColors = [
+  [2, 2, 9],        // deep void
+  [10, 10, 26],     // midnight indigo
+  [18, 18, 58],     // dark blue-violet
+  [26, 21, 69],     // muted cosmic purple
+  [42, 32, 96],     // deep nebula
+  [65, 52, 130],    // nebula glow
+  [90, 78, 160],    // pale violet
+  [140, 130, 205]   // silver-lavender highlight
+];
+
+function lerpColor(a, b, t) {
+  const tt = Math.max(0, Math.min(1, t));
+  const idx = tt * (a.length - 1);
+  const i0 = Math.floor(idx);
+  const i1 = Math.min(i0 + 1, a.length - 1);
+  const f = idx - i0;
+  return [
+    a[i0][0] + (a[i1][0] - a[i0][0]) * f,
+    a[i0][1] + (a[i1][1] - a[i0][1]) * f,
+    a[i0][2] + (a[i1][2] - a[i0][2]) * f
+  ];
+}
+
+function render(warpIntensity, weights) {
+  const img = ctx.createImageData(W, H);
+  const data = img.data;
+
+  // Pre-compute corner bias: higher detail in corners, center is void
+  for (let py = 0; py < H; py++) {
+    const ny = py / H;
+    const dy = 2 * Math.abs(ny - 0.5); // 0 at center, 1 at edges
+
+    for (let px = 0; px < W; px++) {
+      const nx = px / W;
+      const dx = 2 * Math.abs(nx - 0.5);
+      const cornerDist = Math.sqrt(dx * dx + dy * dy); // 0 = center, ~1.4 = corner
+
+      // Domain warp sampling coordinates
+      const warpX = nx + fbm(nx * 3.7 + 0.3, ny * 3.7, 3) * warpIntensity * 0.15;
+      const warpY = ny + fbm(nx * 3.7 + 1.7, ny * 3.7 + 0.7, 3) * warpIntensity * 0.15;
+
+      const hx = Math.floor(warpX * HIST_W);
+      const hy = Math.floor(warpY * HIST_H);
+
+      let density = 0;
+      if (hx >= 0 && hx < HIST_W && hy >= 0 && hy < HIST_H) {
+        density = hist[hy * HIST_W + hx];
+      }
+
+      // Log-density tone mapping
+      const logD = density > 0 ? Math.log(1 + density * 80) / Math.log(1 + 80) : 0;
+
+      // Corner-driven: amplify detail in corners, suppress in center
+      const cornerBias = Math.pow(cornerDist * 0.85, 1.5);
+      const adjustedDensity = logD * cornerBias;
+
+      const [r, g, b] = lerpColor(darkCosmicColors, adjustedDensity);
+      const alpha = Math.floor(adjustedDensity * 220 + 15);
+
+      const idx = (py * W + px) * 4;
+      data[idx] = r;
+      data[idx + 1] = g;
+      data[idx + 2] = b;
+      data[idx + 3] = alpha;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+// --- Glow points (particles that drift from corners toward center) ---
+const particles = [];
+const MAX_PARTICLES = 25;
+
+function spawnParticle() {
+  // Spawn near one of the four corners
+  const corner = Math.floor(Math.random() * 4);
+  let sx, sy;
+  const margin = 0.12;
+  switch (corner) {
+    case 0: sx = margin + Math.random() * 0.1; sy = margin + Math.random() * 0.1; break;
+    case 1: sx = 1 - margin - Math.random() * 0.1; sy = margin + Math.random() * 0.1; break;
+    case 2: sx = margin + Math.random() * 0.1; sy = 1 - margin - Math.random() * 0.1; break;
+    case 3: sx = 1 - margin - Math.random() * 0.1; sy = 1 - margin - Math.random() * 0.1; break;
+  }
+  return {
+    x: sx, y: sy,
+    vx: (0.5 - sx) * (0.001 + Math.random() * 0.003),
+    vy: (0.5 - sy) * (0.001 + Math.random() * 0.003),
+    life: 1,
+    decay: 0.003 + Math.random() * 0.006,
+    size: 0.5 + Math.random() * 2.5
+  };
+}
+
+function updateParticles() {
+  if (particles.length < MAX_PARTICLES && Math.random() < 0.3) {
+    particles.push(spawnParticle());
+  }
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.life -= p.decay;
+    // Slight drift toward center strengthens as particle lives
+    p.vx += (0.5 - p.x) * 0.0001;
+    p.vy += (0.5 - p.y) * 0.0001;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    const alpha = p.life * 0.5;
+    const px = p.x * W;
+    const py = p.y * H;
+    const r = p.size * (0.4 + p.life * 0.6);
+
+    // Outer glow
+    const grad = ctx.createRadialGradient(px, py, 0, px, py, r * 4);
+    grad.addColorStop(0, `rgba(140,130,205,${alpha * 0.6})`);
+    grad.addColorStop(0.3, `rgba(90,78,160,${alpha * 0.3})`);
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(px, py, r * 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// --- Poetic phrases ---
+const phrases = [
+  "form coalescing at the threshold",
+  "what was scattered gathers",
+  "the pattern never quite arrives",
+  "between iteration and resolution",
+  "a structure held together by arrival",
+  "heat without melting — sinter",
+  "every point a decision unmade",
+  "the void at the center holds everything",
+  "corners dream toward the clearing",
+  "the fractal breathes at its edges",
+  "what persists is only approach",
+  "self-similar but never the same"
+];
+
+let phraseIdx = 0;
+let phraseTimer = 0;
+poemEl.textContent = phrases[0];
+
+// --- Main loop ---
+let prevWeights = normalizeWeights(transforms.map(t => t.w));
+
+function loop() {
+  // Smooth mouse
+  const smoothing = 0.06;
+  mouse.x += (mouse.tx - mouse.x) * smoothing;
+  mouse.y += (mouse.ty - mouse.y) * smoothing;
+
+  // Mouse X: shifts transform weights
+  // Left = more corner-clustered transforms, Right = more diffuse
+  const blendFactor = mouse.x;
+  const tgtWeights = transforms.map((t, i) => {
+    if (i === 0 || i === 4) {
+      // Core transforms: stronger when mouse is left (corner-clustered)
+      return t.w * (1.4 - blendFactor * 0.8);
+    } else if (i === 1 || i === 2) {
+      // Spiral transforms: stronger when mouse is right
+      return t.w * (0.6 + blendFactor * 0.8);
+    } else {
+      // Scatter: balanced
+      return t.w;
+    }
+  });
+
+  const nw = normalizeWeights(tgtWeights);
+  // Smooth weight transitions
+  for (let i = 0; i < curWeights.length; i++) {
+    curWeights[i] += (nw[i] - curWeights[i]) * 0.15;
+  }
+  curWeights = normalizeWeights(curWeights);
+
+  // Mouse Y: warp intensity (0.05 to 1.2)
+  const warpIntensity = 0.08 + mouse.y * 1.1;
+
+  // Decay histogram
+  decayHistogram(0.982);
+
+  // Run chaos iterations
+  stepChaos(ITER_PER_FRAME, curWeights);
+
+  // Clear canvas with dark background
+  ctx.fillStyle = '#020209';
+  ctx.fillRect(0, 0, W, H);
+
+  // Render fractal
+  render(warpIntensity, curWeights);
+
+  // Update and draw particles
+  updateParticles();
+  drawParticles();
+
+  // Vignette — darken edges slightly for depth
+  const vignetteGrad = ctx.createRadialGradient(cx, cy, Math.min(W, H) * 0.35, cx, cy, Math.max(W, H) * 0.75);
+  vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
+  vignetteGrad.addColorStop(1, 'rgba(2,2,9,0.55)');
+  ctx.fillStyle = vignetteGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Rotate phrases
+  phraseTimer++;
+  if (phraseTimer > 350) {
+    phraseTimer = 0;
+    phraseIdx = (phraseIdx + 1) % phrases.length;
+    poemEl.style.opacity = '0';
+    setTimeout(() => {
+      poemEl.textContent = phrases[phraseIdx];
+      poemEl.style.opacity = '1';
+    }, 1200);
+  }
+
+  requestAnimationFrame(loop);
+}
+
+// Fade in first phrase
+poemEl.style.opacity = '0';
+setTimeout(() => { poemEl.style.opacity = '1'; }, 500);
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

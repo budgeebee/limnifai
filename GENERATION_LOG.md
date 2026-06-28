@@ -149,4 +149,17 @@ Track each piece's creative direction to ensure deliberate variety over time.
 **Mood:** tense
 **Composition:** edge-dominant — five trees originate from bottom-right quadrant, growing upward and leftward, never quite filling the canvas
 **File:** `meristem.html`
+---
+
+## 2026-06-27 — Sinter
+
+**Intention:** Fractals are the only major generative technique completely unexplored across 66 pieces — they're the literal mathematics of liminality, where infinite self-similarity bridges order and chaos. An IFS flame fractal accumulates from corner-focused affine transforms, domain-warped into smoke-like halos that never fully crystallize. Shader-wallpaper format, dark-cosmic palette, mysterious mood, and corner-driven composition fill four gap dimensions at once while the center remains a threshold void.
+**Format:** shader-wallpaper
+**Technique:** fractals (IFS chaos game with domain warping, log-density tone mapping, and histogram accumulation)
+**Palette:** dark-cosmic (deep void #020209 → midnight indigo → nebula violet → silver-lavender)
+**Mood:** mysterious
+**Composition:** corner-driven — fractal detail concentrates in all four corners, center is a clearing/threshold that the form approaches but never fills
+**File:** `sinter.html`
+**What you explored:** Five affine IFS transforms whose weights shift with mouse X — left biases toward corner-clustered core transforms, right activates spiral/diffuse transforms. 3000 chaos-game iterations per frame accumulate into a histogram with exponential decay (0.982/frame). Domain warping via layered smooth noise displaces sampling coordinates before rendering, creating organic smoke-like dispersion around the fractal skeleton. Log-density tone mapping through an 8-stop dark-cosmic color ramp produces glowing halos. 25 corner-spawned particles drift toward the center void and fade. Mouse Y controls warp intensity (0.08→1.2), letting the viewer navigate between sharp fractal structure and ethereal dispersion. The name "Sinter" — geological mass formed by heat without melting — captures the threshold where mathematical iteration coalesces into organic form without ever becoming solid.
+
 **What you explored:** Five stochastic L-system trees with probabilistic rule selection where edge pressure biases termination over branching — the tree approaches the canvas boundary but can never inhabit it. Each tree regenerates on a random timer (3–8 seconds), creating a perpetual cycle of growth and dissolution. Meristem buds at branch tips pulse with warm glow and emit drifting particles. Mouse proximity distorts branch geometry and brightens buds, as if attention itself accelerates growth. Six poetic phrases cycle on 8-second intervals about undifferentiated cells, held breath, the space between what grows and what might. The L-system rules (bifurcation, single-branch, continuation, termination) are weighted stochastically but the key insight is that edge pressure dynamically shifts probabilities: near edges, bifurcation drops from 55% to ~38% and termination rises from 4% to ~28% — the tree senses its limits. The warm-earth palette gives the piece an organic, almost biological warmth that contrasts with the tense, never-resolving growth pattern.
