@@ -137,3 +137,16 @@ Track each piece's creative direction to ensure deliberate variety over time.
 **Composition:** full-bleed
 **File:** `plume.html`
 **What you explored:** A full Stam-style stable fluids solver on a 100×72 grid, rendered at 8× scale to fill the viewport. Semi-Lagrangian advection with bilinear interpolation, Jacobi relaxation for diffusion (20 iterations) and pressure projection (40 iterations). Auto-injected plumes rise periodically from the bottom third with Gaussian falloff and upward velocity bias. Mouse drag injects both dye density and velocity along the stroke path with interpolation. Strong density decay (0.995/frame) gives the piece its melancholic character — plumes are always in the process of vanishing. Five cold-ethereal palette tones mapped to density intensity, creating a luminescent glow at the bright cores and foggy dispersion at the edges. Ten poetic phrases cycle slowly about rising, dissolving, and the boundary that was never there. The phenomenon itself — a plume — is liminal by nature: a column of fluid rising through its own dissolution, defined entirely by its boundary with the surrounding medium.
+
+---
+
+## 2026-06-26 — Meristem
+
+**Intention:** L-systems are the only major generative technique never explored across 65 pieces — fractal botanical growth is literally a cascade of thresholds, where every meristem tip is a decision point between continuing, bifurcating, or terminating. Warm-earth palette and tense mood are both underrepresented, and edge-dominant composition lets the growth concentrate in the bottom-right quadrant while the rest of the canvas remains in potentia — the tree is always reaching, never arriving.
+**Format:** generative-visual
+**Technique:** L-systems (stochastic context-free branching with probability modulated by edge pressure — the closer a branch tip gets to a canvas edge, the more likely it is to terminate rather than bifurcate)
+**Palette:** warm-earth (ochre, sienna, cream, terracotta on deep sepia-black background #1a0e06)
+**Mood:** tense
+**Composition:** edge-dominant — five trees originate from bottom-right quadrant, growing upward and leftward, never quite filling the canvas
+**File:** `meristem.html`
+**What you explored:** Five stochastic L-system trees with probabilistic rule selection where edge pressure biases termination over branching — the tree approaches the canvas boundary but can never inhabit it. Each tree regenerates on a random timer (3–8 seconds), creating a perpetual cycle of growth and dissolution. Meristem buds at branch tips pulse with warm glow and emit drifting particles. Mouse proximity distorts branch geometry and brightens buds, as if attention itself accelerates growth. Six poetic phrases cycle on 8-second intervals about undifferentiated cells, held breath, the space between what grows and what might. The L-system rules (bifurcation, single-branch, continuation, termination) are weighted stochastically but the key insight is that edge pressure dynamically shifts probabilities: near edges, bifurcation drops from 55% to ~38% and termination rises from 4% to ~28% — the tree senses its limits. The warm-earth palette gives the piece an organic, almost biological warmth that contrasts with the tense, never-resolving growth pattern.
