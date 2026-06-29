@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cusp</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #080808;
+    overflow: hidden;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    cursor: crosshair;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  canvas { display: block; }
+
+  #coherence-bar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 4px;
+    background: #1a1a1a;
+    z-index: 10;
+    transition: height 0.6s ease;
+  }
+  #coherence-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #d4a853, #f5e6c8);
+    transition: width 0.3s ease, opacity 0.5s ease;
+    box-shadow: 0 0 8px rgba(212, 168, 83, 0.6);
+  }
+  #coherence-bar.low { height: 6px; }
+  #coherence-bar.low #coherence-fill {
+    background: linear-gradient(90deg, #a84040, #d4a853);
+    box-shadow: 0 0 12px rgba(212, 80, 80, 0.7);
+  }
+  #coherence-bar.critical {
+    height: 8px;
+    animation: pulse-bar 0.6s ease-in-out infinite;
+  }
+  #coherence-bar.critical #coherence-fill {
+    background: linear-gradient(90deg, #8a2020, #a84040);
+    box-shadow: 0 0 16px rgba(200, 60, 60, 0.9);
+  }
+  @keyframes pulse-bar {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  #coherence-text {
+    position: fixed;
+    top: 12px;
+    right: 16px;
+    color: rgba(255,255,255,0.5);
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    z-index: 10;
+    font-family: 'Georgia', serif;
+  }
+
+  #vignette {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 5;
+    transition: opacity 0.8s ease;
+    opacity: 0;
+    background: radial-gradient(ellipse at center, transparent 35%, rgba(160,40,40,0.25) 70%, rgba(120,20,20,0.5) 100%);
+  }
+
+  #poem {
+    position: fixed;
+    bottom: 32px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(255,255,255,0.35);
+    font-size: 13px;
+    font-style: italic;
+    letter-spacing: 0.08em;
+    z-index: 10;
+    text-align: center;
+    transition: opacity 1.2s ease;
+    pointer-events: none;
+  }
+
+  #instruction {
+    position: fixed;
+    bottom: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(255,255,255,0.2);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    z-index: 10;
+    pointer-events: none;
+    transition: opacity 2s ease;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="coherence-bar"><div id="coherence-fill"></div></div>
+<div id="coherence-text">coherence —%</div>
+<div id="vignette"></div>
+<div id="poem"></div>
+<div id="instruction">move to hold · click to anchor · release to let go</div>
+
+<script>
+// ──────────────────────────────────────
+// CUSP — geometric tessellation game-toy
+// ──────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const bar = document.getElementById('coherence-bar');
+const barFill = document.getElementById('coherence-fill');
+const cohText = document.getElementById('coherence-text');
+const vignette = document.getElementById('vignette');
+const poem = document.getElementById('poem');
+const instruction = document.getElementById('instruction');
+
+// ── Responsive sizing ──
+const HEX_R = 36;
+let cols, rows, totalTriangles;
+let hexes = [];
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  initGrid();
+}
+window.addEventListener('resize', resize);
+
+// ── Noise field ──
+function noise2D(x, y, t) {
+  const fx = x * 0.013;
+  const fy = y * 0.013;
+  return (
+    Math.sin(fx + t * 0.23) * Math.cos(fy - t * 0.17) * 0.32 +
+    Math.sin(fy + fx * 0.7 + t * 0.19) * Math.sin(fx - fy * 0.6 + t * 0.13) * 0.26 +
+    Math.cos((fx + fy) * 0.8 + t * 0.21) * Math.cos((fx - fy) * 0.7 + t * 0.11) * 0.22 +
+    Math.sin(fx * 1.9 - t * 0.09) * Math.sin(fy * 1.7 + t * 0.15) * 0.20
+  );
+}
+
+// ── Grid initialization ──
+function initGrid() {
+  hexes = [];
+  const spacingX = HEX_R * 1.5;
+  const spacingY = Math.sqrt(3) * HEX_R;
+
+  cols = Math.ceil(canvas.width / spacingX) + 2;
+  rows = Math.ceil(canvas.height / spacingY) + 2;
+  totalTriangles = cols * rows * 6;
+
+  for (let row = -1; row < rows; row++) {
+    for (let col = -1; col < cols; col++) {
+      const cx = col * spacingX + (row % 2) * spacingX * 0.5 + spacingX * 0.5;
+      const cy = row * spacingY + spacingY * 0.5;
+
+      const triangles = [];
+      for (let i = 0; i < 6; i++) {
+        const a1 = i * Math.PI / 3;
+        const a2 = (i + 1) * Math.PI / 3;
+
+        const v1 = { x: cx, y: cy };
+        const v2 = { x: cx + HEX_R * Math.cos(a1), y: cy + HEX_R * Math.sin(a1) };
+        const v3 = { x: cx + HEX_R * Math.cos(a2), y: cy + HEX_R * Math.sin(a2) };
+
+        const centroid = {
+          x: (v1.x + v2.x + v3.x) / 3,
+          y: (v1.y + v2.y + v3.y) / 3
+        };
+
+        // Precompute vertices relative to centroid (for rotation)
+        const rel1 = { x: v1.x - centroid.x, y: v1.y - centroid.y };
+        const rel2 = { x: v2.x - centroid.x, y: v2.y - centroid.y };
+        const rel3 = { x: v3.x - centroid.x, y: v3.y - centroid.y };
+
+        triangles.push({
+          centroid,
+          rel1, rel2, rel3,
+          rot: 0,
+          snapFlash: 0
+        });
+      }
+
+      hexes.push({ cx, cy, triangles });
+    }
+  }
+}
+
+// ── State ──
+let mouseX = -999, mouseY = -999;
+let mouseActive = false;
+let time = 0;
+let coherence = 100;
+let smoothCoherence = 100;
+let shakeAmount = 0;
+const pulses = []; // { x, y, radius, strength, life }
+
+// ── Helper: rotate a point around origin ──
+function rotatePoint(px, py, angle) {
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  return {
+    x: px * c - py * s,
+    y: px * s + py * c
+  };
+}
+
+// ── Mouse tracking ──
+canvas.addEventListener('mousemove', (e) => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+  mouseActive = true;
+});
+
+canvas.addEventListener('mouseleave', () => {
+  mouseActive = false;
+});
+
+canvas.addEventListener('click', (e) => {
+  pulses.push({
+    x: e.clientX,
+    y: e.clientY,
+    radius: 0,
+    maxRadius: 280,
+    strength: 1.6,
+    life: 1.4
+  });
+});
+
+// Touch support
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  mouseX = e.touches[0].clientX;
+  mouseY = e.touches[0].clientY;
+  mouseActive = true;
+}, { passive: false });
+
+canvas.addEventListener('touchend', () => {
+  mouseActive = false;
+});
+
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  mouseX = e.touches[0].clientX;
+  mouseY = e.touches[0].clientY;
+  mouseActive = true;
+  pulses.push({
+    x: mouseX, y: mouseY,
+    radius: 0, maxRadius: 240,
+    strength: 1.3, life: 1.2
+  });
+}, { passive: false });
+
+// ── Poem phrases ──
+const phrases = [
+  'the gap between what was and what holds',
+  'at the edge of coming together',
+  'where form breathes before deciding',
+  'the space that makes the pattern possible',
+  'six edges · one center · zero guarantees',
+  'hold me long enough and I might stay',
+  'every boundary is a decision',
+  'the pattern forgets itself in motion',
+  'what fits together also falls apart',
+  'the cusp is where the curve turns back'
+];
+let phraseIndex = 0;
+let phraseOpacity = 0;
+let phraseTimer = 0;
+const PHRASE_INTERVAL = 5.5;
+
+// ── Main render loop ──
+let lastFrame = performance.now();
+let elapsedTotal = 0;
+
+function frame(now) {
+  const dt = Math.min((now - lastFrame) / 1000, 0.1);
+  lastFrame = now;
+  elapsedTotal += dt;
+  time = elapsedTotal;
+
+  // ── Update ──
+  // Noise amplitude cycles: base + urgency wave
+  const urgencyCycle = Math.sin(time * 0.15) * 0.5 + 0.5;
+  const baseAmplitude = 0.18 + urgencyCycle * 0.14; // 0.18–0.32 rad (~10°–18°)
+  const mouseOrderRadius = 160;
+  const mouseStrongRadius = 45;
+
+  // Update pulses
+  for (let p of pulses) {
+    p.radius += (p.maxRadius - p.radius) * dt * 3.5;
+    p.life -= dt;
+  }
+  // Remove dead pulses
+  for (let i = pulses.length - 1; i >= 0; i--) {
+    if (pulses[i].life <= 0) pulses.splice(i, 1);
+  }
+
+  let alignedCount = 0;
+  const totalCount = totalTriangles;
+  const ALIGN_THRESHOLD = 0.04; // rad — below this = "aligned"
+
+  for (let h of hexes) {
+    for (let tri of h.triangles) {
+      // Compute target rotation from noise field
+      const noiseVal = noise2D(tri.centroid.x, tri.centroid.y, time);
+      let targetRot = noiseVal * baseAmplitude;
+
+      // Mouse order field: pull rotation toward zero
+      if (mouseActive) {
+        const dx = tri.centroid.x - mouseX;
+        const dy = tri.centroid.y - mouseY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        let correction = 0;
+        if (dist < mouseStrongRadius) {
+          correction = 1.0;
+        } else if (dist < mouseOrderRadius) {
+          const t = (dist - mouseStrongRadius) / (mouseOrderRadius - mouseStrongRadius);
+          correction = 1.0 - t * t;
+        }
+
+        if (correction > 0) {
+          targetRot *= (1.0 - correction);
+        }
+      }
+
+      // Pulse corrections
+      for (let p of pulses) {
+        const dx = tri.centroid.x - p.x;
+        const dy = tri.centroid.y - p.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < p.radius) {
+          const t = 1.0 - dist / p.radius;
+          const correction = t * t * p.strength * (p.life / 1.4);
+          targetRot *= (1.0 - Math.min(correction, 1.0));
+        }
+      }
+
+      // Smooth rotation toward target
+      const rotSpeed = 4.5;
+      tri.rot += (targetRot - tri.rot) * rotSpeed * dt;
+
+      // Snap flash
+      if (Math.abs(tri.rot) < 0.025 && tri.snapFlash <= 0) {
+        tri.snapFlash = 0.6;
+      }
+      tri.snapFlash = Math.max(0, tri.snapFlash - dt * 2.5);
+
+      // Count aligned
+      if (Math.abs(tri.rot) < ALIGN_THRESHOLD) alignedCount++;
+    }
+  }
+
+  // Coherence
+  coherence = Math.round((alignedCount / totalCount) * 100);
+  smoothCoherence += (coherence - smoothCoherence) * dt * 3.5;
+
+  // Shake
+  shakeAmount += ((mouseActive ? 0 : 12) - coherence * 0.12 - shakeAmount) * dt * 2.0;
+  shakeAmount = Math.max(0, Math.min(shakeAmount, 8));
+
+  // ── Render ──
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Shake offset
+  const sx = (Math.random() - 0.5) * shakeAmount * 0.5;
+  const sy = (Math.random() - 0.5) * shakeAmount * 0.5;
+
+  ctx.save();
+  ctx.translate(sx, sy);
+
+  // Draw all triangles
+  for (let h of hexes) {
+    for (let tri of h.triangles) {
+      const r = tri.rot;
+      const absR = Math.abs(r);
+
+      // Determine fill color
+      let rFill, gFill, bFill;
+      if (absR < 0.025) {
+        // Near-perfect alignment — white
+        rFill = 240; gFill = 240; bFill = 240;
+      } else if (absR < 0.06) {
+        // Slight drift — light gray
+        const t = (absR - 0.025) / 0.035;
+        rFill = Math.floor(240 - t * 100);
+        gFill = Math.floor(240 - t * 100);
+        bFill = Math.floor(240 - t * 100);
+      } else if (absR < 0.18) {
+        // Moderate drift — medium gray
+        const t = (absR - 0.06) / 0.12;
+        const base = 140 - t * 80;
+        rFill = Math.floor(base);
+        gFill = Math.floor(base);
+        bFill = Math.floor(base);
+      } else {
+        // Strong drift — dark gray near background
+        const t = Math.min((absR - 0.18) / 0.22, 1.0);
+        const base = 60 - t * 32;
+        rFill = Math.floor(base);
+        gFill = Math.floor(base);
+        bFill = Math.floor(base);
+      }
+
+      // Snap flash: warm gold
+      if (tri.snapFlash > 0) {
+        const f = tri.snapFlash;
+        rFill = Math.floor(rFill + (212 - rFill) * f);
+        gFill = Math.floor(gFill + (168 - gFill) * f);
+        bFill = Math.floor(bFill + (83 - bFill) * f * 0.7);
+      }
+
+      const fillColor = `rgb(${rFill},${gFill},${bFill})`;
+
+      // Rotate triangle vertices around centroid
+      const r1 = rotatePoint(tri.rel1.x, tri.rel1.y, r);
+      const r2 = rotatePoint(tri.rel2.x, tri.rel2.y, r);
+      const r3 = rotatePoint(tri.rel3.x, tri.rel3.y, r);
+
+      const cx = tri.centroid.x, cy = tri.centroid.y;
+
+      // Draw filled triangle
+      ctx.beginPath();
+      ctx.moveTo(r1.x + cx, r1.y + cy);
+      ctx.lineTo(r2.x + cx, r2.y + cy);
+      ctx.lineTo(r3.x + cx, r3.y + cy);
+      ctx.closePath();
+      ctx.fillStyle = fillColor;
+      ctx.fill();
+
+      // Draw stroke (thin gap lines between triangles)
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+      ctx.lineWidth = 0.6;
+      ctx.stroke();
+    }
+  }
+
+  // Draw pulse rings
+  for (let p of pulses) {
+    const alpha = p.life / 1.4;
+    ctx.beginPath();
+    ctx.arc(p.x - sx, p.y - sy, p.radius, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(212,168,83,${0.35 * alpha})`;
+    ctx.lineWidth = 2.0 * alpha;
+    ctx.stroke();
+
+    // Inner glow ring
+    ctx.beginPath();
+    ctx.arc(p.x - sx, p.y - sy, p.radius * 0.6, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(245,230,200,${0.2 * alpha})`;
+    ctx.lineWidth = 4.0 * alpha;
+    ctx.stroke();
+  }
+
+  // Draw mouse order zone
+  if (mouseActive) {
+    const grd = ctx.createRadialGradient(mouseX - sx, mouseY - sy, mouseStrongRadius * 0.3,
+                                          mouseX - sx, mouseY - sy, mouseOrderRadius);
+    grd.addColorStop(0, 'rgba(212,168,83,0.06)');
+    grd.addColorStop(0.5, 'rgba(245,230,200,0.03)');
+    grd.addColorStop(1, 'rgba(245,230,200,0)');
+    ctx.beginPath();
+    ctx.arc(mouseX - sx, mouseY - sy, mouseOrderRadius, 0, Math.PI * 2);
+    ctx.fillStyle = grd;
+    ctx.fill();
+  }
+
+  ctx.restore();
+
+  // ── UI updates ──
+  const displayCoh = Math.round(smoothCoherence);
+  barFill.style.width = displayCoh + '%';
+  cohText.textContent = `coherence ${displayCoh}%`;
+
+  // Bar classes
+  bar.classList.remove('low', 'critical');
+  if (displayCoh < 20) bar.classList.add('critical');
+  else if (displayCoh < 40) bar.classList.add('low');
+
+  // Vignette
+  vignette.style.opacity = displayCoh < 35 ? ((35 - displayCoh) / 35 * 0.9) : '0';
+
+  // Poem rotation
+  phraseTimer += dt;
+  if (phraseTimer > PHRASE_INTERVAL) {
+    phraseTimer = 0;
+    phraseOpacity = 0;
+    phraseIndex = (phraseIndex + 1) % phrases.length;
+    poem.textContent = phrases[phraseIndex];
+  }
+  // Fade in/out
+  const fadeProgress = phraseTimer / PHRASE_INTERVAL;
+  if (fadeProgress < 0.15) {
+    phraseOpacity = fadeProgress / 0.15;
+  } else if (fadeProgress > 0.8) {
+    phraseOpacity = (1.0 - fadeProgress) / 0.2;
+  } else {
+    phraseOpacity = 1.0;
+  }
+  poem.style.opacity = phraseOpacity * 0.7;
+
+  // Fade instruction
+  instruction.style.opacity = Math.max(0, 0.25 - elapsedTotal * 0.02);
+
+  requestAnimationFrame(frame);
+}
+
+// ── Initialize ──
+resize();
+poem.textContent = phrases[0];
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
