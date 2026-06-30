@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Murmur</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #f6eef7; }
+  body {
+    font-family: 'Georgia', 'Cormorant Garamond', serif;
+    color: #6b5a73;
+    -webkit-font-smoothing: antialiased;
+    cursor: none;
+  }
+  #canvas {
+    position: absolute; inset: 0;
+    width: 100vw; height: 100vh;
+    display: block;
+  }
+  #title {
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    font-size: clamp(28px, 4vw, 54px);
+    letter-spacing: 0.4em;
+    text-transform: lowercase;
+    color: rgba(120, 95, 130, 0.55);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 4s ease;
+    font-weight: 300;
+    text-align: center;
+  }
+  #title.show { opacity: 1; }
+  #title.hide { opacity: 0; transition: opacity 4s ease; }
+  #subtitle {
+    position: absolute;
+    left: 50%; bottom: 7vh;
+    transform: translateX(-50%);
+    font-size: 12px;
+    letter-spacing: 0.32em;
+    color: rgba(140, 120, 150, 0);
+    pointer-events: none;
+    transition: color 6s ease;
+    text-transform: lowercase;
+    white-space: nowrap;
+    font-style: italic;
+    max-width: 90vw;
+    text-align: center;
+  }
+  #subtitle.show { color: rgba(140, 120, 150, 0.55); }
+  #breath {
+    position: absolute;
+    right: 6vw; top: 50%;
+    transform: translateY(-50%);
+    width: 1px; height: 28vh;
+    background: linear-gradient(to bottom,
+      rgba(180,160,200,0) 0%,
+      rgba(180,160,200,0.45) 50%,
+      rgba(180,160,200,0) 100%);
+    opacity: 0.4;
+    pointer-events: none;
+  }
+  #breath .marker {
+    position: absolute;
+    left: -3px; top: 50%;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: rgba(200,170,215,0.7);
+    box-shadow: 0 0 12px rgba(200,170,215,0.5);
+    transform: translateY(-50%);
+  }
+  #dot {
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 4px; height: 4px;
+    border-radius: 50%;
+    background: rgba(180,150,200,0.0);
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    transition: background 1.2s ease;
+  }
+  #dot.on {
+    background: rgba(180,150,200,0.85);
+    box-shadow: 0 0 16px rgba(220,190,230,0.5);
+  }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="title">murmur</div>
+<div id="breath"><div class="marker" id="breath-marker"></div></div>
+<div id="subtitle"></div>
+<div id="dot"></div>
+
+<script>
+'use strict';
+
+// ---------------------------------------------------------------------------
+//   M U R M U R
+//
+//   a pastel-dream, ambient-only, full-bleed smoke wallpaper.
+//
+//   smoke drifts upward in a curl-noise velocity field on a pastel gradient
+//   background. there is no mouse interaction. the piece is alive on its
+//   own terms — it breathes, exhales, disperses, and is reborn.
+//
+//   technique:
+//     - layered sine-noise curl field for divergence-free flow
+//     - semi-Lagrangian advection on a density grid
+//     - 5-tap gaussian diffuse per frame
+//     - density sources injected periodically along the bottom edge
+//     - density rendered as soft additive radial-gradient puffs
+//     - background slowly cycles through a pastel-dream palette
+//
+//   liminality expressed:
+//     - the threshold between smoke and air
+//     - the in-breath before a thought finds its shape
+//     - what remains when nothing is asked of you
+//
+// ---------------------------------------------------------------------------
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d', { alpha: false });
+const titleEl = document.getElementById('title');
+const subtitleEl = document.getElementById('subtitle');
+const breathMarker = document.getElementById('breath-marker');
+const dotEl = document.getElementById('dot');
+
+// ----- canvas sizing -------------------------------------------------------
+
+let W = 0, H = 0;                  // canvas pixels
+let GW = 160, GH = 100;            // grid cells (smoke resolution)
+let cellSize = 0;
+
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  canvas.width = Math.max(1, Math.floor(w * dpr));
+  canvas.height = Math.max(1, Math.floor(h * dpr));
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  W = w; H = h;
+  cellSize = w / GW;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ----- palette ------------------------------------------------------------
+//
+//   pastel-dream — soft, dawnlike, in-breath colors.
+//   five ordered stops; we lerp between them through the day.
+
+const PALETTE = [
+  [216, 197, 255],   // 0.00 — pale lavender
+  [251, 213, 232],   // 0.25 — soft pink
+  [255, 217, 184],   // 0.50 — peach
+  [197, 240, 212],   // 0.75 — mint
+  [248, 239, 214]    // 1.00 — cream
+];
+
+function paletteLerp(t) {
+  // t in [0,1] loops through PALETTE
+  t = ((t % 1) + 1) % 1;
+  const n = PALETTE.length - 1;
+  const f = t * n;
+  const i = Math.floor(f);
+  const j = Math.min(i + 1, n);
+  const k = f - i;
+  const a = PALETTE[i], b = PALETTE[j];
+  return [
+    a[0] + (b[0] - a[0]) * k,
+    a[1] + (b[1] - a[1]) * k,
+    a[2] + (b[2] - a[2]) * k
+  ];
+}
+
+// ----- noise --------------------------------------------------------------
+//
+//   layered sine-noise. not true perlin but visually silky; cheap, fast,
+//   and gives a curl-noise field that looks like slow wind on fabric.
+
+function noise(x, y, t) {
+  return (
+    Math.sin(x * 1.27 + t * 0.42) * 0.50 +
+    Math.sin(y * 1.13 + t * 0.31) * 0.50 +
+    Math.sin((x + y) * 0.71 + t * 0.27) * 0.50 +
+    Math.sin((x - y) * 0.97 + t * 0.19) * 0.50 +
+    Math.sin(x * 2.13 + y * 0.43 + t * 0.61) * 0.25
+  ) / 2.25;
+}
+
+//   curl of the noise field gives a divergence-free 2d flow:
+//     vx =  dψ/dy
+//     vy = -dψ/dx
+//   we sample the scalar noise ψ = noise(x,y,t).
+
+const CURL_EPS = 0.6;
+function curl(x, y, t) {
+  const dy = noise(x, y + CURL_EPS, t) - noise(x, y - CURL_EPS, t);
+  const dx = noise(x + CURL_EPS, y, t) - noise(x - CURL_EPS, y, t);
+  return [dy / (2 * CURL_EPS), -dx / (2 * CURL_EPS)];
+}
+
+// ----- smoke field --------------------------------------------------------
+
+//   density field: how much "smoke" sits in each cell.
+//   velocity field: how it moves.
+//   we keep two ping-pong buffers for advection.
+
+let density     = new Float32Array(GW * GH);
+let densityNext = new Float32Array(GW * GH);
+let vx          = new Float32Array(GW * GH);
+let vy          = new Float32Array(GW * GH);
+
+function idx(x, y) { return y * GW + x; }
+
+function sampleBilinear(field, fx, fy) {
+  // bilinear sample with clamp
+  const x = Math.max(0, Math.min(GW - 1.001, fx));
+  const y = Math.max(0, Math.min(GH - 1.001, fy));
+  const i = Math.floor(x), j = Math.floor(y);
+  const fxr = x - i, fyr = y - j;
+  const i1 = Math.min(i + 1, GW - 1);
+  const j1 = Math.min(j + 1, GH - 1);
+  const a = field[idx(i,  j)];
+  const b = field[idx(i1, j)];
+  const c = field[idx(i,  j1)];
+  const d = field[idx(i1, j1)];
+  return (
+    a * (1 - fxr) * (1 - fyr) +
+    b * fxr       * (1 - fyr) +
+    c * (1 - fxr) *       fyr  +
+    d * fxr       *       fyr
+  );
+}
+
+// ----- advection + diffusion + sources ----------------------------------
+
+const ADVECT_DT  = 0.18;   // flow rate per frame
+const DIFFUSE_W  = 0.06;   // gaussian diffusion coefficient
+const DECAY      = 0.9965; // density decay per frame (slow — serenity)
+const SWIRL      = 1.05;   // overall velocity field strength
+const RISE       = 0.55;   // baseline upward drift
+
+function advect() {
+  // back-trace through velocity field
+  for (let y = 1; y < GH - 1; y++) {
+    for (let x = 1; x < GW - 1; x++) {
+      const i = idx(x, y);
+      const vxi = vx[i] * SWIRL;
+      const vyi = vy[i] * SWIRL - RISE; // bias upward
+      const sx = x - vxi * ADVECT_DT;
+      const sy = y - vyi * ADVECT_DT;
+      densityNext[i] = sampleBilinear(density, sx, sy) * DECAY;
+    }
+  }
+  [density, densityNext] = [densityNext, density];
+}
+
+function diffuse() {
+  // 5-tap gaussian blur (laplacian as diffusion)
+  for (let y = 1; y < GH - 1; y++) {
+    for (let x = 1; x < GW - 1; x++) {
+      const i = idx(x, y);
+      const c = density[i];
+      const n = density[idx(x,     y - 1)];
+      const s = density[idx(x,     y + 1)];
+      const e = density[idx(x + 1, y    )];
+      const w = density[idx(x - 1, y    )];
+      const self = c + DIFFUSE_W * (n + s + e + w - 4 * c);
+      densityNext[i] = Math.max(0, self);
+    }
+  }
+  [density, densityNext] = [densityNext, density];
+}
+
+// periodic smoke sources along the bottom
+//   - every ~0.32s we add a new puff at a random x along bottom
+//   - the puff is a gaussian falloff across 4 rows
+//   - puffs vary in size and strength
+let nextSourceAt = 0;
+function injectSources(now) {
+  if (now < nextSourceAt) return;
+  nextSourceAt = now + 0.18 + Math.random() * 0.34;
+  const sx = 4 + Math.floor(Math.random() * (GW - 8));
+  const strength = 0.55 + Math.random() * 0.55;
+  const width = 2 + Math.floor(Math.random() * 4);
+  const depth = 4 + Math.floor(Math.random() * 4);
+  for (let dx = -width; dx <= width; dx++) {
+    for (let dy = 0; dy < depth; dy++) {
+      const x = sx + dx;
+      const y = GH - 1 - dy; // bottom up
+      if (x < 1 || x >= GW - 1 || y < 1 || y >= GH - 1) continue;
+      const fall = Math.exp(-(dx * dx) / (width * width * 0.6) - (dy * dy) / (depth * depth * 0.5));
+      density[idx(x, y)] = Math.min(1.4, density[idx(x, y)] + strength * fall);
+    }
+  }
+}
+
+// velocity field update — recomputed from curl noise each frame
+function updateVelocity(t) {
+  const tt = t * 0.5;
+  for (let y = 0; y < GH; y++) {
+    for (let x = 0; x < GW; x++) {
+      const c = curl(x * 0.18, y * 0.22, tt);
+      const i = idx(x, y);
+      vx[i] = c[0];
+      vy[i] = c[1];
+    }
+  }
+}
+
+// ----- rendering ---------------------------------------------------------
+
+//   we render density not as a uniform field but as a soft field of
+//   additive radial-gradient blobs. this gives the "smoke" feel rather
+//   than the "weather map" feel of density-as-pixel.
+
+function drawBackground(t) {
+  // full-bleed gradient that cycles through the palette slowly.
+  // background uses 3 palette points offset by time, blended as a vertical
+  // gradient through a tinted "fog" color.
+
+  const cycleA = paletteLerp(t / 47.0);
+  const cycleB = paletteLerp(t / 47.0 + 0.5);
+  const cycleC = paletteLerp(t / 47.0 + 0.18);
+
+  // mix toward a mist-y base so colors never feel candy
+  const base = [246, 240, 248]; // soft bone
+  const bg1 = mix(base, cycleA, 0.55);
+  const bg2 = mix(base, cycleB, 0.55);
+
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0.0,    rgb(bg1));
+  g.addColorStop(0.55,   rgb(mix(bg1, bg2, 0.5)));
+  g.addColorStop(1.0,    rgb(bg2));
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  // soft horizontal tint band that drifts — gives the background its own
+  // 'breath' independent of the smoke. cycleC biases the warmth toward
+  // one side using a radial gradient with low alpha.
+  const cx = W * (0.30 + 0.40 * (0.5 + 0.5 * Math.sin(t / 19)));
+  const rg = ctx.createRadialGradient(cx, H * 0.45, 0, cx, H * 0.45, Math.max(W, H) * 0.85);
+  rg.addColorStop(0, `rgba(${cycleC[0]|0},${cycleC[1]|0},${cycleC[2]|0},0.18)`);
+  rg.addColorStop(1, `rgba(${cycleC[0]|0},${cycleC[1]|0},${cycleC[2]|0},0)`);
+  ctx.fillStyle = rg;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function rgb(c) {
+  return `rgb(${(c[0]|0)},${(c[1]|0)},${(c[2]|0)})`;
+}
+function rgba(c, a) {
+  return `rgba(${(c[0]|0)},${(c[1]|0)},${(c[2]|0)},${a})`;
+}
+function mix(a, b, t) {
+  return [
+    a[0] + (b[0] - a[0]) * t,
+    a[1] + (b[1] - a[1]) * t,
+    a[2] + (b[2] - a[2]) * t
+  ];
+}
+
+// soft additive radial gradient at a pixel
+const tmpCanvas = document.createElement('canvas');
+const tmpCtx = tmpCanvas.getContext('2d');
+function drawPuffBlob(px, py, radius, color, alpha) {
+  // pre-render the radial blob once per frame onto a tiny offscreen
+  // and stamp it — this is dramatically faster than createRadialGradient
+  // per blob.
+  const sz = Math.ceil(radius * 2);
+  tmpCanvas.width = sz;
+  tmpCanvas.height = sz;
+  const cx = sz / 2, cy = sz / 2;
+  const g = tmpCtx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+  g.addColorStop(0,    rgba(color, alpha));
+  g.addColorStop(0.45, rgba(color, alpha * 0.55));
+  g.addColorStop(1,    rgba(color, 0));
+  tmpCtx.clearRect(0, 0, sz, sz);
+  tmpCtx.fillStyle = g;
+  tmpCtx.fillRect(0, 0, sz, sz);
+  ctx.drawImage(tmpCanvas, px - radius, py - radius);
+}
+
+function drawSmoke(t) {
+  // sample palette cycle aligned with background (same period)
+  const cyc = t / 47.0;
+  ctx.globalCompositeOperation = 'lighter';
+
+  // walk the grid; render every active cell
+  const cs = cellSize;
+  for (let y = 0; y < GH; y++) {
+    for (let x = 0; x < GW; x++) {
+      const d = density[idx(x, y)];
+      if (d < 0.04) continue;
+      // color cycles through palette according to (x + y + time)
+      const localT = cyc + (x / GW) * 0.35 + (y / GH) * 0.15;
+      const c = paletteLerp(localT);
+      // brighten core, keep edges soft
+      const cHi = mix(c, [255, 250, 252], 0.18);
+      const radius = cs * (1.0 + Math.min(d, 1.2) * 0.8);
+      const alpha = Math.min(0.55, d * 0.45);
+      drawPuffBlob(x * cs + cs / 2, y * cs + cs / 2, radius, cHi, alpha);
+      // secondary lower-alpha wash for softness
+      if (d > 0.18) {
+        drawPuffBlob(x * cs + cs / 2, y * cs + cs / 2, radius * 1.55, c, alpha * 0.32);
+      }
+    }
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+//   light global haze pass — gives an extremely subtle "vapor" overlay
+//   on top of the smoke so the whole image breathes together.
+
+function drawHaze(t) {
+  ctx.globalCompositeOperation = 'lighter';
+  const cycle = paletteLerp(t / 47.0 + 0.33);
+  for (let i = 0; i < 6; i++) {
+    const x = W * (0.1 + 0.8 * (0.5 + 0.5 * Math.sin(t / 13 + i * 1.7)));
+    const y = H * (0.1 + 0.8 * (0.5 + 0.5 * Math.cos(t / 17 + i * 0.9)));
+    const r = Math.max(W, H) * 0.45;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0,   rgba(cycle, 0.025));
+    g.addColorStop(0.6, rgba(cycle, 0.012));
+    g.addColorStop(1,   rgba(cycle, 0));
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+// ----- ambient breath + poetic overlay -----------------------------------
+
+const PHRASES = [
+  'the breath before the word has a colour',
+  'smoke remembers where it was air',
+  'there is a quiet room inside every sound',
+  'no one asks the cloud to be elsewhere',
+  'in-breath, out-breath — the doorway has no door',
+  'softness is what is left when nothing insists',
+  'the threshold you are not crossing is also a threshold',
+  'pink is just lavender being warmer',
+  'between two breaths there is a kingdom'
+];
+
+let phraseIdx = -1;
+function showSubtitle() {
+  phraseIdx = (phraseIdx + 1) % PHRASES.length;
+  subtitleEl.textContent = PHRASES[phraseIdx];
+  subtitleEl.classList.add('show');
+  setTimeout(() => subtitleEl.classList.remove('show'), 11000);
+}
+
+//   breath marker — a tiny pulse on the right edge that travels up and
+//   down once per breath cycle (~7 seconds). pure ambient.
+
+function updateBreathMarker(t) {
+  const phase = (t / 7.0) % 1;
+  // soft eased back-and-forth
+  const e = 0.5 - 0.5 * Math.cos(phase * Math.PI * 2);
+  breathMarker.style.top = (10 + 80 * e) + '%';
+}
+
+// ----- title fade lifecycle ---------------------------------------------
+
+let titleState = 'in';
+function updateTitle(t) {
+  if (titleState === 'in' && t > 4) {
+    titleEl.classList.remove('show');
+    titleEl.classList.add('hide');
+    titleState = 'out';
+  }
+}
+
+// ----- main loop ---------------------------------------------------------
+
+let startTime = performance.now() / 1000;
+let frame = 0;
+let lastPhraseAt = 4;
+
+function loop() {
+  const now = performance.now() / 1000;
+  const t = now - startTime;
+
+  frame++;
+
+  // physics: every 2nd frame advect+diffuse to keep things smooth
+  if (frame % 2 === 0) {
+    advect();
+    diffuse();
+  }
+  // velocity field refresh every frame (cheap with curl of sine)
+  updateVelocity(t);
+  // sources injected per "real" time
+  injectSources(now);
+
+  // render: background → smoke → haze
+  drawBackground(t);
+  drawSmoke(t);
+  drawHaze(t);
+
+  // breath marker + title lifecycle
+  updateBreathMarker(t);
+  updateTitle(t);
+
+  // subtle breath dot at center — visible only briefly at the midpoint
+  // of every breath cycle (a single catch-of-light each breath).
+  const phase = (t / 7.0) % 1;
+  const lit = phase > 0.46 && phase < 0.54;
+  dotEl.classList.toggle('on', lit);
+
+  // periodic phrase (every ~16s after the title fades)
+  if (t - lastPhraseAt > 16 && titleState === 'out') {
+    lastPhraseAt = t;
+    showSubtitle();
+  }
+
+  requestAnimationFrame(loop);
+}
+
+// ----- boot --------------------------------------------------------------
+
+// seed a few initial puffs so the first frame already has motion
+function seedInitial() {
+  for (let i = 0; i < 5; i++) {
+    const sx = Math.floor(GW * (0.1 + 0.18 * i));
+    for (let dy = 0; dy < 8; dy++) {
+      for (let dx = -3; dx <= 3; dx++) {
+        const x = sx + dx;
+        const y = GH - 1 - dy - i;
+        if (x < 1 || x >= GW - 1 || y < 1 || y >= GH - 1) continue;
+        const fall = Math.exp(-(dx * dx) / 12 - (dy * dy) / 24);
+        density[idx(x, y)] = Math.min(1.2, density[idx(x, y)] + 0.8 * fall);
+      }
+    }
+  }
+  nextSourceAt = performance.now() / 1000 + 0.5;
+}
+
+seedInitial();
+updateVelocity(0);
+
+//   fade in title with a short delay so the user sees the piece first.
+setTimeout(() => titleEl.classList.add('show'), 600);
+setTimeout(() => titleEl.classList.remove('show'), 4200);
+
+//   gentle first phrase shortly after the title leaves.
+setTimeout(showSubtitle, 8000);
+
+requestAnimationFrame(loop);
+
+// keep the page honest — pause is unnecessary since ambient-only.
+
+</script>
+</body>
+</html>
