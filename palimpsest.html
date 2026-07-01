@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Palimpsest</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a141c;
+    overflow: hidden;
+    cursor: none;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  canvas { display: block; }
+  #phrase {
+    position: fixed;
+    bottom: 48px;
+    width: 100%;
+    text-align: center;
+    color: #7ba4c4;
+    font-size: 14px;
+    letter-spacing: 0.15em;
+    opacity: 0;
+    transition: opacity 2s ease;
+    pointer-events: none;
+    z-index: 10;
+  }
+  #phrase.visible { opacity: 0.7; }
+  #indicator {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #b8d4e8;
+    opacity: 0;
+    transition: opacity 0.6s ease;
+    pointer-events: none;
+    z-index: 10;
+    box-shadow: 0 0 12px 4px rgba(184, 212, 232, 0.35);
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="phrase"></div>
+<div id="indicator"></div>
+
+<script>
+// ─── Palimpsest ───
+// A generative typography piece exploring liminality through the threshold
+// where marks become letters, letters become words, and one text overwrites another.
+// Cold-ethereal palette · contemplative mood · center-focused composition.
+// Mouse proximity brings letters into sharp coalescence; distance lets them dissolve.
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const phraseEl = document.getElementById('phrase');
+const indicator = document.getElementById('indicator');
+
+// ─── Palette: cold-ethereal ───
+const BG = '#0a141c';
+const CORE_BRIGHT = '#e8f0f8';    // full coherence — silver-white
+const CORE_MID = '#b8d4e8';        // moderate coherence — pale blue
+const DRIFT_HIGH = '#7ba4c4';      // light drift — ice blue
+const DRIFT_LOW = '#4a7a9b';       // heavy drift — deeper fog blue
+const GHOST_COLOR = '#5a8aaa';     // palimpsest under-layer
+const GLOW_RING = 'rgba(184, 212, 232, 0.06)';
+
+// ─── Words — liminality vocabulary ───
+const WORDS = [
+  'threshold', 'between', 'becoming', 'passage',
+  'verge', 'dissolve', 'cusp', 'limen',
+  'drift', 'edge', 'rift', 'seam',
+  'sinter', 'cleave', 'attune', 'murmur'
+];
+
+const PHRASES = [
+  'what was written here before',
+  'the ghost of another word',
+  'beneath this text, another',
+  'half-erased, never gone',
+  'each letter overwrites a silence',
+  'the page remembers everything',
+  'between one word and the next',
+  'erasure is a kind of presence',
+  'the threshold where meaning flickers',
+  'letters that dream of being read',
+  'every mark carries its own ghost',
+  'palimpsest: the skin of language',
+];
+
+// ─── State ───
+let W, H, cx, cy;
+let mouseX = -999, mouseY = -999;
+let mouseActive = false;
+let time = 0;
+let wordIndex = 0;
+let currentWord = WORDS[0];
+let prevWord = '';
+let transitionT = 1.0; // 0=transitioning, 1=stable
+let transitionDir = 0; // 1=fading in new word
+let phraseIndex = 0;
+let phraseOpacity = 0;
+let phraseTimer = 0;
+let wordTimer = 0;
+const WORD_DURATION = 22; // seconds per word
+const TRANSITION_DURATION = 2.5; // seconds for crossfade
+const COHERENCE_RADIUS = 180; // px — mouse influence radius
+const STRONG_COHERENCE = 60; // px — full sharpness zone
+const DRIFT_BASE = 1.8; // base drift amplitude
+const DRIFT_FAR = 4.5; // max drift when mouse is distant
+const PARTICLE_COUNT = 320;
+
+// ─── Particle arrays ───
+let particles = [];       // current word particles
+let ghostParticles = [];  // previous word ghost layer
+
+// ─── Offscreen canvas for letter sampling ───
+const offscreen = document.createElement('canvas');
+const offCtx = offscreen.getContext('2d');
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  cx = W / 2;
+  cy = H / 2;
+}
+window.addEventListener('resize', () => {
+  resize();
+  spawnWord(currentWord, true);
+});
+
+// ─── Layered sine noise ───
+function noiseField(px, py, seed, t) {
+  const s = seed * 2.17;
+  return {
+    x: Math.sin(py * 0.031 + s + t * 0.62) * Math.cos(px * 0.037 + s * 1.3 + t * 0.55) * 1.4 +
+       Math.sin(px * 0.053 - py * 0.023 + s * 0.7 + t * 0.82) * 0.9 +
+       Math.cos(py * 0.047 + s * 1.9 + t * 0.48) * Math.sin(px * 0.019 + s * 0.4 + t * 0.71) * 0.7,
+    y: Math.cos(px * 0.029 + s * 1.7 + t * 0.74) * Math.sin(py * 0.043 + s * 0.85 + t * 0.58) * 1.4 +
+       Math.cos(px * 0.047 + py * 0.013 + s * 1.5 + t * 0.69) * 0.9 +
+       Math.sin(px * 0.041 + s * 0.3 + t * 0.53) * Math.cos(py * 0.037 + s * 1.1 + t * 0.77) * 0.7
+  };
+}
+
+// ─── Sample letterforms from offscreen canvas ───
+function sampleWordPixels(word) {
+  const fontSize = Math.min(W * 0.12, H * 0.18, 160);
+  offCtx.clearRect(0, 0, offscreen.width, offscreen.height);
+  offscreen.width = W;
+  offscreen.height = H;
+  offCtx.fillStyle = '#ffffff';
+  offCtx.font = `${fontSize}px Georgia, serif`;
+  offCtx.textAlign = 'center';
+  offCtx.textBaseline = 'middle';
+  offCtx.fillText(word, cx, cy);
+
+  const imageData = offCtx.getImageData(0, 0, W, H);
+  const pixels = imageData.data;
+  const points = [];
+  const step = 3; // sample every 3rd pixel
+
+  for (let y = 0; y < H; y += step) {
+    for (let x = 0; x < W; x += step) {
+      const idx = (y * W + x) * 4;
+      if (pixels[idx + 3] > 100) { // alpha threshold
+        points.push({ x: x + (Math.random() - 0.5) * step, y: y + (Math.random() - 0.5) * step });
+      }
+    }
+  }
+
+  // Random subsample to target count
+  if (points.length > PARTICLE_COUNT) {
+    for (let i = points.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [points[i], points[j]] = [points[j], points[i]];
+    }
+    points.length = PARTICLE_COUNT;
+  }
+
+  // If not enough points (small word, low res), duplicate with jitter
+  while (points.length < PARTICLE_COUNT) {
+    const src = points[Math.floor(Math.random() * points.length)];
+    points.push({
+      x: src.x + (Math.random() - 0.5) * 4,
+      y: src.y + (Math.random() - 0.5) * 4
+    });
+  }
+
+  return points;
+}
+
+// ─── Create particles from sampled points ───
+function createParticles(points, isGhost) {
+  return points.map((pt, i) => ({
+    anchorX: pt.x,
+    anchorY: pt.y,
+    x: pt.x + (Math.random() - 0.5) * 60,
+    y: pt.y + (Math.random() - 0.5) * 60,
+    vx: 0,
+    vy: 0,
+    seed: i * 0.031 + Math.random() * 0.1,
+    phase: Math.random() * Math.PI * 2,
+    size: isGhost ? 1.0 + Math.random() * 1.2 : 1.2 + Math.random() * 1.8,
+    brightness: isGhost ? 0.08 + Math.random() * 0.1 : 0.7 + Math.random() * 0.3,
+  }));
+}
+
+// ─── Spawn a new word ───
+function spawnWord(word, instant) {
+  const points = sampleWordPixels(word);
+  const newParticles = createParticles(points, false);
+
+  if (instant || particles.length === 0) {
+    particles = newParticles;
+    ghostParticles = [];
+    transitionT = 1.0;
+    return;
+  }
+
+  // Existing particles become ghosts
+  ghostParticles = particles.map(p => ({
+    ...p,
+    size: p.size * 0.6,
+    brightness: 0.06 + Math.random() * 0.08,
+    life: 1.0,
+    decay: 0.003 + Math.random() * 0.006,
+  }));
+
+  particles = newParticles;
+  transitionT = 0;
+  transitionDir = 1;
+}
+
+// ─── Update ───
+function update(dt) {
+  time += dt;
+  const t = time;
+
+  // Word cycling
+  wordTimer += dt;
+  if (wordTimer > WORD_DURATION && transitionT >= 1.0) {
+    wordTimer = 0;
+    prevWord = currentWord;
+    wordIndex = (wordIndex + 1) % WORDS.length;
+    currentWord = WORDS[wordIndex];
+    spawnWord(currentWord, false);
+  }
+
+  // Transition progress
+  if (transitionT < 1.0) {
+    transitionT += dt / TRANSITION_DURATION;
+    if (transitionT >= 1.0) transitionT = 1.0;
+  }
+
+  // Ghost particle decay
+  ghostParticles = ghostParticles.filter(g => {
+    g.life -= g.decay * dt * 60;
+    g.brightness = Math.max(0, g.life * 0.09);
+    return g.life > 0.01;
+  });
+
+  // Mouse coherence factor
+  const distToMouse = mouseActive
+    ? Math.hypot(mouseX - cx, mouseY - cy)
+    : 9999;
+  const mouseInfluence = mouseActive
+    ? Math.max(0, 1 - (distToMouse - STRONG_COHERENCE) / (COHERENCE_RADIUS - STRONG_COHERENCE))
+    : 0;
+  const clampedInfluence = Math.min(1, Math.max(0, mouseInfluence));
+
+  // Update current word particles
+  for (const p of particles) {
+    const n = noiseField(p.anchorX, p.anchorY, p.seed, t);
+
+    // Drift amplitude: high when mouse is far, low when mouse is near
+    const driftAmp = DRIFT_BASE + (DRIFT_FAR - DRIFT_BASE) * (1 - clampedInfluence);
+
+    // Spring force toward anchor — stronger with mouse proximity
+    const springK = 0.08 + clampedInfluence * 0.35;
+    const dx = p.anchorX - p.x;
+    const dy = p.anchorY - p.y;
+
+    // Velocity update with noise drift and spring
+    p.vx += n.x * driftAmp * 0.04 + dx * springK * 0.06;
+    p.vy += n.y * driftAmp * 0.04 + dy * springK * 0.06;
+
+    // Damping — lighter when mouse is present (more alive)
+    const damp = 0.88 + clampedInfluence * 0.06;
+    p.vx *= damp;
+    p.vy *= damp;
+
+    p.x += p.vx;
+    p.y += p.vy;
+
+    // Transition fade-in: particles start scattered and settle
+    if (transitionT < 1.0) {
+      const settle = easeInOutCubic(transitionT);
+      p.x += (p.anchorX - p.x) * settle * 0.04;
+      p.y += (p.anchorY - p.y) * settle * 0.04;
+      p.vx *= 0.92;
+      p.vy *= 0.92;
+    }
+  }
+
+  // Update ghost particles — slow drift away from anchors
+  for (const g of ghostParticles) {
+    const n = noiseField(g.anchorX, g.anchorY, g.seed + 10, t);
+    g.x += n.x * 0.15 + (Math.random() - 0.5) * 0.3;
+    g.y += n.y * 0.15 + (Math.random() - 0.5) * 0.3;
+  }
+
+  // Phrase cycling
+  phraseTimer += dt;
+  if (phraseTimer > 14) {
+    phraseTimer = 0;
+    phraseIndex = (phraseIndex + 1) % PHRASES.length;
+    phraseEl.textContent = PHRASES[phraseIndex];
+    phraseEl.classList.add('visible');
+    setTimeout(() => phraseEl.classList.remove('visible'), 8000);
+  }
+
+  // Indicator — subtle center dot during transition or mouse presence
+  const indicatorTarget = (transitionT < 1.0 || (mouseActive && distToMouse < COHERENCE_RADIUS)) ? 1 : 0;
+  indicator.style.opacity = indicatorTarget * 0.5;
+}
+
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+// ─── Render ───
+function render() {
+  ctx.clearRect(0, 0, W, H);
+
+  // Background — deep fog gradient
+  const bgGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H) * 0.7);
+  bgGrad.addColorStop(0, '#0d1924');
+  bgGrad.addColorStop(0.5, '#0a141c');
+  bgGrad.addColorStop(1, '#060d14');
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Center glow ring — the "clearing" where text lives
+  const ringGrad = ctx.createRadialGradient(cx, cy, Math.min(W, H) * 0.08, cx, cy, Math.min(W, H) * 0.35);
+  ringGrad.addColorStop(0, 'rgba(184, 212, 232, 0.04)');
+  ringGrad.addColorStop(0.5, 'rgba(122, 164, 196, 0.02)');
+  ringGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = ringGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Edge vignette — darkness eating the periphery
+  const vignette = ctx.createRadialGradient(cx, cy, Math.min(W, H) * 0.3, cx, cy, Math.max(W, H) * 0.75);
+  vignette.addColorStop(0, 'rgba(0,0,0,0)');
+  vignette.addColorStop(0.7, 'rgba(6, 13, 20, 0.3)');
+  vignette.addColorStop(1, 'rgba(6, 13, 20, 0.75)');
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, W, H);
+
+  // ─── Render ghost particles (palimpsest under-layer) ───
+  for (const g of ghostParticles) {
+    const alpha = g.brightness;
+    if (alpha < 0.005) continue;
+
+    // Outer glow
+    ctx.beginPath();
+    ctx.arc(g.x, g.y, g.size * 2.2, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(90, 138, 170, ${alpha * 0.35})`;
+    ctx.fill();
+
+    // Core
+    ctx.beginPath();
+    ctx.arc(g.x, g.y, g.size * 0.7, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(122, 164, 196, ${alpha * 0.7})`;
+    ctx.fill();
+  }
+
+  // ─── Render current word particles ───
+  const distToMouse = mouseActive ? Math.hypot(mouseX - cx, mouseY - cy) : 9999;
+  const mouseInfluence = mouseActive
+    ? Math.max(0, 1 - (distToMouse - STRONG_COHERENCE) / (COHERENCE_RADIUS - STRONG_COHERENCE))
+    : 0;
+  const clampedInfluence = Math.min(1, Math.max(0, mouseInfluence));
+  const transitionSettle = transitionT < 1.0 ? easeInOutCubic(transitionT) : 1.0;
+
+  for (const p of particles) {
+    // Distance from this particle to its anchor (how "scattered" it is)
+    const scatter = Math.hypot(p.x - p.anchorX, p.y - p.anchorY) / (DRIFT_FAR * 3);
+    const coherence = 1 - Math.min(1, scatter * (1 - clampedInfluence * 0.7));
+
+    // Color interpolates: scattered=blue, coherent=white
+    const r = lerp(74, 232, coherence);
+    const g = lerp(122, 240, coherence);
+    const b = lerp(155, 248, coherence);
+    const alpha = lerp(0.45, 0.95, coherence * transitionSettle);
+
+    // Outer glow halo
+    const haloSize = p.size * 3.5 * (1 + (1 - coherence) * 0.8);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, haloSize, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)}, ${alpha * 0.12})`;
+    ctx.fill();
+
+    // Mid glow
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * 1.8, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)}, ${alpha * 0.3})`;
+    ctx.fill();
+
+    // Bright core
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * 0.55, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)}, ${alpha * 0.85})`;
+    ctx.fill();
+  }
+
+  // ─── Subtle center focus ring during transition ───
+  if (transitionT < 1.0) {
+    const ringAlpha = (1 - transitionT) * 0.06;
+    const ringRadius = Math.min(W, H) * 0.2 + transitionT * Math.min(W, H) * 0.1;
+    ctx.beginPath();
+    ctx.arc(cx, cy, ringRadius, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(184, 212, 232, ${ringAlpha})`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  // ─── Custom cursor ───
+  if (mouseActive) {
+    const cursorDist = Math.hypot(mouseX - cx, mouseY - cy);
+    const cursorAlpha = Math.min(0.6, 0.15 + clampedInfluence * 0.45);
+    const cursorSize = 3 + clampedInfluence * 3;
+
+    // Outer ring
+    ctx.beginPath();
+    ctx.arc(mouseX, mouseY, 14, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(184, 212, 232, ${cursorAlpha * 0.4})`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Inner dot
+    ctx.beginPath();
+    ctx.arc(mouseX, mouseY, cursorSize, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(232, 240, 248, ${cursorAlpha})`;
+    ctx.fill();
+
+    // Coherence ring — shrinks as letters sharpen
+    if (clampedInfluence > 0.1) {
+      const ringR = STRONG_COHERENCE + (COHERENCE_RADIUS - STRONG_COHERENCE) * (1 - clampedInfluence);
+      ctx.beginPath();
+      ctx.arc(mouseX, mouseY, ringR, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(184, 212, 232, ${clampedInfluence * 0.08})`;
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+    }
+  }
+}
+
+function lerp(a, b, t) {
+  return a + (b - a) * Math.max(0, Math.min(1, t));
+}
+
+// ─── Mouse tracking ───
+canvas.addEventListener('mousemove', e => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+  mouseActive = true;
+});
+canvas.addEventListener('mouseleave', () => {
+  mouseActive = false;
+});
+canvas.addEventListener('mouseenter', e => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+  mouseActive = true;
+});
+
+// ─── Touch support ───
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  mouseX = e.touches[0].clientX;
+  mouseY = e.touches[0].clientY;
+  mouseActive = true;
+}, { passive: false });
+canvas.addEventListener('touchend', () => {
+  mouseActive = false;
+});
+canvas.addEventListener('touchstart', e => {
+  mouseX = e.touches[0].clientX;
+  mouseY = e.touches[0].clientY;
+  mouseActive = true;
+});
+
+// ─── Animation loop ───
+let lastTime = performance.now();
+
+function loop(now) {
+  const dt = Math.min(0.1, (now - lastTime) / 1000);
+  lastTime = now;
+
+  update(dt);
+  render();
+
+  requestAnimationFrame(loop);
+}
+
+// ─── Init ───
+resize();
+spawnWord(currentWord, true);
+phraseEl.textContent = PHRASES[0];
+requestAnimationFrame(loop);
+
+// Show first phrase after a beat
+setTimeout(() => {
+  phraseEl.classList.add('visible');
+  setTimeout(() => phraseEl.classList.remove('visible'), 8000);
+}, 3000);
+
+// ─── Handle window resize with re-sampling ───
+let resizeTimeout;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimeout);
+  resizeTimeout = setTimeout(() => {
+    resize();
+    spawnWord(currentWord, true);
+  }, 400);
+});
+</script>
+</body>
+</html>
