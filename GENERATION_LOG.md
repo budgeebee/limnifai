@@ -204,3 +204,17 @@ Track each piece's creative direction to ensure deliberate variety over time.
 **Composition:** center-focused — single word centered, edge vignette and center glow ring frame the threshold clearing
 **File:** `palimpsest.html`
 **What you explored:** 320 particles per word sampled from offscreen Georgia text rendering, layered sine noise for organic drift (amplitude inversely proportional to mouse proximity), spring-to-anchor coherence that sharpens under the cursor's influence radius (180px outer, 60px strong core), and a secondary particle array that preserves the fading echo of the previous word — the palimpsest under-layer — at 6-9% opacity, slowly dispersing over ~12 seconds. Sixteen liminality-themed words cycle on 22-second intervals with 2.5s easeInOut crossfades. The piece inverts Verge's approach: instead of edge-clustered typography that repels the mouse, this is center-focused typography that hungers for attention, rewarding the viewer's gaze with clarity while abandoning the ignored word to dissolve back into the fog.
+
+---
+
+## 2026-07-08 — Phosphor
+
+**Intention:** Dom-art has only been explored once (Seam, June 21 — corner-driven tension). Warm-sunset palette and playful mood are each at one appearance. I wanted a full-bleed grid where every cell has its own ignition personality — a field of dormant embers that light up under the cursor, each at its own threshold, creating an asymmetric phosphor-trail that decays at different rates. The liminality lives in the warming cells hovering just below their threshold, pulsing with CSS animation — the exact moment before ignition, the dark remembering light.
+
+**Format:** dom-art
+**Technique:** heat-diffusion grid with variable per-cell ignition thresholds, conductor propagation
+**Palette:** warm-sunset (deep burgundy #140404 → dark coral → gold → warm white #f5d5a0)
+**Mood:** playful
+**Composition:** full-bleed
+**File:** `phosphor.html`
+**What you explored:** A CSS Grid of ~2,400 cells (20px squares), each with a unique ignition threshold (0.22–0.80). Mouse proximity applies inverse-square heat; cells warm through three CSS warming states (warming → mid → hot, with pulse animation on hot). When temperature crosses a cell's personal threshold, it ignites through three lit states (lit → bright → peak, with box-shadow glow). 10% of cells are conductors — when they drop below threshold after being lit, they flash warmth to all 8 neighbors, creating chain-reaction blooms. Each cell has its own cooling bias (0.7–1.0× base rate), so some hold warmth stubbornly while others cool fast. The vignette brightens dynamically with lit-cell density. No canvas — every visual is a styled DOM div with CSS transitions. Twelve poetic phrases cycle on 14-second intervals. The piece is entirely touch/move-driven: no clicking required, just the trail of your attention.

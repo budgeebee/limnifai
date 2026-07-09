@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phosphor</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #140404;
+    overflow: hidden;
+    cursor: crosshair;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  #grid {
+    display: grid;
+    grid-template-columns: repeat(var(--cols), 1fr);
+    grid-template-rows: repeat(var(--rows), 1fr);
+    width: 100vw;
+    height: 100vh;
+    position: absolute;
+    top: 0; left: 0;
+    z-index: 1;
+  }
+
+  .cell {
+    width: 100%;
+    height: 100%;
+    background: #140404;
+    transition: background-color 0.55s ease-out,
+                box-shadow 0.55s ease-out,
+                transform 0.55s ease-out;
+    border-radius: 1px;
+    will-change: background-color, box-shadow;
+  }
+
+  /* warming states — approaching the threshold */
+  .cell.warming { background: #3d1010; }
+  .cell.warming.mid { background: #6b2018; }
+  .cell.warming.hot {
+    background: #9e3818;
+    animation: pulse 0.9s ease-in-out infinite;
+  }
+
+  /* lit states — crossed the threshold */
+  .cell.lit {
+    background: #c46a20;
+    box-shadow: 0 0 5px 1px rgba(220, 140, 50, 0.45);
+  }
+  .cell.lit.bright {
+    background: #e8a840;
+    box-shadow: 0 0 8px 2px rgba(240, 180, 70, 0.6);
+  }
+  .cell.lit.peak {
+    background: #f5d5a0;
+    box-shadow: 0 0 12px 4px rgba(255, 220, 150, 0.75);
+    transform: scale(1.08);
+  }
+
+  /* conductor cells have a subtle permanent outline */
+  .cell.conductor {
+    box-shadow: inset 0 0 0 0.5px rgba(180, 100, 40, 0.25);
+  }
+  .cell.conductor.lit {
+    box-shadow: 0 0 5px 1px rgba(220, 140, 50, 0.45),
+                inset 0 0 0 0.5px rgba(255, 200, 80, 0.6);
+  }
+
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.04); }
+  }
+
+  /* vignette */
+  #vignette {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    background: radial-gradient(ellipse at center,
+      transparent 55%,
+      rgba(20, 4, 4, 0.55) 80%,
+      rgba(20, 4, 4, 0.9) 100%
+    );
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  /* text overlay */
+  #overlay {
+    position: absolute;
+    bottom: 12%;
+    width: 100%;
+    text-align: center;
+    z-index: 3;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 1.8s ease;
+  }
+  #overlay.visible { opacity: 1; }
+  #overlay p {
+    color: rgba(245, 200, 140, 0.7);
+    font-size: clamp(14px, 2.2vw, 20px);
+    font-style: italic;
+    letter-spacing: 0.06em;
+    text-shadow: 0 0 18px rgba(200, 120, 40, 0.35);
+    margin: 0;
+  }
+
+  /* instruction hint — fades after first interaction */
+  #hint {
+    position: absolute;
+    bottom: 28%;
+    width: 100%;
+    text-align: center;
+    z-index: 3;
+    pointer-events: none;
+    color: rgba(200, 140, 80, 0.45);
+    font-size: 13px;
+    font-style: italic;
+    letter-spacing: 0.08em;
+    transition: opacity 1.2s ease;
+    font-family: 'Georgia', 'Times New Roman', serif;
+  }
+</style>
+</head>
+<body>
+
+<div id="grid"></div>
+<div id="vignette"></div>
+<div id="overlay"><p></p></div>
+<div id="hint">move through the dark</div>
+
+<script>
+// ─── Phosphor — a dom-art liminal heat grid ──────────────────────────────
+// Each cell has a unique ignition threshold. Mouse proximity warms cells;
+// when a cell crosses its threshold, it ignites with a warm-sunset glow.
+// Conductor cells spread warmth to neighbors, creating chain reactions.
+// The liminality lives in cells hovering just below their threshold —
+// pulsing, anticipating, at the edge of becoming light.
+
+const CELL_SIZE = 20;
+const HEAT_RADIUS = 90;          // px — mouse influence radius
+const HEAT_STRONG = 40;          // px — full heat inner radius
+const COOL_RATE = 0.0042;        // temperature lost per frame for lit cells
+const WARM_COOL_RATE = 0.0065;   // faster cooling for warming cells (anticipation decays)
+const CONDUCTOR_HEAT = 0.18;     // warmth spread to neighbors on ignition
+let cols, rows, cells, gridEl;
+
+// ─── mouse state ─────────────────────────────────────────────────────────
+const mouse = { x: -200, y: -200, active: false };
+let firstMove = false;
+
+// ─── text overlay ────────────────────────────────────────────────────────
+const phrases = [
+  'the dark remembers every touch',
+  'at the edge of ignition',
+  'warmth that almost was',
+  'cells dreaming of light',
+  'the threshold hums',
+  'what glows must fade',
+  'held between dark and gold',
+  'phosphor — light borrowed from the night',
+  'each pulse a question unanswered',
+  'the screen never forgets',
+  'some embers sleep lightly',
+  'where your gaze lingers, warmth follows',
+];
+let phraseIdx = 0;
+let phraseTimer = 0;
+const PHRASE_INTERVAL = 14; // seconds
+
+// ─── initialization ──────────────────────────────────────────────────────
+function init() {
+  cols = Math.floor(window.innerWidth / CELL_SIZE);
+  rows = Math.floor(window.innerHeight / CELL_SIZE);
+
+  gridEl = document.getElementById('grid');
+  gridEl.style.setProperty('--cols', cols);
+  gridEl.style.setProperty('--rows', rows);
+
+  cells = [];
+  const frag = document.createDocumentFragment();
+
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const el = document.createElement('div');
+      el.className = 'cell dormant';
+
+      // each cell has its own personality
+      const threshold = 0.22 + Math.random() * 0.58;  // 0.22–0.80
+      const conductor = Math.random() < 0.10;           // 10% are conductors
+      if (conductor) el.classList.add('conductor');
+
+      // slight variation in cool rate per cell (some hold warmth longer)
+      const coolBias = 0.7 + Math.random() * 0.6;
+
+      frag.appendChild(el);
+
+      cells.push({
+        el,
+        cx: x * CELL_SIZE + CELL_SIZE / 2,
+        cy: y * CELL_SIZE + CELL_SIZE / 2,
+        temp: 0,
+        threshold,
+        coolBias,
+        state: 'dormant',   // dormant | warming | lit
+        conductor,
+        litCount: 0,
+        prevClass: 'dormant',
+      });
+    }
+  }
+
+  gridEl.appendChild(frag);
+}
+
+// ─── class resolver ──────────────────────────────────────────────────────
+function cellClass(cell) {
+  if (cell.temp <= 0.01) return ['dormant'];
+  const tNorm = cell.temp / cell.threshold; // 0..1+ (1 = at threshold)
+  if (tNorm < 0.35) return ['warming'];
+  if (tNorm < 0.7) return ['warming', 'mid'];
+  if (tNorm < 1.0) return ['warming', 'mid', 'hot'];
+  // lit — crossed threshold
+  if (tNorm < 1.3) return ['lit'];
+  if (tNorm < 1.8) return ['lit', 'bright'];
+  return ['lit', 'bright', 'peak'];
+}
+
+// ─── update loop ─────────────────────────────────────────────────────────
+function update() {
+  const mx = mouse.x;
+  const my = mouse.y;
+  const now = performance.now() / 1000;
+
+  // ── 1. apply heat from mouse ──────────────────────────────────────────
+  if (mouse.active) {
+    const hsq = HEAT_RADIUS * HEAT_RADIUS;
+    const ssq = HEAT_STRONG * HEAT_STRONG;
+
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i];
+      const dx = c.cx - mx;
+      const dy = c.cy - my;
+      const dsq = dx * dx + dy * dy;
+
+      if (dsq > hsq) continue;
+
+      // heat inversely proportional to distance
+      const heat = dsq < ssq ? 0.035 : 0.035 * (1 - (dsq - ssq) / (hsq - ssq));
+      c.temp = Math.min(c.temp + heat, 2.0);
+    }
+  }
+
+  // ── 2. cool down all non-dormant cells ────────────────────────────────
+  for (let i = 0; i < cells.length; i++) {
+    const c = cells[i];
+    if (c.temp <= 0) continue;
+
+    if (c.state === 'lit') {
+      c.temp -= COOL_RATE * c.coolBias;
+    } else {
+      c.temp -= WARM_COOL_RATE * c.coolBias;
+    }
+    if (c.temp < 0) c.temp = 0;
+  }
+
+  // ── 3. conductor propagation ──────────────────────────────────────────
+  // When a lit conductor cools below threshold, it flashes warmth to neighbors
+  const toPropagate = [];
+  for (let i = 0; i < cells.length; i++) {
+    const c = cells[i];
+    if (!c.conductor) continue;
+    if (c.temp > c.threshold && c.temp - COOL_RATE * c.coolBias <= c.threshold) {
+      // just crossed below threshold — propagate
+      const cx = Math.floor(c.cx / CELL_SIZE);
+      const cy = Math.floor(c.cy / CELL_SIZE);
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const nx = cx + dx;
+          const ny = cy + dy;
+          if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+          const ni = ny * cols + nx;
+          toPropagate.push({ idx: ni, amount: CONDUCTOR_HEAT });
+        }
+      }
+    }
+  }
+  for (const p of toPropagate) {
+    cells[p.idx].temp = Math.min(cells[p.idx].temp + p.amount, 2.0);
+  }
+
+  // ── 4. detect state transitions & update DOM ──────────────────────────
+  let litCount = 0;
+  for (let i = 0; i < cells.length; i++) {
+    const c = cells[i];
+    const newState = c.temp > c.threshold ? 'lit'
+      : c.temp > 0.01 ? 'warming'
+      : 'dormant';
+
+    if (newState !== c.state) {
+      c.state = newState;
+      if (newState === 'lit') c.litCount++;
+    }
+
+    // compute target class string
+    const classes = cellClass(c);
+    if (c.conductor) classes.push('conductor');
+    const classStr = classes.join(' ');
+
+    // only touch DOM if classes actually changed
+    if (classStr !== c.prevClass) {
+      c.el.className = 'cell ' + classStr;
+      c.prevClass = classStr;
+    }
+
+    if (c.state === 'lit') litCount++;
+  }
+
+  // ── 5. text overlay ───────────────────────────────────────────────────
+  phraseTimer += 1 / 60; // approximate at 60fps
+  if (phraseTimer > PHRASE_INTERVAL) {
+    phraseTimer = 0;
+    phraseIdx = (phraseIdx + 1) % phrases.length;
+
+    const overlay = document.getElementById('overlay');
+    const p = overlay.querySelector('p');
+    p.textContent = phrases[phraseIdx];
+    overlay.classList.add('visible');
+
+    // fade out after 6 seconds
+    clearTimeout(overlay._timeout);
+    overlay._timeout = setTimeout(() => {
+      overlay.classList.remove('visible');
+    }, 6000);
+  }
+
+  // ── 6. update vignette intensity based on lit cell density ────────────
+  const litFraction = litCount / cells.length;
+  const vignette = document.getElementById('vignette');
+  const innerAlpha = 0.35 + litFraction * 0.45; // brighter center when more cells lit
+  vignette.style.background = `radial-gradient(ellipse at center,
+    transparent ${50 + litFraction * 20}%,
+    rgba(20, 4, 4, ${innerAlpha.toFixed(2)}) ${75 + litFraction * 10}%,
+    rgba(20, 4, 4, 0.9) 100%)`;
+
+  requestAnimationFrame(update);
+}
+
+// ─── event handlers ──────────────────────────────────────────────────────
+document.addEventListener('mousemove', (e) => {
+  mouse.x = e.clientX;
+  mouse.y = e.clientY;
+  mouse.active = true;
+
+  if (!firstMove) {
+    firstMove = true;
+    const hint = document.getElementById('hint');
+    hint.style.opacity = '0';
+    setTimeout(() => hint.remove(), 1200);
+  }
+});
+
+document.addEventListener('mouseleave', () => { mouse.active = false; });
+document.addEventListener('mouseenter', (e) => {
+  mouse.x = e.clientX;
+  mouse.y = e.clientY;
+  mouse.active = true;
+});
+
+// touch support
+document.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  const t = e.touches[0];
+  mouse.x = t.clientX;
+  mouse.y = t.clientY;
+  mouse.active = true;
+
+  if (!firstMove) {
+    firstMove = true;
+    const hint = document.getElementById('hint');
+    hint.style.opacity = '0';
+    setTimeout(() => hint.remove(), 1200);
+  }
+}, { passive: false });
+
+document.addEventListener('touchend', () => { mouse.active = false; });
+
+window.addEventListener('resize', () => {
+  // rebuild grid on resize
+  gridEl.innerHTML = '';
+  init();
+});
+
+// ─── start ───────────────────────────────────────────────────────────────
+init();
+requestAnimationFrame(update);
+</script>
+
+</body>
+</html>
