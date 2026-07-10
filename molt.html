@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Molt</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #050510; font-family: 'Georgia', 'Times New Roman', serif; }
+  canvas { display: block; position: absolute; top: 0; left: 0; }
+  #overlay {
+    position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
+    pointer-events: none; z-index: 2; text-align: center;
+    opacity: 0; transition: opacity 2.5s ease;
+  }
+  #phrase {
+    color: #bf5eff; font-size: 18px; letter-spacing: 0.08em;
+    text-shadow: 0 0 24px rgba(191,94,255,0.5), 0 0 48px rgba(0,240,255,0.25);
+    line-height: 1.6;
+  }
+  #counter {
+    position: absolute; top: 24px; right: 32px; z-index: 2; pointer-events: none;
+    color: rgba(191,94,255,0.45); font-size: 12px; letter-spacing: 0.12em;
+    font-family: 'Courier New', monospace;
+  }
+  #title-hint {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 2; pointer-events: none;
+    color: rgba(0,240,255,0.15); font-size: 64px; letter-spacing: 0.18em;
+    animation: titleFade 4s ease forwards;
+  }
+  @keyframes titleFade {
+    0% { opacity: 0; transform: translate(-50%,-50%) scale(0.92); }
+    15% { opacity: 1; transform: translate(-50%,-50%) scale(1); }
+    80% { opacity: 0.6; }
+    100% { opacity: 0; transform: translate(-50%,-48%) scale(1.04); }
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="title-hint">M O L T</div>
+<div id="overlay"><span id="phrase"></span></div>
+<div id="counter"></div>
+
+<script>
+// ─── Constants ───────────────────────────────────────
+const NEON = {
+  cyan:       [0, 240, 255],
+  hotPink:    [255, 45, 149],
+  acidGreen:  [57, 255, 20],
+  electricPurple: [191, 94, 255],
+  iceBlue:    [100, 220, 255]
+};
+const PALETTE = [NEON.cyan, NEON.hotPink, NEON.acidGreen, NEON.electricPurple, NEON.iceBlue];
+
+const G = 1800;            // gravitational constant
+const DAMPING = 0.9998;    // orbital friction (tiny, for stability)
+const MAX_VEL = 6.5;       // velocity ceiling
+const MIN_VEL = 0.3;       // minimum orbital velocity to stay in orbit
+const PARTICLE_COUNT = 220;
+const MOUSE_FORCE = 2800;
+const MOUSE_RADIUS = 200;
+const MOLT_COUNT_MIN = 8;
+const MOLT_COUNT_MAX = 14;
+const DAUGHTER_LIFE = 90;  // frames (~1.5s at 60fps)
+const CHAOS_PULSE_INTERVAL = 420; // frames (~7s)
+
+// Phrases
+const phrases = [
+  "the skin remembers what it was before it shed",
+  "joy lives at the precise instant of letting go",
+  "every threshold is a small death celebrated with light",
+  "to molt is to trust that what comes next is more alive",
+  "the old self falls away not with grief but with luminance",
+  "crossing over is the only prayer",
+  "between one gravity and another: the flare",
+  "shedding is not loss — it is permission",
+  "the edge between orbits is where stars are born",
+  "what you release returns as radiance",
+  "liminality is the molt: the space between skins"
+];
+
+// ─── Canvas setup ────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ─── Attractors ──────────────────────────────────────
+const attractors = [
+  { x: W * 0.72, y: H * 0.68, mass: 1.4, color: NEON.cyan },       // dominant — lower right
+  { x: W * 0.25, y: H * 0.28, mass: 0.85, color: NEON.electricPurple } // weaker — upper left
+];
+
+// ─── Mouse ───────────────────────────────────────────
+let mouse = { x: W * 0.5, y: H * 0.5, active: false };
+canvas.addEventListener('mousemove', e => {
+  mouse.x = e.clientX; mouse.y = e.clientY; mouse.active = true;
+});
+canvas.addEventListener('mouseleave', () => { mouse.active = false; });
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  mouse.x = e.touches[0].clientX; mouse.y = e.touches[0].clientY; mouse.active = true;
+}, { passive: false });
+canvas.addEventListener('touchend', () => { mouse.active = false; });
+
+// ─── Utility ─────────────────────────────────────────
+function rand(min, max) { return min + Math.random() * (max - min); }
+function randInt(min, max) { return Math.floor(rand(min, max + 1)); }
+function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+function lerpColor(c1, c2, t) {
+  return [
+    Math.round(c1[0] + (c2[0] - c1[0]) * t),
+    Math.round(c1[1] + (c2[1] - c1[1]) * t),
+    Math.round(c1[2] + (c2[2] - c1[2]) * t)
+  ];
+}
+function rgbaStr(c, a) {
+  return `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+}
+
+// ─── Particle ────────────────────────────────────────
+class Particle {
+  constructor() {
+    this.reset();
+  }
+
+  reset() {
+    // Spawn near one of the attractors
+    const src = attractors[Math.random() < 0.55 ? 0 : 1];
+    const angle = rand(0, Math.PI * 2);
+    const r = rand(40, 160);
+    this.x = src.x + Math.cos(angle) * r;
+    this.y = src.y + Math.sin(angle) * r;
+
+    // Orbital velocity (perpendicular to radius)
+    const dx = this.x - src.x;
+    const dy = this.y - src.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const speed = rand(1.8, 4.2);
+    this.vx = (-dy / d) * speed + rand(-0.4, 0.4);
+    this.vy = (dx / d) * speed + rand(-0.4, 0.4);
+
+    this.allegiance = this.closestAttractor();
+    this.size = rand(1.4, 2.6);
+    this.hue = PALETTE[randInt(0, PALETTE.length - 1)];
+    this.hue2 = PALETTE[randInt(0, PALETTE.length - 1)]; // for trail gradient
+    this.phase = rand(0, 1);
+  }
+
+  closestAttractor() {
+    const d0 = Math.hypot(this.x - attractors[0].x, this.y - attractors[0].y);
+    const d1 = Math.hypot(this.x - attractors[1].x, this.y - attractors[1].y);
+    if (mouse.active) {
+      const dm = Math.hypot(this.x - mouse.x, this.y - mouse.y);
+      if (dm < d0 && dm < d1) return 2; // mouse allegiance
+    }
+    return d0 < d1 ? 0 : 1;
+  }
+
+  update() {
+    let fx = 0, fy = 0;
+
+    // Attractor forces
+    for (let i = 0; i < attractors.length; i++) {
+      const a = attractors[i];
+      const dx = a.x - this.x;
+      const dy = a.y - this.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const force = (G * a.mass) / (d * d + 120);
+      fx += (dx / d) * force;
+      fy += (dy / d) * force;
+    }
+
+    // Mouse force (temporary attractor)
+    if (mouse.active) {
+      const dmx = mouse.x - this.x;
+      const dmy = mouse.y - this.y;
+      const dm = Math.hypot(dmx, dmy) || 1;
+      if (dm < MOUSE_RADIUS) {
+        const mf = (MOUSE_FORCE * 0.7) / (dm * dm + 80);
+        fx += (dmx / dm) * mf;
+        fy += (dmy / dm) * mf;
+      }
+    }
+
+    this.vx += fx;
+    this.vy += fy;
+
+    // Clamp velocity
+    const speed = Math.hypot(this.vx, this.vy);
+    if (speed > MAX_VEL) {
+      const s = MAX_VEL / speed;
+      this.vx *= s; this.vy *= s;
+    }
+    if (speed < MIN_VEL && speed > 0) {
+      const s = MIN_VEL / speed;
+      this.vx *= s; this.vy *= s;
+    }
+
+    this.vx *= DAMPING;
+    this.vy *= DAMPING;
+
+    this.x += this.vx;
+    this.y += this.vy;
+
+    // Bounce off edges
+    if (this.x < 2) { this.x = 2; this.vx *= -0.7; }
+    if (this.x > W - 2) { this.x = W - 2; this.vx *= -0.7; }
+    if (this.y < 2) { this.y = 2; this.vy *= -0.7; }
+    if (this.y > H - 2) { this.y = H - 2; this.vy *= -0.7; }
+
+    // Check allegiance change
+    const newAllegiance = this.closestAttractor();
+    const changed = newAllegiance !== this.allegiance;
+    this.allegiance = newAllegiance;
+    return changed;
+  }
+}
+
+// ─── Daughter Particle ───────────────────────────────
+class Daughter {
+  constructor(x, y, color, life) {
+    this.x = x;
+    this.y = y;
+    const angle = rand(0, Math.PI * 2);
+    const speed = rand(1.5, 5.5);
+    this.vx = Math.cos(angle) * speed;
+    this.vy = Math.sin(angle) * speed;
+    this.color = color;
+    this.life = life;
+    this.maxLife = life;
+    this.size = rand(0.6, 1.8);
+  }
+
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.vx *= 0.985;
+    this.vy *= 0.985;
+    this.life--;
+    return this.life > 0;
+  }
+
+  alpha() { return this.life / this.maxLife; }
+
+  draw(ctx) {
+    const a = this.alpha();
+    // Core glow
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size * (0.6 + a * 0.4), 0, Math.PI * 2);
+    ctx.fillStyle = rgbaStr(this.color, a * 0.9);
+    ctx.fill();
+    // Outer halo
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size * 2.2 * a, 0, Math.PI * 2);
+    const haloGrad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size * 2.2 * a);
+    haloGrad.addColorStop(0, rgbaStr(this.color, a * 0.5));
+    haloGrad.addColorStop(1, rgbaStr(this.color, 0));
+    ctx.fillStyle = haloGrad;
+    ctx.fill();
+  }
+}
+
+// ─── State ───────────────────────────────────────────
+const particles = [];
+const daughters = [];
+let totalMolts = 0;
+let frameCount = 0;
+let phraseIndex = 0;
+let phraseTimer = 0;
+const overlay = document.getElementById('overlay');
+const phraseEl = document.getElementById('phrase');
+const counterEl = document.getElementById('counter');
+
+let flashAlpha = 0; // global flash on molt
+
+// Initialize particles
+for (let i = 0; i < PARTICLE_COUNT; i++) {
+  particles.push(new Particle());
+}
+
+// ─── Spawn molt burst ────────────────────────────────
+function moltBurst(particle) {
+  const count = randInt(MOLT_COUNT_MIN, MOLT_COUNT_MAX);
+  for (let i = 0; i < count; i++) {
+    const color = PALETTE[randInt(0, PALETTE.length - 1)];
+    daughters.push(new Daughter(particle.x, particle.y, color, DAUGHTER_LIFE + randInt(-10, 10)));
+  }
+  totalMolts++;
+  flashAlpha = Math.min(flashAlpha + 0.14, 0.45);
+  // Visual feedback size pulse on the parent
+  particle.size = Math.min(particle.size + 0.6, 4.0);
+}
+
+// ─── Render ──────────────────────────────────────────
+function drawBackground() {
+  // Deep space gradient
+  const bg = ctx.createRadialGradient(W * 0.65, H * 0.6, 0, W * 0.35, H * 0.35, Math.max(W, H));
+  bg.addColorStop(0, '#08081c');
+  bg.addColorStop(0.45, '#050512');
+  bg.addColorStop(1, '#02020a');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // Subtle star field
+  if (frameCount === 0) {
+    ctx.fillStyle = 'rgba(0,240,255,0.03)';
+    for (let i = 0; i < 60; i++) {
+      ctx.beginPath();
+      ctx.arc(rand(0, W), rand(0, H), rand(0.3, 0.8), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Global flash overlay
+  if (flashAlpha > 0.001) {
+    ctx.fillStyle = `rgba(191,94,255,${flashAlpha * 0.35})`;
+    ctx.fillRect(0, 0, W, H);
+    flashAlpha *= 0.92;
+  }
+
+  // Attractor glow halos (subtle)
+  for (const a of attractors) {
+    const glow = ctx.createRadialGradient(a.x, a.y, 0, a.x, a.y, 90);
+    glow.addColorStop(0, rgbaStr(a.color, 0.08));
+    glow.addColorStop(1, rgbaStr(a.color, 0));
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(a.x, a.y, 90, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Tiny center dot
+    ctx.beginPath();
+    ctx.arc(a.x, a.y, 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = rgbaStr(a.color, 0.3);
+    ctx.fill();
+  }
+}
+
+function drawParticles() {
+  // Draw trails first (dimmer)
+  for (const p of particles) {
+    const trailLen = 6;
+    const ax = p.x - p.vx * trailLen * 0.5;
+    const ay = p.y - p.vy * trailLen * 0.5;
+    const grad = ctx.createLinearGradient(p.x, p.y, ax, ay);
+    grad.addColorStop(0, rgbaStr(p.hue, 0.55));
+    grad.addColorStop(1, rgbaStr(p.hue, 0));
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = p.size * 0.8;
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(ax, ay);
+    ctx.stroke();
+  }
+
+  // Draw particles
+  for (const p of particles) {
+    // Allegiance indicator (subtle colored ring)
+    const allyColor = attractors[p.allegiance] ? attractors[p.allegiance].color : NEON.electricPurple;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * 2.2, 0, Math.PI * 2);
+    ctx.strokeStyle = rgbaStr(allyColor, 0.15 + p.phase * 0.08);
+    ctx.lineWidth = 0.7;
+    ctx.stroke();
+
+    // Core particle with glow
+    const core = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 3);
+    core.addColorStop(0, rgbaStr(p.hue, 0.9 + p.phase * 0.1));
+    core.addColorStop(0.3, rgbaStr(p.hue, 0.5));
+    core.addColorStop(1, rgbaStr(p.hue, 0));
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * 3, 0, Math.PI * 2);
+    ctx.fillStyle = core;
+    ctx.fill();
+
+    // Bright center
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * 0.7, 0, Math.PI * 2);
+    ctx.fillStyle = rgbaStr(lerpColor(p.hue, [255,255,255], 0.55), 0.85);
+    ctx.fill();
+  }
+
+  // Draw attractor-to-attractor tension line
+  ctx.beginPath();
+  ctx.moveTo(attractors[0].x, attractors[0].y);
+  const mid = { x: (attractors[0].x + attractors[1].x) / 2, y: (attractors[0].y + attractors[1].y) / 2 };
+  ctx.quadraticCurveTo(mid.x + rand(-3,3) * (frameCount % 60) * 0.4, mid.y + rand(-3,3) * (frameCount % 47) * 0.4, attractors[1].x, attractors[1].y);
+  const tensionGrad = ctx.createLinearGradient(attractors[0].x, attractors[0].y, attractors[1].x, attractors[1].y);
+  tensionGrad.addColorStop(0, rgbaStr(NEON.cyan, 0.06 + flashAlpha * 0.15));
+  tensionGrad.addColorStop(0.5, rgbaStr(NEON.electricPurple, 0.04));
+  tensionGrad.addColorStop(1, rgbaStr(NEON.electricPurple, 0.06 + flashAlpha * 0.15));
+  ctx.strokeStyle = tensionGrad;
+  ctx.lineWidth = 0.5;
+  ctx.setLineDash([4, 12]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Draw midpoint pulse
+  const pulseR = 5 + Math.sin(frameCount * 0.04) * 4;
+  const pulseGrad = ctx.createRadialGradient(mid.x, mid.y, 0, mid.x, mid.y, pulseR);
+  pulseGrad.addColorStop(0, rgbaStr(NEON.hotPink, 0.15 + flashAlpha * 0.25));
+  pulseGrad.addColorStop(1, rgbaStr(NEON.hotPink, 0));
+  ctx.beginPath();
+  ctx.arc(mid.x, mid.y, pulseR, 0, Math.PI * 2);
+  ctx.fillStyle = pulseGrad;
+  ctx.fill();
+}
+
+function drawDaughters() {
+  for (const d of daughters) {
+    d.draw(ctx);
+  }
+}
+
+// ─── Phrase cycle ────────────────────────────────────
+let phraseVisible = false;
+let phraseFadeTimer = 0;
+const PHRASE_INTERVAL = 340; // frames (~5.7s)
+const PHRASE_VISIBLE = 180;  // frames (~3s)
+
+function updatePhrases() {
+  phraseTimer++;
+  const shouldShow = phraseTimer > PHRASE_INTERVAL && phraseTimer < PHRASE_INTERVAL + PHRASE_VISIBLE;
+
+  if (shouldShow && !phraseVisible) {
+    phraseVisible = true;
+    phraseIndex = (phraseIndex + 1) % phrases.length;
+    phraseEl.textContent = phrases[phraseIndex];
+    overlay.style.opacity = '1';
+  } else if (!shouldShow && phraseVisible) {
+    phraseVisible = false;
+    overlay.style.opacity = '0';
+  }
+
+  if (phraseTimer > PHRASE_INTERVAL + PHRASE_VISIBLE + 160) {
+    phraseTimer = 0;
+  }
+}
+
+// ─── Chaos pulse ─────────────────────────────────────
+function chaosPulse() {
+  if (frameCount > 0 && frameCount % CHAOS_PULSE_INTERVAL === 0) {
+    // Give random particles a velocity kick
+    const kickCount = randInt(8, 20);
+    for (let i = 0; i < kickCount; i++) {
+      const p = particles[randInt(0, particles.length - 1)];
+      p.vx += rand(-3, 3);
+      p.vy += rand(-3, 3);
+    }
+  }
+}
+
+// ─── Main loop ───────────────────────────────────────
+function loop() {
+  frameCount++;
+  resize(); // handle window resizing
+  attractors[0].x = W * 0.72;
+  attractors[0].y = H * 0.68;
+  attractors[1].x = W * 0.25;
+  attractors[1].y = H * 0.28;
+
+  // Update attractor mass breathing
+  attractors[0].mass = 1.4 + Math.sin(frameCount * 0.012) * 0.12;
+  attractors[1].mass = 0.85 + Math.cos(frameCount * 0.015) * 0.08;
+
+  // Update particles
+  let moltEvents = 0;
+  for (const p of particles) {
+    const changed = p.update();
+    if (changed) {
+      moltBurst(p);
+      moltEvents++;
+    }
+    // Decay size pulse
+    if (p.size > 2.6) p.size *= 0.96;
+    else if (p.size < 1.4) p.size = 1.4;
+    // Slow hue drift
+    p.phase += 0.002;
+    if (p.phase > 1) p.phase -= 1;
+  }
+
+  // Update daughters
+  for (let i = daughters.length - 1; i >= 0; i--) {
+    if (!daughters[i].update()) {
+      daughters.splice(i, 1);
+    }
+  }
+
+  // Cap daughters
+  if (daughters.length > 600) {
+    daughters.splice(0, daughters.length - 600);
+  }
+
+  // Chaos pulse
+  chaosPulse();
+
+  // Phrase cycle
+  updatePhrases();
+
+  // Draw
+  drawBackground();
+  drawDaughters();
+  drawParticles();
+
+  // Counter
+  counterEl.textContent = `molts: ${totalMolts}`;
+
+  // Replenish if particles escape
+  for (const p of particles) {
+    if (p.x < -20 || p.x > W + 20 || p.y < -20 || p.y > H + 20) {
+      p.reset();
+    }
+  }
+
+  requestAnimationFrame(loop);
+}
+
+// ─── Start ───────────────────────────────────────────
+// Fade out title hint
+const titleHint = document.getElementById('title-hint');
+setTimeout(() => {
+  if (titleHint) titleHint.style.display = 'none';
+}, 4200);
+
+loop();
+</script>
+</body>
+</html>

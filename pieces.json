@@ -282,5 +282,9 @@
   {
     "file": "phosphor.html",
     "title": "Phosphor"
+  },
+  {
+    "file": "molt.html",
+    "title": "Molt"
   }
 ]
