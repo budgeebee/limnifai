@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Strike</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #020209;
+    overflow: hidden;
+    font-family: 'Georgia', serif;
+    cursor: crosshair;
+    user-select: none;
+    -webkit-user-select: none;
+    height: 100vh;
+    width: 100vw;
+  }
+  canvas { display: block; }
+  #overlay {
+    position: fixed;
+    bottom: 32px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 10;
+  }
+  #phrase {
+    color: rgba(180, 160, 220, 0.7);
+    font-size: 16px;
+    letter-spacing: 0.08em;
+    transition: opacity 1.2s ease;
+    text-shadow: 0 0 18px rgba(140, 120, 200, 0.3);
+  }
+  #info {
+    position: fixed;
+    top: 24px;
+    right: 28px;
+    color: rgba(140, 130, 180, 0.5);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    pointer-events: none;
+    z-index: 10;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="overlay"><span id="phrase"></span></div>
+<div id="info">MOVE &bull; LISTEN</div>
+<script>
+// ── Strike ──────────────────────────────────────────
+// A harmonic threshold explorer.
+// Twelve overtone nodes on a dark-cosmic ring.
+// Mouse interpolates pitch between adjacent harmonics —
+// the liminal microtonal space where tone wavers between pure ratios.
+// Landing on a node: clarity, resonance, joy.
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const phraseEl = document.getElementById('phrase');
+const infoEl = document.getElementById('info');
+
+let W, H, cx, cy, R;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  cx = W / 2;
+  cy = H / 2;
+  R = Math.min(W, H) * 0.32;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ── Tone.js oscillator layer ─────────────────────────
+let audioCtx = null;
+let oscA = null, oscB = null;
+let gainA = null, gainB = null;
+let reverbNode = null;
+let masterGain = null;
+let filterNode = null;
+let audioStarted = false;
+let lastScheduledFreq = 220;
+let targetFreq = 220;
+let currentGain = 0;
+let targetGain = 0;
+
+function initAudio() {
+  if (audioStarted) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = 0;
+  masterGain.connect(audioCtx.destination);
+
+  filterNode = audioCtx.createBiquadFilter();
+  filterNode.type = 'lowpass';
+  filterNode.frequency.value = 3000;
+  filterNode.Q.value = 0.7;
+  filterNode.connect(masterGain);
+
+  // Simple convolution-like reverb via feedback delay
+  reverbNode = audioCtx.createGain();
+  reverbNode.gain.value = 0.12;
+  const delayA = audioCtx.createDelay(0.08);
+  const delayB = audioCtx.createDelay(0.11);
+  delayA.delayTime.value = 0.08;
+  delayB.delayTime.value = 0.11;
+  const fbA = audioCtx.createGain();
+  const fbB = audioCtx.createGain();
+  fbA.gain.value = 0.25;
+  fbB.gain.value = 0.22;
+
+  delayA.connect(fbA); fbA.connect(delayA);
+  delayB.connect(fbB); fbB.connect(delayB);
+  const mix = audioCtx.createGain();
+  mix.gain.value = 0.35;
+  delayA.connect(mix); delayB.connect(mix);
+  reverbNode.connect(delayA);
+  mix.connect(filterNode);
+
+  // Two oscillators for crossfaded harmonic interpolation
+  oscA = audioCtx.createOscillator();
+  oscB = audioCtx.createOscillator();
+  oscA.type = 'sine';
+  oscB.type = 'sine';
+  gainA = audioCtx.createGain();
+  gainB = audioCtx.createGain();
+  gainA.gain.value = 0;
+  gainB.gain.value = 0;
+
+  oscA.connect(gainA);
+  oscB.connect(gainB);
+  gainA.connect(filterNode);
+  gainB.connect(filterNode);
+  gainA.connect(reverbNode);
+  gainB.connect(reverbNode);
+
+  oscA.frequency.value = 220;
+  oscB.frequency.value = 220;
+  oscA.start();
+  oscB.start();
+
+  // Gentle LFO on filter for organic warmth
+  const lfo = audioCtx.createOscillator();
+  const lfoGain = audioCtx.createGain();
+  lfo.type = 'sine';
+  lfo.frequency.value = 0.15;
+  lfoGain.gain.value = 800;
+  lfo.connect(lfoGain);
+  lfoGain.connect(filterNode.frequency);
+  lfo.start();
+
+  audioStarted = true;
+}
+
+// ── Harmonic Constants ──────────────────────────────
+const NUM_HARMONICS = 12;
+const BASE_FREQ = 55; // A1
+const harmonics = [];
+for (let i = 0; i < NUM_HARMONICS; i++) {
+  const ratio = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12][i];
+  const angle = (i / NUM_HARMONICS) * Math.PI * 2 - Math.PI / 2;
+  harmonics.push({
+    ratio,
+    freq: BASE_FREQ * ratio,
+    angle,
+    x: 0, y: 0, // computed on resize
+    pulse: 0,
+    pulseDir: 1,
+    lastHit: 0
+  });
+}
+
+function updateHarmonicPositions() {
+  harmonics.forEach(h => {
+    h.x = cx + Math.cos(h.angle) * R;
+    h.y = cy + Math.sin(h.angle) * R;
+  });
+}
+updateHarmonicPositions();
+
+// ── Mouse state ──────────────────────────────────────
+let mouse = { x: cx, y: cy, active: false, px: cx, py: cy };
+let mouseSpeed = 0;
+let mouseAngle = 0;
+
+canvas.addEventListener('mousemove', e => {
+  mouse.px = mouse.x;
+  mouse.py = mouse.y;
+  mouse.x = e.clientX;
+  mouse.y = e.clientY;
+  mouse.active = true;
+  mouseSpeed = Math.hypot(mouse.x - mouse.px, mouse.y - mouse.py);
+  if (!audioStarted) initAudio();
+});
+canvas.addEventListener('mouseleave', () => { mouse.active = false; });
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  const t = e.touches[0];
+  mouse.px = mouse.x;
+  mouse.py = mouse.y;
+  mouse.x = t.clientX;
+  mouse.y = t.clientY;
+  mouse.active = true;
+  mouseSpeed = Math.hypot(mouse.x - mouse.px, mouse.y - mouse.py);
+  if (!audioStarted) initAudio();
+}, { passive: false });
+canvas.addEventListener('touchend', () => { mouse.active = false; });
+
+// ── Noise field ──────────────────────────────────────
+// Simplex-like 2D noise via hashed gradient lattice
+const perm = new Uint8Array(512);
+for (let i = 0; i < 256; i++) perm[i] = i;
+for (let i = 255; i > 0; i--) {
+  const j = Math.floor(Math.random() * (i + 1));
+  [perm[i], perm[j]] = [perm[j], perm[i]];
+}
+for (let i = 0; i < 256; i++) perm[i + 256] = perm[i];
+
+const GRAD2 = [[1,1],[-1,1],[1,-1],[-1,-1],[1,0],[-1,0],[0,1],[0,-1]];
+
+function noise2D(x, y) {
+  const X = Math.floor(x) & 255;
+  const Y = Math.floor(y) & 255;
+  const xf = x - Math.floor(x);
+  const yf = y - Math.floor(y);
+  const u = xf * xf * (3 - 2 * xf);
+  const v = yf * yf * (3 - 2 * yf);
+  const gi00 = perm[perm[X] + Y] & 7;
+  const gi10 = perm[perm[X + 1] + Y] & 7;
+  const gi01 = perm[perm[X] + Y + 1] & 7;
+  const gi11 = perm[perm[X + 1] + Y + 1] & 7;
+  const n00 = GRAD2[gi00][0] * xf + GRAD2[gi00][1] * yf;
+  const n10 = GRAD2[gi10][0] * (xf - 1) + GRAD2[gi10][1] * yf;
+  const n01 = GRAD2[gi01][0] * xf + GRAD2[gi01][1] * (yf - 1);
+  const n11 = GRAD2[gi11][0] * (xf - 1) + GRAD2[gi11][1] * (yf - 1);
+  const nx0 = n00 + u * (n10 - n00);
+  const nx1 = n01 + u * (n11 - n01);
+  return nx0 + v * (nx1 - nx0);
+}
+
+function fbm(x, y, octaves, lacunarity, gain) {
+  let val = 0, amp = 1, freq = 1, max = 0;
+  for (let i = 0; i < octaves; i++) {
+    val += amp * noise2D(x * freq, y * freq);
+    max += amp;
+    amp *= gain;
+    freq *= lacunarity;
+  }
+  return val / max;
+}
+
+// ── Particle system ──────────────────────────────────
+const particles = [];
+const MAX_PARTICLES = 180;
+
+class Particle {
+  constructor(x, y, hue, life) {
+    this.x = x;
+    this.y = y;
+    this.vx = (Math.random() - 0.5) * 0.8;
+    this.vy = (Math.random() - 0.5) * 0.8 - 0.3;
+    this.life = life || 1;
+    this.maxLife = this.life;
+    this.hue = hue;
+    this.size = 0.8 + Math.random() * 2.2;
+  }
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.vx *= 0.998;
+    this.vy *= 0.998;
+    this.life -= 0.008;
+    return this.life > 0;
+  }
+  draw(ctx) {
+    const alpha = this.life / this.maxLife;
+    ctx.fillStyle = `hsla(${this.hue}, 50%, ${50 + alpha * 30}%, ${alpha * 0.7})`;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size * alpha, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function spawnParticles(x, y, count, hue) {
+  for (let i = 0; i < count; i++) {
+    particles.push(new Particle(x, y, hue, 0.6 + Math.random() * 0.8));
+  }
+  if (particles.length > MAX_PARTICLES) {
+    particles.splice(0, particles.length - MAX_PARTICLES);
+  }
+}
+
+// ── Phrases ──────────────────────────────────────────
+const phrases = [
+  "the space between two notes",
+  "where silence remembers sound",
+  "a threshold struck",
+  "ringing in the dark",
+  "every overtone a doorway",
+  "the pure tone finds you",
+  "between harmonics the world wavers",
+  "listen for the seam",
+  "resonance is recognition",
+  "the bell before the echo",
+  "what rings in the interval",
+  "strike and release"
+];
+let phraseIndex = 0;
+let phraseAlpha = 0;
+let phraseTimer = 0;
+const PHRASE_INTERVAL = 7.5; // seconds
+const PHRASE_FADE = 1.5;
+
+function cyclePhrase(dt) {
+  phraseTimer += dt;
+  if (phraseTimer < PHRASE_INTERVAL - PHRASE_FADE) {
+    phraseAlpha = 0;
+  } else if (phraseTimer < PHRASE_INTERVAL) {
+    phraseAlpha = (phraseTimer - (PHRASE_INTERVAL - PHRASE_FADE)) / PHRASE_FADE;
+  } else if (phraseTimer < PHRASE_INTERVAL + 2) {
+    phraseAlpha = 1;
+  } else if (phraseTimer < PHRASE_INTERVAL + 2 + PHRASE_FADE) {
+    phraseAlpha = 1 - (phraseTimer - (PHRASE_INTERVAL + 2)) / PHRASE_FADE;
+  } else {
+    phraseIndex = (phraseIndex + 1) % phrases.length;
+    phraseTimer = 0;
+    phraseAlpha = 0;
+  }
+  phraseEl.style.opacity = Math.max(0, Math.min(1, phraseAlpha));
+  phraseEl.textContent = phrases[phraseIndex];
+}
+
+// ── Ring noise field contour lines ───────────────────
+function drawNoiseField(time) {
+  const scale = 0.004;
+  const t = time * 0.12;
+  
+  // Draw contour bands radiating from center
+  ctx.save();
+  
+  // Sample a coarse grid and draw contour paths
+  const gridRes = 3; // pixel step
+  const thresholdBase = 0.35;
+  const numContours = 6;
+  
+  for (let ci = 0; ci < numContours; ci++) {
+    const threshold = thresholdBase + ci * 0.08;
+    const hue = 250 + ci * 10;
+    const alpha = 0.12 + ci * 0.03;
+    
+    ctx.strokeStyle = `hsla(${hue}, 40%, ${35 + ci * 5}%, ${alpha})`;
+    ctx.lineWidth = 0.5 + ci * 0.3;
+    ctx.beginPath();
+    
+    let pathStarted = false;
+    for (let y = 0; y < H; y += gridRes) {
+      for (let x = 0; x < W; x += gridRes) {
+        // Distance from ring (not center)
+        const dx = x - cx;
+        const dy = y - cy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const ringDist = Math.abs(dist - R);
+        
+        // Noise value at this point
+        const n = fbm(x * scale, y * scale + t * 0.3, 4, 2.0, 0.55);
+        // Modulate by ring distance — strongest near the ring
+        const ringFactor = Math.exp(-ringDist * ringDist / (R * R * 0.03));
+        const val = n * ringFactor;
+        
+        if (Math.abs(val - threshold) < 0.015) {
+          if (!pathStarted) {
+            ctx.moveTo(x, y);
+            pathStarted = true;
+          } else {
+            ctx.lineTo(x, y);
+          }
+        } else {
+          pathStarted = false;
+        }
+      }
+    }
+    ctx.stroke();
+  }
+  
+  ctx.restore();
+}
+
+// ── Harmonic ring glow ───────────────────────────────
+function drawRingGlow(time) {
+  ctx.save();
+  
+  // Outer ethereal ring
+  const grad = ctx.createRadialGradient(cx, cy, R * 0.85, cx, cy, R * 1.15);
+  grad.addColorStop(0, 'rgba(30, 20, 60, 0)');
+  grad.addColorStop(0.4, 'rgba(60, 40, 120, 0.08)');
+  grad.addColorStop(0.7, 'rgba(100, 70, 180, 0.12)');
+  grad.addColorStop(1, 'rgba(20, 10, 40, 0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.arc(cx, cy, R * 1.15, 0, Math.PI * 2, true);
+  ctx.fill();
+  
+  // Inner void glow
+  const innerGrad = ctx.createRadialGradient(cx, cy, R * 0.3, cx, cy, R);
+  innerGrad.addColorStop(0, 'rgba(8, 6, 24, 1)');
+  innerGrad.addColorStop(0.5, 'rgba(15, 10, 40, 0.9)');
+  innerGrad.addColorStop(1, 'rgba(30, 20, 60, 0.3)');
+  ctx.fillStyle = innerGrad;
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.fill();
+  
+  ctx.restore();
+}
+
+// ── Harmonic nodes ───────────────────────────────────
+function drawHarmonicNodes(time, nearestIdx, nearestDist, activeHarmonicIdx) {
+  harmonics.forEach((h, i) => {
+    const isActive = (i === activeHarmonicIdx);
+    
+    // Breathing pulse for recently struck nodes
+    if (time - h.lastHit < 2.5) {
+      const elapsed = time - h.lastHit;
+      h.pulse = Math.sin(elapsed * 8) * Math.exp(-elapsed * 1.2) * 0.6;
+    } else {
+      h.pulse *= 0.95;
+    }
+    
+    const baseR = 5 + h.pulse * 22;
+    const hue = 230 + (i / NUM_HARMONICS) * 80;
+    const alpha = isActive ? 0.95 : 0.35;
+    
+    // Outer halo
+    if (isActive || h.pulse > 0.05) {
+      const haloGrad = ctx.createRadialGradient(h.x, h.y, 0, h.x, h.y, baseR * 3.5);
+      haloGrad.addColorStop(0, `hsla(${hue}, 60%, 65%, ${alpha * 0.8})`);
+      haloGrad.addColorStop(0.5, `hsla(${hue}, 50%, 40%, ${alpha * 0.2})`);
+      haloGrad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = haloGrad;
+      ctx.beginPath();
+      ctx.arc(h.x, h.y, baseR * 3.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    
+    // Core dot
+    const coreGrad = ctx.createRadialGradient(h.x, h.y, 0, h.x, h.y, baseR);
+    coreGrad.addColorStop(0, `hsla(${hue}, 30%, 90%, ${alpha})`);
+    coreGrad.addColorStop(0.4, `hsla(${hue}, 50%, 55%, ${alpha * 0.9})`);
+    coreGrad.addColorStop(1, `hsla(${hue}, 60%, 30%, 0)`);
+    ctx.fillStyle = coreGrad;
+    ctx.beginPath();
+    ctx.arc(h.x, h.y, baseR, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Harmonic number label (subtle)
+    if (isActive) {
+      ctx.fillStyle = `rgba(180, 160, 220, 0.6)`;
+      ctx.font = '10px Georgia';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${h.ratio}:1`, h.x, h.y - baseR - 10);
+    }
+  });
+}
+
+// ── Interpolation arc ────────────────────────────────
+function drawInterpolationArc(nearestIdx, tVal, time) {
+  if (nearestIdx < 0) return;
+  const hA = harmonics[nearestIdx];
+  const hB = harmonics[(nearestIdx + 1) % NUM_HARMONICS];
+  
+  // Draw a subtle arc connecting the two nearest harmonics
+  const midAngle = hA.angle + (tVal * (Math.PI * 2 / NUM_HARMONICS));
+  const midX = cx + Math.cos(midAngle) * R;
+  const midY = cy + Math.sin(midAngle) * R;
+  
+  // Glow dot at interpolation point
+  const alpha = 0.3 + 0.2 * Math.sin(time * 3);
+  const grad = ctx.createRadialGradient(midX, midY, 0, midX, midY, 12);
+  grad.addColorStop(0, `rgba(180, 150, 220, ${alpha})`);
+  grad.addColorStop(0.5, `rgba(120, 90, 180, ${alpha * 0.5})`);
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(midX, midY, 12, 0, Math.PI * 2);
+  ctx.fill();
+  
+  // Connection line
+  ctx.strokeStyle = `rgba(100, 80, 160, ${0.15 + alpha * 0.2})`;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 7]);
+  ctx.beginPath();
+  ctx.moveTo(hA.x, hA.y);
+  ctx.quadraticCurveTo(midX + (hB.x - hA.x) * 0.1, midY + (hB.y - hA.y) * 0.1, hB.x, hB.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+// ── Background star field ────────────────────────────
+const stars = [];
+for (let i = 0; i < 80; i++) {
+  stars.push({
+    x: Math.random() * 2000,
+    y: Math.random() * 2000,
+    r: Math.random() * 1.3 + 0.3,
+    twinkle: Math.random() * Math.PI * 2,
+    speed: 0.3 + Math.random() * 1.2
+  });
+}
+
+function drawStars(time) {
+  stars.forEach(s => {
+    const alpha = 0.15 + 0.25 * (0.5 + 0.5 * Math.sin(time * s.speed + s.twinkle));
+    ctx.fillStyle = `rgba(160, 150, 200, ${alpha})`;
+    ctx.beginPath();
+    ctx.arc(s.x % W, s.y % H, s.r, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+// ── Center pulse ─────────────────────────────────────
+let centerPulse = 0;
+let centerPulseTarget = 0;
+
+// ── Main loop ─────────────────────────────────────────
+let lastTime = performance.now();
+let timeAccum = 0;
+
+function findNearestHarmonic(angle) {
+  // Normalize angle to [0, 2π)
+  let a = angle % (Math.PI * 2);
+  if (a < 0) a += Math.PI * 2;
+  
+  // Find the two harmonics this angle is between
+  const segSize = (Math.PI * 2) / NUM_HARMONICS;
+  // Convert angle to index space (0 at the first harmonic's position)
+  const rawIdx = ((a + Math.PI / 2) % (Math.PI * 2)) / segSize;
+  const idx0 = Math.floor(rawIdx) % NUM_HARMONICS;
+  const idx1 = (idx0 + 1) % NUM_HARMONICS;
+  const tVal = rawIdx - Math.floor(rawIdx); // 0..1 interpolation
+  
+  return { idx0, idx1, tVal };
+}
+
+function getAngleFromPoint(x, y) {
+  return Math.atan2(y - cy, x - cx);
+}
+
+let activeHarmonicIdx = -1;
+let activeHarmonicTimer = 0;
+let lastHarmonicIdx = -1;
+
+function loop(now) {
+  requestAnimationFrame(loop);
+  
+  const dt = Math.min((now - lastTime) / 1000, 0.1);
+  lastTime = now;
+  timeAccum += dt;
+  const time = timeAccum;
+  
+  // Clear
+  ctx.fillStyle = '#020209';
+  ctx.fillRect(0, 0, W, H);
+  
+  // Stars
+  drawStars(time);
+  
+  // Noise field contours
+  drawNoiseField(time);
+  
+  // Ring glow
+  drawRingGlow(time);
+  
+  // Find mouse position on ring
+  let nearestIdx = -1;
+  let tVal = 0;
+  let nearestDist = Infinity;
+  let harmonicHitThisFrame = -1;
+  
+  if (mouse.active) {
+    const angle = getAngleFromPoint(mouse.x, mouse.y);
+    const { idx0, idx1, tVal: t } = findNearestHarmonic(angle);
+    nearestIdx = idx0;
+    tVal = t;
+    
+    // Check if mouse is close to the ring
+    const distToCenter = Math.hypot(mouse.x - cx, mouse.y - cy);
+    const ringFactor = Math.max(0, 1 - Math.abs(distToCenter - R) / (R * 0.25));
+    
+    // Check for harmonic hit (within threshold of a node angle)
+    const hA = harmonics[idx0];
+    const hB = harmonics[idx1];
+    
+    if (tVal < 0.08) {
+      harmonicHitThisFrame = idx0;
+    } else if (tVal > 0.92) {
+      harmonicHitThisFrame = idx1;
+    }
+    
+    // Calculate target frequency
+    const freqA = hA.freq;
+    const freqB = hB.freq;
+    targetFreq = freqA + (freqB - freqA) * tVal;
+    targetGain = ringFactor * 0.55;
+    
+    // Spawn particles along the ring
+    if (ringFactor > 0.3 && Math.random() < 0.6) {
+      const interpX = cx + Math.cos(angle) * R;
+      const interpY = cy + Math.sin(angle) * R;
+      const hue = 230 + (idx0 / NUM_HARMONICS) * 80;
+      spawnParticles(interpX, interpY, 2, hue);
+    }
+  } else {
+    targetGain = 0;
+  }
+  
+  // Handle harmonic hits
+  if (harmonicHitThisFrame >= 0 && harmonicHitThisFrame !== activeHarmonicIdx) {
+    harmonics[harmonicHitThisFrame].lastHit = time;
+    harmonics[harmonicHitThisFrame].pulse = 1;
+    spawnParticles(
+      harmonics[harmonicHitThisFrame].x,
+      harmonics[harmonicHitThisFrame].y,
+      18,
+      230 + (harmonicHitThisFrame / NUM_HARMONICS) * 80
+    );
+    centerPulseTarget = 1;
+    activeHarmonicIdx = harmonicHitThisFrame;
+    activeHarmonicTimer = 0;
+  }
+  
+  // Decay active harmonic
+  if (activeHarmonicIdx >= 0) {
+    activeHarmonicTimer += dt;
+    if (activeHarmonicTimer > 1.2 || (harmonicHitThisFrame >= 0 && harmonicHitThisFrame !== activeHarmonicIdx)) {
+      // Only clear if we're not still near it
+      if (harmonicHitThisFrame < 0) {
+        activeHarmonicIdx = -1;
+      }
+    }
+  }
+  
+  // Compute nearest distance for active harmonic
+  if (activeHarmonicIdx >= 0) {
+    const dx = mouse.x - harmonics[activeHarmonicIdx].x;
+    const dy = mouse.y - harmonics[activeHarmonicIdx].y;
+    nearestDist = Math.sqrt(dx * dx + dy * dy);
+  }
+  
+  // Center pulse
+  centerPulse += (centerPulseTarget - centerPulse) * 0.08;
+  centerPulseTarget *= 0.94;
+  if (centerPulse > 0.01) {
+    const pulseGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 0.4 * centerPulse);
+    pulseGrad.addColorStop(0, `rgba(120, 100, 180, ${centerPulse * 0.25})`);
+    pulseGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = pulseGrad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R * 0.4 * centerPulse, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  
+  // Draw interpolation arc
+  drawInterpolationArc(nearestIdx, tVal, time);
+  
+  // Draw harmonic nodes
+  drawHarmonicNodes(time, nearestIdx, nearestDist, activeHarmonicIdx);
+  
+  // Update and draw particles
+  for (let i = particles.length - 1; i >= 0; i--) {
+    if (!particles[i].update()) {
+      particles.splice(i, 1);
+    }
+  }
+  particles.forEach(p => p.draw(ctx));
+  
+  // Phrase overlay
+  cyclePhrase(dt);
+  
+  // Audio update
+  if (audioStarted) {
+    // Smooth frequency transition
+    lastScheduledFreq += (targetFreq - lastScheduledFreq) * 0.08;
+    currentGain += (targetGain - currentGain) * 0.06;
+    
+    const nowTime = audioCtx.currentTime;
+    oscA.frequency.setTargetAtTime(lastScheduledFreq, nowTime, 0.05);
+    oscB.frequency.setTargetAtTime(lastScheduledFreq * 1.001, nowTime, 0.05); // slight detune for warmth
+    
+    masterGain.gain.setTargetAtTime(Math.min(currentGain * 0.25, 0.15), nowTime, 0.06);
+  }
+  
+  // Update info text
+  if (activeHarmonicIdx >= 0) {
+    const h = harmonics[activeHarmonicIdx];
+    infoEl.textContent = `${h.ratio}:1  ·  ${Math.round(h.freq)} Hz`;
+  } else if (mouse.active && nearestIdx >= 0) {
+    const f = Math.round(targetFreq);
+    infoEl.textContent = `~${f} Hz  ·  microtone`;
+  } else {
+    infoEl.textContent = 'MOVE · LISTEN';
+  }
+  
+  // Fade info
+  infoEl.style.opacity = mouse.active ? 0.7 : 0.35;
+}
+
+requestAnimationFrame(loop);
+
+// ── Handle window resize ─────────────────────────────
+window.addEventListener('resize', () => {
+  resize();
+  updateHarmonicPositions();
+});
+
+// ── Click to start audio on mobile ───────────────────
+canvas.addEventListener('click', () => {
+  if (!audioStarted) initAudio();
+});
+</script>
+</body>
+</html>
