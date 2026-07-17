@@ -218,3 +218,18 @@ Track each piece's creative direction to ensure deliberate variety over time.
 **Composition:** full-bleed
 **File:** `phosphor.html`
 **What you explored:** A CSS Grid of ~2,400 cells (20px squares), each with a unique ignition threshold (0.22–0.80). Mouse proximity applies inverse-square heat; cells warm through three CSS warming states (warming → mid → hot, with pulse animation on hot). When temperature crosses a cell's personal threshold, it ignites through three lit states (lit → bright → peak, with box-shadow glow). 10% of cells are conductors — when they drop below threshold after being lit, they flash warmth to all 8 neighbors, creating chain-reaction blooms. Each cell has its own cooling bias (0.7–1.0× base rate), so some hold warmth stubbornly while others cool fast. The vignette brightens dynamically with lit-cell density. No canvas — every visual is a styled DOM div with CSS transitions. Twelve poetic phrases cycle on 14-second intervals. The piece is entirely touch/move-driven: no clicking required, just the trail of your attention.
+
+---
+
+## 2026-07-09 — Molt
+
+**Intention:** Particle-systems is the only generative technique never formally explored across 71 tracked pieces — the pre-log particle pieces (rift, drift, suspended, vapor, basin) predate formal technique tracking. Neon-synth palette and joyful mood each have exactly one appearance (Glow-Wake, Kindle), and asymmetric composition is severely underrepresented (2 uses vs 6 full-bleed). I wanted to create a piece where particles orbit between two asymmetric gravitational attractors, and the liminal moment of crossing allegiance triggers a celebratory burst of daughter particles — molting as joyful transformation. The joy lives in the threshold itself: the exact instant a trajectory flips, shedding neon light.
+
+**Format:** generative-visual
+**Technique:** particle-systems (gravitational N-body with dual-attractor orbits + daughter-particle molt bursts)
+**Palette:** neon-synth (electric cyan, hot pink, acid green, electric purple, ice blue on deep void #050510)
+**Mood:** joyful
+**Composition:** asymmetric — dominant attractor at lower-right (72%,68%), weaker attractor at upper-left (25%,28%), midpoint pulse between them
+**Interactivity:** mouse-attract — cursor acts as temporary third gravity well, disrupting orbits and triggering molt cascades
+**File:** `molt.html`
+**What you explored:** 220 particles orbiting two gravity wells with breathing mass (±8–12% sinusoidal variation). Each particle tracks its closest-attractor allegiance on every frame; when the allegiance flips — crossing the gravitational watershed between attractors — the particle "molts" by spawning 8–14 daughter particles in random neon colors that burst outward and fade over ~1.5s (90 frames). The mouse is a dynamic third attractor (radius 200px, force 2800/G unit), disrupting stable orbits and chaining molt events. Chaos pulses every ~7 seconds inject velocity kicks to 8–20 random particles, preventing orbital stasis. A tension line (dashed quadratic curve) connects the two attractors with a pulsating midpoint. 11 poetic phrases cycle on 5.7s intervals about shedding, joy, and liminality as the molt. The title "Molt" — to shed an outer layer, to transform through release — captures the piece's core idea: every threshold crossing is a celebration, not a loss. No external libraries, 400+ lines of JS.
