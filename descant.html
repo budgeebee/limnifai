@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Descant</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #161310;
+    overflow: hidden;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    cursor: crosshair;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  canvas { display: block; position: fixed; top: 0; left: 0; }
+
+  #edge-line {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(180,160,130,0.3) 20%,
+      rgba(180,160,130,0.6) 50%,
+      rgba(180,160,130,0.3) 80%,
+      transparent 100%
+    );
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  #seed-beacon {
+    position: fixed;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgba(170,150,120,0.5);
+    box-shadow: 0 0 8px rgba(170,150,120,0.4);
+    pointer-events: none;
+    z-index: 2;
+    transform: translate(-50%, -50%);
+    animation: seed-pulse 3s ease-in-out infinite;
+  }
+
+  @keyframes seed-pulse {
+    0%, 100% { opacity: 0.3; box-shadow: 0 0 4px rgba(170,150,120,0.2); }
+    50% { opacity: 0.7; box-shadow: 0 0 12px rgba(170,150,120,0.5); }
+  }
+
+  #phrase-box {
+    position: fixed;
+    bottom: 2.5rem;
+    left: 2rem;
+    max-width: 260px;
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  #phrase {
+    color: #8a8075;
+    font-size: 0.85rem;
+    line-height: 1.7;
+    opacity: 0;
+    transition: opacity 2s ease;
+    font-style: italic;
+  }
+
+  #rule-info {
+    position: fixed;
+    top: 1.2rem;
+    right: 1.5rem;
+    color: #6a6055;
+    font-size: 0.7rem;
+    font-family: 'Courier New', monospace;
+    letter-spacing: 0.05em;
+    pointer-events: none;
+    z-index: 2;
+    text-align: right;
+    line-height: 1.6;
+  }
+
+  #hint {
+    position: fixed;
+    bottom: 2.5rem;
+    right: 1.5rem;
+    color: #5a5045;
+    font-size: 0.65rem;
+    font-family: 'Courier New', monospace;
+    pointer-events: none;
+    z-index: 2;
+    opacity: 0.6;
+    text-align: right;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="edge-line"></div>
+<div id="seed-beacon"></div>
+<div id="phrase-box"><span id="phrase"></span></div>
+<div id="rule-info"></div>
+<div id="hint">← rule →<br>↑ slower ↓ faster<br>tap to reseed</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const seedBeacon = document.getElementById('seed-beacon');
+const phraseEl = document.getElementById('phrase');
+const ruleInfo = document.getElementById('rule-info');
+const hintEl = document.getElementById('hint');
+
+// ── Dimensions ──────────────────────────────────
+let W, H, cellSize, cols, maxRows;
+let grid = [];
+let rule = 90;
+let generation = 0;
+let genInterval = 100; // ms between generations
+let lastGenTime = 0;
+let seedCol;
+let paused = false;
+let mouseX = -1, mouseY = -1;
+let mouseOnCanvas = false;
+
+// ── Muted-nature palette for alive cells ────────
+// Cycled by column position for a woven, threaded look
+const PALETTE = [
+  { r: 138, g: 156, b: 122 }, // sage
+  { r: 196, g: 166, b: 166 }, // dusty rose
+  { r: 126, g: 142, b: 142 }, // slate
+];
+const BG_COLOR = { r: 22, g: 19, b: 16 };
+
+// ── Poetic phrases ─────────────────────────────
+const phrases = [
+  'each row a voice above the last',
+  'the line that carries the song forward',
+  'what the seed remembers of itself',
+  'one becomes many, then fades',
+  'a descent through still time',
+  'threshold between what was and what comes next',
+  'the melody of inheritance',
+  'singing apart, yet together',
+  'generation after generation, a chain of sound',
+  'the descant rises as it falls',
+  'what is passed down, what is lost',
+  'the pattern that knows itself only in becoming',
+  'each cell a note in a score no one wrote',
+  'the thread that holds the weave',
+  'from one, the branching world',
+];
+
+let phraseIdx = 0;
+let phraseAlpha = 0;
+let phraseTarget = 0;
+let phraseTimer = 0;
+const PHRASE_INTERVAL = 9000;  // ms between phrase changes
+const PHRASE_FADE = 2000;       // ms for fade in/out
+
+// ── Resize ──────────────────────────────────────
+function resize() {
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W;
+  canvas.height = H;
+
+  // Cell size: ~400 cells across, minimum 2px
+  cellSize = Math.max(2, Math.floor(W / 400));
+  cols = Math.floor(W / cellSize);
+  maxRows = Math.floor(H / cellSize);
+
+  // Recompute seed column
+  const oldSeedCol = seedCol;
+  seedCol = Math.floor(cols / 2);
+
+  // Map old seed proportionally if it existed
+  if (grid.length > 0 && oldSeedCol !== undefined) {
+    const ratio = oldSeedCol / (cols > 0 ? Math.floor(W / cellSize) : cols);
+    seedCol = Math.floor(ratio * cols);
+  }
+
+  // Update seed beacon position
+  updateSeedBeacon();
+
+  // Rebuild grid for new dimensions
+  rebuildGrid();
+}
+
+function updateSeedBeacon() {
+  seedBeacon.style.left = (seedCol * cellSize + cellSize / 2) + 'px';
+  seedBeacon.style.top = '6px';
+}
+
+function rebuildGrid() {
+  if (grid.length === 0) {
+    reseed();
+    return;
+  }
+  // Rebuild existing rows for new column count
+  const oldGrid = grid;
+  const oldCols = oldGrid[0] ? oldGrid[0].length : 0;
+  grid = [];
+  for (let r = 0; r < oldGrid.length; r++) {
+    const newRow = new Array(cols).fill(0);
+    for (let c = 0; c < cols; c++) {
+      const oldC = Math.floor(c * oldCols / cols);
+      if (oldC < oldCols) newRow[c] = oldGrid[r][oldC];
+    }
+    grid.push(newRow);
+  }
+}
+
+function reseed() {
+  grid = [];
+  const row = new Array(cols).fill(0);
+  row[seedCol] = 1;
+  grid.push(row);
+  generation = 1;
+}
+
+// ── 1D Elementary CA ───────────────────────────
+function computeNextRow(prevRow) {
+  const next = new Array(cols).fill(0);
+  for (let i = 0; i < cols; i++) {
+    const left   = i > 0          ? prevRow[i - 1] : 0;
+    const center = prevRow[i];
+    const right  = i < cols - 1   ? prevRow[i + 1] : 0;
+    const pattern = (left << 2) | (center << 1) | right;
+    next[i] = (rule >> pattern) & 1;
+  }
+  return next;
+}
+
+// ── Update loop ─────────────────────────────────
+function update(now) {
+  if (paused) return;
+
+  if (now - lastGenTime >= genInterval) {
+    lastGenTime = now;
+
+    const prevRow = grid[grid.length - 1];
+    const nextRow = computeNextRow(prevRow);
+    grid.push(nextRow);
+    generation++;
+
+    // Scroll: remove oldest row when over capacity
+    while (grid.length > maxRows) {
+      grid.shift();
+    }
+  }
+}
+
+// ── Draw ────────────────────────────────────────
+function draw() {
+  // Clear with background
+  ctx.fillStyle = `rgb(${BG_COLOR.r},${BG_COLOR.g},${BG_COLOR.b})`;
+  ctx.fillRect(0, 0, W, H);
+
+  if (grid.length === 0) return;
+
+  const alphaMin = 0.22;
+  const alphaMax = 0.92;
+  const rowsVisible = grid.length;
+
+  for (let r = 0; r < rowsVisible; r++) {
+    const frac = rowsVisible > 1 ? r / (rowsVisible - 1) : 0.5;
+    // Non-linear: older rows fade faster (exponential feel)
+    const alpha = alphaMin + Math.pow(frac, 1.3) * (alphaMax - alphaMin);
+    const row = grid[r];
+    const y = r * cellSize;
+
+    for (let c = 0; c < cols; c++) {
+      if (row[c] !== 1) continue;
+
+      const paletteIdx = c % 3;
+      const { r: cr, g: cg, b: cb } = PALETTE[paletteIdx];
+
+      ctx.fillStyle = `rgba(${cr},${cg},${cb},${alpha.toFixed(3)})`;
+      ctx.fillRect(c * cellSize, y, cellSize, cellSize);
+    }
+  }
+
+  // ── Frontier glow: newest row ──────────────────
+  if (rowsVisible > 0) {
+    const lastRow = grid[rowsVisible - 1];
+    const frontierY = (rowsVisible - 1) * cellSize;
+
+    // Warm glow band on frontier
+    const glowGrad = ctx.createLinearGradient(0, frontierY - cellSize * 2, 0, frontierY + cellSize);
+    glowGrad.addColorStop(0, 'rgba(180,150,120,0)');
+    glowGrad.addColorStop(0.5, 'rgba(180,150,120,0.08)');
+    glowGrad.addColorStop(1, 'rgba(180,150,120,0)');
+    ctx.fillStyle = glowGrad;
+    ctx.fillRect(0, frontierY - cellSize * 2, W, cellSize * 3);
+
+    // Bright dots on alive frontier cells
+    for (let c = 0; c < cols; c++) {
+      if (lastRow[c] === 1) {
+        const cx = c * cellSize + cellSize / 2;
+        const cy = frontierY + cellSize / 2;
+        const radius = cellSize * 0.55;
+
+        // Outer glow
+        const dotGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius * 1.8);
+        dotGrad.addColorStop(0, 'rgba(210,185,145,0.55)');
+        dotGrad.addColorStop(0.5, 'rgba(180,150,120,0.2)');
+        dotGrad.addColorStop(1, 'rgba(180,150,120,0)');
+        ctx.fillStyle = dotGrad;
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius * 1.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  // ── Top edge gradient ─────────────────────────
+  const topGrad = ctx.createLinearGradient(0, 0, 0, cellSize * 6);
+  topGrad.addColorStop(0, 'rgba(180,155,125,0.12)');
+  topGrad.addColorStop(1, 'rgba(180,155,125,0)');
+  ctx.fillStyle = topGrad;
+  ctx.fillRect(0, 0, W, cellSize * 6);
+
+  // ── Subtle bottom-edge shadow ─────────────────
+  const botGrad = ctx.createLinearGradient(0, H - cellSize * 4, 0, H);
+  botGrad.addColorStop(0, 'rgba(0,0,0,0)');
+  botGrad.addColorStop(1, 'rgba(0,0,0,0.4)');
+  ctx.fillStyle = botGrad;
+  ctx.fillRect(0, H - cellSize * 4, W, cellSize * 4);
+}
+
+// ── Phrase management ──────────────────────────
+function updatePhrases(now) {
+  if (phraseTimer === 0) {
+    phraseTimer = now;
+    phraseEl.textContent = phrases[phraseIdx];
+  }
+
+  const elapsed = now - phraseTimer;
+
+  // Show phase (first half of interval)
+  if (elapsed < PHRASE_INTERVAL - PHRASE_FADE) {
+    phraseTarget = 1;
+  }
+  // Fade out phase (last PHRASE_FADE ms)
+  else if (elapsed < PHRASE_INTERVAL) {
+    phraseTarget = 0;
+  }
+  // Switch phrase
+  else {
+    phraseIdx = (phraseIdx + 1) % phrases.length;
+    phraseEl.textContent = phrases[phraseIdx];
+    phraseTimer = now;
+    phraseTarget = 1;
+  }
+
+  // Smooth transition
+  phraseAlpha += (phraseTarget - phraseAlpha) * 0.03;
+  phraseEl.style.opacity = phraseAlpha.toFixed(3);
+}
+
+// ── Rule info display ──────────────────────────
+function updateRuleInfo() {
+  const ruleNames = {
+    30:  'chaos',
+    54:  'amphibians',
+    90:  'Sierpinski',
+    110: 'universal',
+    150: 'checkerboard',
+    184: 'traffic',
+  };
+  const name = ruleNames[rule] || '';
+  ruleInfo.innerHTML = `Rule ${rule}${name ? '<br>' + name : ''}<br>gen ${generation}`;
+}
+
+// ── Hint fade ───────────────────────────────────
+let hintAlpha = 0.6;
+let hintTarget = 0.6;
+let hintTimer = 0;
+function updateHint(now) {
+  if (hintTimer === 0) hintTimer = now;
+  // Fade hint after 30s of no movement
+  if (mouseOnCanvas) {
+    hintTimer = now;
+    hintTarget = 0.6;
+  } else if (now - hintTimer > 30000) {
+    hintTarget = 0;
+  }
+  hintAlpha += (hintTarget - hintAlpha) * 0.04;
+  hintEl.style.opacity = hintAlpha.toFixed(3);
+}
+
+// ── Animation loop ─────────────────────────────
+function loop(now) {
+  update(now);
+  draw();
+  updatePhrases(now);
+  updateRuleInfo();
+  updateHint(now);
+  requestAnimationFrame(loop);
+}
+
+// ── Mouse / Touch ──────────────────────────────
+function handlePointer(x, y) {
+  mouseX = x;
+  mouseY = y;
+  mouseOnCanvas = true;
+
+  // X → Rule (0–255)
+  rule = Math.max(0, Math.min(255, Math.floor((x / W) * 256)));
+  // Y → Speed (10ms fast at bottom, 250ms slow at top)
+  genInterval = 10 + ((H - y) / H) * 240;
+}
+
+canvas.addEventListener('mousemove', (e) => {
+  handlePointer(e.clientX, e.clientY);
+});
+
+canvas.addEventListener('mouseleave', () => {
+  mouseOnCanvas = false;
+});
+
+canvas.addEventListener('mouseenter', (e) => {
+  mouseOnCanvas = true;
+  handlePointer(e.clientX, e.clientY);
+});
+
+canvas.addEventListener('click', () => {
+  reseed();
+});
+
+// Touch support
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  if (e.touches.length > 0) {
+    handlePointer(e.touches[0].clientX, e.touches[0].clientY);
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', () => {
+  reseed();
+});
+
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  if (e.touches.length > 0) {
+    handlePointer(e.touches[0].clientX, e.touches[0].clientY);
+  }
+}, { passive: false });
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+  switch (e.key) {
+    case ' ':
+      e.preventDefault();
+      paused = !paused;
+      break;
+    case 'r':
+      reseed();
+      break;
+    case 'ArrowLeft':
+      rule = Math.max(0, rule - 1);
+      break;
+    case 'ArrowRight':
+      rule = Math.min(255, rule + 1);
+      break;
+    case 'ArrowUp':
+      genInterval = Math.max(5, genInterval - 10);
+      break;
+    case 'ArrowDown':
+      genInterval = Math.min(500, genInterval + 10);
+      break;
+    case '0':
+      rule = 90; // Sierpinski
+      genInterval = 100;
+      reseed();
+      break;
+  }
+});
+
+window.addEventListener('resize', resize);
+
+// ── Initialize ─────────────────────────────────
+resize();
+reseed();
+updateSeedBeacon();
+updateRuleInfo();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
