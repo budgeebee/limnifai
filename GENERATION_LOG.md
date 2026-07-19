@@ -245,3 +245,17 @@ Track each piece's creative direction to ensure deliberate variety over time.
 **File:** `strike.html`
 **Interactivity:** mouse-tracking on ring — angle determines harmonic index and interpolation weight, proximity to ring radius controls volume
 **What you explored:** A harmonic circle where each of 12 overtone nodes (1:1 through 12:1, anchored at A=55Hz) glows at its angular position on a balanced ring. The mouse's angle on the ring selects two adjacent harmonics and the interpolation weight t between them, smoothly crossfading two Web Audio sine oscillators with a subtle 0.1% detune for organic warmth. When the interpolation t falls within 0.08 of a pure harmonic, the node "strikes" — it pulses, spawns 18 particles, triggers a center pulse, and the tone locks to the pure ratio. Between harmonics, the tone wavers in the microtonal gap, the liminal space where neither ratio fully dominates. A reverb tail (feedback delay network), lowpass filter with gentle LFO, and noise-field FBM contours (4-octave Simplex-like, 6 contour bands) create the dark-cosmic atmosphere. 80 twinkling stars, 12 cycling poetic phrases, and a real-time frequency readout complete the experience. The joy lives in discovery — finding each pure tone in the dark ring feels like striking a hidden bell. No external libraries except the Web Audio API.
+
+---
+
+## 2026-07-17 — Descant
+
+**Intention:** Game-toy format has only 2 appearances (Cleave May 22, Cusp June 28) and cellular automata hasn't been explored since Cleave — the longest dormant technique at nearly 2 months. Muted-nature palette, melancholic mood, and edge-dominant composition each have only 2 uses. Unlike Cleave's 2D competitive CA, this is a 1D elementary CA viewer where the viewer sweeps through Wolfram's 256 rules by moving horizontally, watching the liminal threshold where deterministic iteration births emergent pattern — each row a descant, each generation a new voice above the silence.
+
+**Format:** game-toy
+**Technique:** cellular-automata (1D elementary CA, Rule 0–255 sweepable via mouse X)
+**Palette:** muted-nature (sage, dusty rose, slate on dark warm stone #161310)
+**Mood:** melancholic
+**Composition:** edge-dominant — CA grows from a single seed cell at the top edge, cascading downward; oldest rows fade to 22% opacity and scroll off when the grid fills
+**File:** `descant.html`
+**What you explored:** A 1D elementary cellular automaton where mouse X sweeps through Wolfram's 256 rules and mouse Y controls generation speed (250ms slow at top, 10ms fast at bottom). A single seed cell at center-top spawns all pattern — the edge-dominant origin point marked by a pulsing beacon. Three muted-nature tones cycle by column position (sage, dusty rose, slate), giving the pattern a woven, threaded look. Older rows fade exponentially (α 0.22→0.92), and the frontier row glows with warm ochre dots on each alive cell. Fifteen poetic phrases cycle on 9s intervals about descent, inheritance, and the descant — the musical term for a melody sung above a theme. Keyboard shortcuts: space=pause, r=reseed, arrows=rule/speed, 0=reset to Rule 90. The piece is melancholic not through darkness but through the quiet knowledge that every pattern fades as it scrolls off the top — each generation born from the one before, then forgotten. No external libraries.
