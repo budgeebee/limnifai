@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Anfract</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0d0604;
+    overflow: hidden;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    cursor: crosshair;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  canvas { display: block; }
+  #overlay {
+    position: fixed; bottom: min(6vh, 48px); right: min(6vw, 56px);
+    color: #e8a850; font-size: clamp(13px, 1.4vw, 17px);
+    opacity: 0; transition: opacity 2.4s ease;
+    text-align: right; line-height: 1.6;
+    pointer-events: none; max-width: 38vw;
+  }
+  #overlay.visible { opacity: 0.72; }
+  #info {
+    position: fixed; top: min(4vh, 28px); left: min(5vw, 40px);
+    color: #c47a40; font-size: clamp(10px, 1vw, 13px);
+    opacity: 0; transition: opacity 1.8s ease;
+    pointer-events: none; font-family: monospace;
+  }
+  #info.visible { opacity: 0.55; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="overlay"></div>
+<div id="info"></div>
+
+<script>
+// ── Setup ──────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const overlay = document.getElementById('overlay');
+const info = document.getElementById('info');
+
+let W, H, cx, cy, dpr;
+
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
+  cx = W * 0.62; cy = H * 0.58;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ── Mouse ──────────────────────────────────────────────
+let mx = W * 0.55, my = H * 0.52;
+let mdx = 0, mdy = 0;
+let pmx = mx, pmy = my;
+
+canvas.addEventListener('mousemove', e => {
+  mx = e.clientX; my = e.clientY;
+});
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  mx = e.touches[0].clientX; my = e.touches[0].clientY;
+}, { passive: false });
+
+// ── Palette: warm-sunset ───────────────────────────────
+const palette = [
+  { r: 210, g: 94,  b: 44  }, // deep orange
+  { r: 232, g: 140, b: 62  }, // amber
+  { r: 245, g: 180, b: 80  }, // gold
+  { r: 198, g: 108, b: 58  }, // coral
+  { r: 155, g: 52,  b: 38  }, // burgundy
+  { r: 248, g: 195, b: 110 }, // warm cream
+];
+
+function lerpColor(c1, c2, t) {
+  return {
+    r: c1.r + (c2.r - c1.r) * t,
+    g: c1.g + (c2.g - c1.g) * t,
+    b: c1.b + (c2.b - c1.b) * t
+  };
+}
+
+function colorAt(p, offset) {
+  const t = ((p + offset) % palette.length + palette.length) % palette.length;
+  const i = Math.floor(t);
+  const f = t - i;
+  const c1 = palette[i % palette.length];
+  const c2 = palette[(i + 1) % palette.length];
+  return lerpColor(c1, c2, f);
+}
+
+// ── Lorenz System ──────────────────────────────────────
+class LorenzAttractor {
+  constructor(x0, y0, z0, sigma, rho, beta, scale) {
+    this.x = x0; this.y = y0; this.z = z0;
+    this.sigma = sigma; this.rho = rho; this.beta = beta;
+    this.scale = scale;
+    this.history = [];
+    this.maxHistory = 1800;
+    this.index = 0;
+  }
+
+  step(dt) {
+    // RK4
+    const f = (x, y, z) => {
+      return {
+        dx: this.sigma * (y - x),
+        dy: x * (this.rho - z) - y,
+        dz: x * y - this.beta * z
+      };
+    };
+
+    const k1 = f(this.x, this.y, this.z);
+    const k2 = f(
+      this.x + 0.5 * dt * k1.dx,
+      this.y + 0.5 * dt * k1.dy,
+      this.z + 0.5 * dt * k1.dz
+    );
+    const k3 = f(
+      this.x + 0.5 * dt * k2.dx,
+      this.y + 0.5 * dt * k2.dy,
+      this.z + 0.5 * dt * k2.dz
+    );
+    const k4 = f(
+      this.x + dt * k3.dx,
+      this.y + dt * k3.dy,
+      this.z + dt * k3.dz
+    );
+
+    this.x += (dt / 6) * (k1.dx + 2*k2.dx + 2*k3.dx + k4.dx);
+    this.y += (dt / 6) * (k1.dy + 2*k2.dy + 2*k3.dy + k4.dy);
+    this.z += (dt / 6) * (k1.dz + 2*k2.dz + 2*k3.dz + k4.dz);
+
+    // Record
+    this.history[this.index] = { x: this.x, y: this.y, z: this.z };
+    this.index = (this.index + 1) % this.maxHistory;
+  }
+
+  getTrail(count) {
+    const pts = [];
+    let idx = (this.index - 1 + this.maxHistory) % this.maxHistory;
+    for (let i = 0; i < Math.min(count, this.maxHistory); i++) {
+      const pt = this.history[idx];
+      if (pt) pts.push(pt);
+      idx = (idx - 1 + this.maxHistory) % this.maxHistory;
+      if (idx === this.index) break;
+    }
+    return pts.reverse();
+  }
+
+  project(pt) {
+    // Project 3D Lorenz to 2D with an angled view
+    const sx = pt.x * this.scale;
+    const sy = (pt.y * 0.85 - pt.z * 0.45) * this.scale;
+    return { x: cx + sx, y: cy - sy };
+  }
+}
+
+// ── Create Attractors ──────────────────────────────────
+const attractors = [];
+const baseParams = [
+  { sigma: 10, rho: 28, beta: 8/3, scale: 6.5, x: 0.1, y: 0, z: 0 },
+  { sigma: 10, rho: 28.6, beta: 8/3, scale: 6.2, x: 0.1001, y: 0, z: 0.0001 },
+  { sigma: 10.2, rho: 27.4, beta: 2.667, scale: 5.8, x: -0.1, y: -0.1, z: 0.05 },
+];
+
+baseParams.forEach((p, i) => {
+  attractors.push(new LorenzAttractor(p.x, p.y, p.z, p.sigma, p.rho, p.beta, p.scale));
+});
+
+// Burn-in
+for (let a of attractors) {
+  for (let i = 0; i < 600; i++) a.step(0.008);
+}
+
+// ── Rendering ──────────────────────────────────────────
+const bgLayers = [];
+
+function draw() {
+  // Mouse velocity
+  mdx = mx - pmx;
+  mdy = my - pmy;
+  pmx = mx; pmy = my;
+
+  // Mouse parameter influence
+  const mxNorm = mx / W;
+  const myNorm = my / H;
+  const mouseSpeed = Math.sqrt(mdx * mdx + mdy * mdy) * 0.02;
+
+  // Clear with subtle trails
+  ctx.fillStyle = 'rgba(13, 6, 4, 0.12)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Background glow at the main cluster
+  const glowGrad = ctx.createRadialGradient(cx, cy, 40, cx, cy, 280);
+  glowGrad.addColorStop(0, 'rgba(180, 70, 30, 0.06)');
+  glowGrad.addColorStop(1, 'rgba(13, 6, 4, 0)');
+  ctx.fillStyle = glowGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Update and draw attractors
+  attractors.forEach((a, ai) => {
+    // Mouse warps rho and sigma locally
+    const rhoShift = (mxNorm - 0.5) * 6 + mdy * 0.008;
+    const sigmaShift = (myNorm - 0.5) * 2;
+    a.rho = baseParams[ai].rho + rhoShift;
+    a.sigma = baseParams[ai].sigma + sigmaShift;
+
+    // Step
+    const stepsPerFrame = 3;
+    for (let s = 0; s < stepsPerFrame; s++) {
+      a.step(0.007);
+    }
+
+    // Get trail
+    const trail = a.getTrail(400);
+    if (trail.length < 2) return;
+
+    // Draw ribbon
+    const segments = trail.length - 1;
+    for (let i = 0; i < segments; i++) {
+      const t = i / segments;
+      const p0 = a.project(trail[i]);
+      const p1 = a.project(trail[i + 1]);
+      const zNorm = Math.max(0, Math.min(1, (trail[i].z + 30) / 60));
+
+      // Color based on z-depth and attractor index
+      const colorIdx = (ai * 2 + zNorm * 3);
+      const col = colorAt(colorIdx, 0);
+
+      // Opacity: brighter at middle z, faded at extremes
+      const alpha = 0.25 + 0.45 * (1 - Math.abs(zNorm - 0.5) * 1.6);
+
+      // Thicker near the "now" end of trail
+      const ageFactor = 0.3 + 0.7 * t;
+      const lineWidth = 1.2 + ageFactor * 1.6 + mouseSpeed * 0.6;
+
+      ctx.beginPath();
+      ctx.moveTo(p0.x, p0.y);
+      ctx.lineTo(p1.x, p1.y);
+      ctx.strokeStyle = `rgba(${Math.round(col.r)},${Math.round(col.g)},${Math.round(col.b)},${alpha * ageFactor})`;
+      ctx.lineWidth = lineWidth;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+    }
+
+    // Draw current point (firefly at the tip)
+    const tipPt = a.project(trail[trail.length - 1]);
+    const tipCol = colorAt(ai * 2 + 0.5, 0);
+    const tpGrad = ctx.createRadialGradient(tipPt.x, tipPt.y, 0, tipPt.x, tipPt.y, 14 + mouseSpeed * 8);
+    tpGrad.addColorStop(0, `rgba(${tipCol.r},${tipCol.g},${tipCol.b},0.9)`);
+    tpGrad.addColorStop(0.4, `rgba(${tipCol.r},${tipCol.g},${tipCol.b},0.25)`);
+    tpGrad.addColorStop(1, `rgba(${tipCol.r},${tipCol.g},${tipCol.b},0)`);
+    ctx.fillStyle = tpGrad;
+    ctx.beginPath();
+    ctx.arc(tipPt.x, tipPt.y, 14 + mouseSpeed * 8, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // Vignette — stronger at non-cluster areas
+  const vignetteGrad = ctx.createRadialGradient(W * 0.78, H * 0.72, W * 0.15, W * 0.5, H * 0.5, W * 0.95);
+  vignetteGrad.addColorStop(0, 'rgba(13, 6, 4, 0)');
+  vignetteGrad.addColorStop(0.6, 'rgba(13, 6, 4, 0.15)');
+  vignetteGrad.addColorStop(1, 'rgba(13, 6, 4, 0.7)');
+  ctx.fillStyle = vignetteGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Parameter readout
+  const avgRho = attractors.reduce((s, a) => s + a.rho, 0) / attractors.length;
+  const avgSigma = attractors.reduce((s, a) => s + a.sigma, 0) / attractors.length;
+  info.innerHTML =
+    `ρ ${avgRho.toFixed(2)} &nbsp; σ ${avgSigma.toFixed(2)} &nbsp; β ${(8/3).toFixed(2)}`;
+}
+
+// ── Poetic Text Cycle ──────────────────────────────────
+const phrases = [
+  "a path that never crosses itself",
+  "determined but never determined",
+  "the butterfly remembers nothing",
+  "chaos with a shape",
+  "forever approaching",
+  "the crease between wings",
+  "where order forgets itself",
+  "bounded and boundless",
+  "the strange geometry of almost",
+  "every return is a departure",
+  "flight without destination",
+  "the threshold breathes",
+];
+
+let phraseIdx = 0;
+let phraseTimer = 0;
+const phraseInterval = 8.5;
+
+function cyclePhrase() {
+  overlay.textContent = phrases[phraseIdx];
+  overlay.classList.add('visible');
+  phraseIdx = (phraseIdx + 1) % phrases.length;
+
+  setTimeout(() => {
+    if (phraseIdx === 0 || Math.random() < 0.3) {
+      overlay.classList.remove('visible');
+    }
+  }, phraseInterval * 1000 * 0.7);
+}
+
+// Initial delay
+setTimeout(() => {
+  cyclePhrase();
+  info.classList.add('visible');
+}, 1800);
+
+// ── Animation Loop ─────────────────────────────────────
+let frameCount = 0;
+let lastTime = performance.now();
+
+function animate(timestamp) {
+  const dt = Math.min((timestamp - lastTime) / 1000, 0.05);
+  lastTime = timestamp;
+
+  draw();
+
+  frameCount++;
+  phraseTimer += dt;
+  if (phraseTimer > phraseInterval) {
+    phraseTimer = 0;
+    cyclePhrase();
+  }
+
+  requestAnimationFrame(animate);
+}
+
+requestAnimationFrame(animate);
+
+// ── Keyboard ───────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.key === 'r') {
+    attractors.forEach((a, i) => {
+      a.x = baseParams[i].x + (Math.random() - 0.5) * 0.2;
+      a.y = baseParams[i].y + (Math.random() - 0.5) * 0.2;
+      a.z = baseParams[i].z + (Math.random() - 0.5) * 0.1;
+      a.history = [];
+      a.index = 0;
+    });
+  }
+  if (e.key === 'f') {
+    // Full chaos burst
+    attractors.forEach((a, i) => {
+      a.rho = baseParams[i].rho + (Math.random() - 0.5) * 10;
+    });
+    setTimeout(() => {
+      attractors.forEach((a, i) => {
+        a.rho = baseParams[i].rho;
+      });
+    }, 2000);
+  }
+});
+</script>
+</body>
+</html>

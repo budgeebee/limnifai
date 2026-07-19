@@ -259,3 +259,17 @@ Track each piece's creative direction to ensure deliberate variety over time.
 **Composition:** edge-dominant — CA grows from a single seed cell at the top edge, cascading downward; oldest rows fade to 22% opacity and scroll off when the grid fills
 **File:** `descant.html`
 **What you explored:** A 1D elementary cellular automaton where mouse X sweeps through Wolfram's 256 rules and mouse Y controls generation speed (250ms slow at top, 10ms fast at bottom). A single seed cell at center-top spawns all pattern — the edge-dominant origin point marked by a pulsing beacon. Three muted-nature tones cycle by column position (sage, dusty rose, slate), giving the pattern a woven, threaded look. Older rows fade exponentially (α 0.22→0.92), and the frontier row glows with warm ochre dots on each alive cell. Fifteen poetic phrases cycle on 9s intervals about descent, inheritance, and the descant — the musical term for a melody sung above a theme. Keyboard shortcuts: space=pause, r=reseed, arrows=rule/speed, 0=reset to Rule 90. The piece is melancholic not through darkness but through the quiet knowledge that every pattern fades as it scrolls off the top — each generation born from the one before, then forgotten. No external libraries.
+
+---
+
+## 2026-07-18 — Anfract
+
+**Intention:** Strange attractors have never been explored across 73 pieces — the Lorenz system's phase-space trajectory is nature's purest liminal object: chaotic yet bounded, deterministic yet unpredictable, forever approaching but never crossing its own path. Underrepresented dimensions (warm-sunset palette at 2 uses, mysterious mood at 2, corner-driven composition at 2) combine to give the mathematical abstraction organic warmth. Three Lorenz attractors with slightly different initial conditions orbit the lower-right quadrant, their parameters warped by mouse position — the viewer navigates the threshold between order and chaos.
+
+**Format:** generative-visual
+**Technique:** strange attractors (Lorenz system, RK4 integration, three attractors with mouse-driven parameter sweep of σ and ρ)
+**Palette:** warm-sunset (deep orange, amber, gold, coral, burgundy, warm cream on dark amber-black #0d0604)
+**Mood:** mysterious
+**Composition:** corner-driven — attractor ribbons cluster in the lower-right quadrant, vignette clearing everywhere else
+**File:** `anfract.html`
+**What you explored:** Three Lorenz attractors integrated with RK4 (dt=0.007, 3 steps/frame), each seeded from a slightly different initial condition near the classic parameters (σ=10, ρ=28, β=8/3). Mouse X warps ρ by ±3, mouse Y warps σ by ±1, letting the viewer sweep through periodic, weakly chaotic, and fully turbulent regimes. Trails are rendered as ribbons with varying opacity based on z-depth — brightest at mid-z, fading at extremes — with line width thickening toward the most recent point. Each attractor's current tip glows as a warm firefly (radial gradient), brighter when mouse is moving fast. A corner-driven vignette (gradient centered at 78%/72% of canvas) clears the upper-left and center for breathing room. Twelve poetic phrases cycle on 8.5s intervals. Press R to randomize initial conditions, F for a 2-second chaos burst. The name "Anfract" — a winding, circuitous path (from Latin anfractus, used for brain sulci and stream meanders) — captures the attractor's paradoxical nature: a path that is always turning, always approaching, but never arriving. No external libraries.
