@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>crepuscule</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { 
+    background: #1a0e06; 
+    overflow: hidden; 
+    font-family: 'Georgia', 'Times New Roman', serif;
+    cursor: crosshair;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  canvas { display: block; }
+  #overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 10;
+  }
+  #clock {
+    color: #f0e0c0;
+    font-size: 28px;
+    letter-spacing: 0.15em;
+    opacity: 0.7;
+    transition: opacity 0.8s;
+    text-shadow: 0 0 20px rgba(196,163,90,0.3);
+  }
+  #phrase {
+    color: #c4a35a;
+    font-size: 16px;
+    font-style: italic;
+    margin-top: 18px;
+    opacity: 0;
+    transition: opacity 2s;
+    max-width: 400px;
+    text-align: center;
+    line-height: 1.6;
+    text-shadow: 0 0 12px rgba(196,163,90,0.2);
+  }
+  #data-panel {
+    position: fixed;
+    bottom: 32px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 11px;
+    color: #8b6b4a;
+    letter-spacing: 0.08em;
+    pointer-events: none;
+    display: flex;
+    gap: 28px;
+    opacity: 0.5;
+  }
+  .rhythm-label { 
+    position: relative; 
+    text-transform: uppercase;
+    transition: color 0.6s, text-shadow 0.6s;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="overlay">
+  <div id="clock">06:00</div>
+  <div id="phrase"></div>
+</div>
+<div id="data-panel">
+  <span class="rhythm-label" data-r="0">cortisol</span>
+  <span class="rhythm-label" data-r="1">alertness</span>
+  <span class="rhythm-label" data-r="2">temperature</span>
+  <span class="rhythm-label" data-r="3">sleep drive</span>
+  <span class="rhythm-label" data-r="4">melatonin</span>
+</div>
+
+<script>
+// ── crepuscule ──────────────────────────────────────────────────
+// circadian rhythm data-art with wave-interference moiré
+// the liminal threshold between day and night, mapped in sine waves
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const clockEl = document.getElementById('clock');
+const phraseEl = document.getElementById('phrase');
+const dataPanel = document.getElementById('data-panel');
+const rhythmLabels = dataPanel.querySelectorAll('.rhythm-label');
+
+let W, H, dpr;
+
+// ── circadian rhythms ───────────────────────────────────────────
+// phase offsets in radians, from 06:00 = 0 (dawn reference)
+// amplitudes and colors from warm-earth palette
+const rhythms = [
+  { name: 'cortisol',       phase: Math.PI / 6,      amp: 0.85, color: [196, 163, 90],  peakH: 8,  troughH: 24 }, // ochre
+  { name: 'alertness',      phase: Math.PI / 3,      amp: 0.78, color: [220, 195, 150], peakH: 10, troughH: 4  }, // cream
+  { name: 'temperature',    phase: 11 * Math.PI / 12, amp: 0.65, color: [196, 113, 59],  peakH: 17, troughH: 5  }, // sienna
+  { name: 'sleep-drive',    phase: 17 * Math.PI / 12, amp: 0.82, color: [160, 85, 45],   peakH: 23, troughH: 7  }, // terracotta
+  { name: 'melatonin',      phase: 5 * Math.PI / 3,  amp: 0.92, color: [92, 58, 44],     peakH: 2,  troughH: 14 }  // deep earth
+];
+
+// ── background palette stops (warm-earth, time-of-day mapped) ──
+const bgStops = [
+  { h: 0,  color: [12, 8, 4]   }, // midnight — deepest brown-black
+  { h: 4,  color: [16, 10, 6]  }, // pre-dawn
+  { h: 6,  color: [26, 16, 8]  }, // dawn — warm ochre-black
+  { h: 8,  color: [32, 20, 10] }, // morning
+  { h: 12, color: [40, 24, 12] }, // noon — warmest
+  { h: 17, color: [36, 20, 10] }, // afternoon
+  { h: 19, color: [28, 16, 8]  }, // dusk
+  { h: 21, color: [18, 12, 6]  }, // evening
+  { h: 24, color: [12, 8, 4]   }  // midnight
+];
+
+// ── poetic phrases ──────────────────────────────────────────────
+const phrases = [
+  "the hour when light forgets its name",
+  "between the sun's leaving and the moon's arriving",
+  "a threshold stitched in violet and gold",
+  "the body remembers what the clock forgets",
+  "dawn: the seam where sleep unravels into waking",
+  "dusk: the breath held between day and night",
+  "circadian — from circa (about) and dies (day)",
+  "every cell keeps its own small clock",
+  "the pineal gland waits for darkness like a stone waits for rain",
+  "in the crepuscule, two rhythms touch and neither dominates",
+  "twilight is the day's exhale",
+  "melatonin rising — the body's slow undressing of alertness",
+  "cortisol at dawn: the chemical courage to begin again",
+  "the interference pattern between waking and dreaming",
+  "what if dawn is not the beginning but the overlap"
+];
+
+// ── state ───────────────────────────────────────────────────────
+let mouseX = 0.25; // normalized 0–1 → 06:00 default
+let mouseY = 0.5;
+let prevMouseX = 0.25, prevMouseY = 0.5;
+let mouseVX = 0, mouseVY = 0;
+let timeOfDay = 6; // hours, 0–24
+let phraseTimer = 0;
+let phraseIdx = 0;
+let phraseAlpha = 0;
+let frameCount = 0;
+let time = 0;
+
+// ── resize ──────────────────────────────────────────────────────
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ── mouse / touch ───────────────────────────────────────────────
+window.addEventListener('mousemove', (e) => {
+  prevMouseX = mouseX;
+  prevMouseY = mouseY;
+  mouseX = e.clientX / W;
+  mouseY = e.clientY / H;
+});
+window.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  const t = e.touches[0];
+  prevMouseX = mouseX;
+  prevMouseY = mouseY;
+  mouseX = t.clientX / W;
+  mouseY = t.clientY / H;
+}, { passive: false });
+
+// ── lerp ────────────────────────────────────────────────────────
+function lerp(a, b, t) { return a + (b - a) * t; }
+function lerpColor(c1, c2, t) {
+  return [
+    Math.round(lerp(c1[0], c2[0], t)),
+    Math.round(lerp(c1[1], c2[1], t)),
+    Math.round(lerp(c1[2], c2[2], t))
+  ];
+}
+function easeInOut(t) { return t < 0.5 ? 2*t*t : -1+(4-2*t)*t; }
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+// ── background color at hour ────────────────────────────────────
+function bgColorAt(hour) {
+  hour = ((hour % 24) + 24) % 24;
+  for (let i = 0; i < bgStops.length - 1; i++) {
+    if (hour >= bgStops[i].h && hour <= bgStops[i+1].h) {
+      const t = (hour - bgStops[i].h) / (bgStops[i+1].h - bgStops[i].h);
+      return lerpColor(bgStops[i].color, bgStops[i+1].color, easeInOut(t));
+    }
+  }
+  return bgStops[bgStops.length-1].color;
+}
+
+// ── sample a rhythm value at a given hour ───────────────────────
+function rhythmValue(rhythm, hour) {
+  // map hour to radians: 6am=0, 6pm=π, 6am next day=2π
+  const rad = ((hour - 6) / 24) * Math.PI * 2;
+  return Math.sin(rad + rhythm.phase) * rhythm.amp;
+}
+
+// ── composite wave (sum of all rhythms at hour) ─────────────────
+function compositeWave(hour) {
+  return rhythms.reduce((sum, r) => sum + rhythmValue(r, hour), 0);
+}
+
+// ── determine which rhythm is most active at an hour ────────────
+function dominantRhythm(hour) {
+  let bestIdx = 0, bestVal = -Infinity;
+  rhythms.forEach((r, i) => {
+    const v = rhythmValue(r, hour);
+    if (v > bestVal) { bestVal = v; bestIdx = i; }
+  });
+  return bestIdx;
+}
+
+// ── draw ────────────────────────────────────────────────────────
+function draw() {
+  frameCount++;
+  
+  // ── update state ──────────────────────────────────────────────
+  mouseVX = (mouseX - prevMouseX) * W;
+  mouseVY = (mouseY - prevMouseY) * H;
+  const speed = Math.sqrt(mouseVX*mouseVX + mouseVY*mouseVY);
+  prevMouseX = lerp(prevMouseX, mouseX, 0.5);
+  prevMouseY = lerp(prevMouseY, mouseY, 0.5);
+  
+  timeOfDay = mouseX * 24; // 0=midnight, 6=dawn, 12=noon, 18=dusk
+  time += 0.016;
+  
+  // ── gesture-response: velocity modulates bloom and wave detail ──
+  const speedNorm = clamp(speed / 800, 0, 1);
+  const bloomRadius = lerp(3, 18, speedNorm); // faster → more bloom
+  const waveOpacity = lerp(0.55, 0.85, 1 - speedNorm); // slower → more clarity
+  const interferenceIntensity = lerp(0.35, 0.72, 1 - speedNorm * 0.6); // slower → richer interference
+  
+  // ── background ────────────────────────────────────────────────
+  const bg = bgColorAt(timeOfDay);
+  const grad = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, Math.max(W, H)*0.75);
+  grad.addColorStop(0, `rgb(${Math.min(bg[0]+6, 40)},${Math.min(bg[1]+4, 28)},${Math.min(bg[2]+2, 16)})`);
+  grad.addColorStop(0.5, `rgb(${bg[0]},${bg[1]},${bg[2]})`);
+  grad.addColorStop(1, `rgb(${Math.max(bg[0]-4, 4)},${Math.max(bg[1]-2, 3)},${Math.max(bg[2]-1, 2)})`);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  
+  // ── liminal threshold zone indicators (dawn & dusk) ───────────
+  const dawnX = (6 / 24) * W;
+  const duskX = (18 / 24) * W;
+  const thresholdZoneW = W * 0.025;
+  
+  // dawn glow band
+  const dawnGrad = ctx.createLinearGradient(dawnX - thresholdZoneW, 0, dawnX + thresholdZoneW, 0);
+  dawnGrad.addColorStop(0, 'rgba(196,163,90,0)');
+  dawnGrad.addColorStop(0.5, 'rgba(196,163,90,0.08)');
+  dawnGrad.addColorStop(1, 'rgba(196,163,90,0)');
+  ctx.fillStyle = dawnGrad;
+  ctx.fillRect(dawnX - thresholdZoneW*2, 0, thresholdZoneW*4, H);
+  
+  // dusk glow band
+  const duskGrad = ctx.createLinearGradient(duskX - thresholdZoneW, 0, duskX + thresholdZoneW, 0);
+  duskGrad.addColorStop(0, 'rgba(160,85,45,0)');
+  duskGrad.addColorStop(0.5, 'rgba(160,85,45,0.08)');
+  duskGrad.addColorStop(1, 'rgba(160,85,45,0)');
+  ctx.fillStyle = duskGrad;
+  ctx.fillRect(duskX - thresholdZoneW*2, 0, thresholdZoneW*4, H);
+  
+  // thin threshold lines
+  ctx.strokeStyle = `rgba(196,163,90,${0.12 + Math.sin(time * 0.4) * 0.04})`;
+  ctx.lineWidth = 0.5;
+  ctx.beginPath();
+  ctx.moveTo(dawnX, 0); ctx.lineTo(dawnX, H);
+  ctx.stroke();
+  
+  ctx.strokeStyle = `rgba(160,85,45,${0.12 + Math.sin(time * 0.4 + Math.PI) * 0.04})`;
+  ctx.beginPath();
+  ctx.moveTo(duskX, 0); ctx.lineTo(duskX, H);
+  ctx.stroke();
+  
+  // ── wave rendering parameters ─────────────────────────────────
+  const waveMargin = H * 0.08;
+  const waveHeight = (H - waveMargin * 2) / rhythms.length;
+  const overshoot = waveHeight * 0.35; // overlap between adjacent waves
+  
+  // ── draw wave interference between adjacent rhythm pairs ──────
+  for (let pair = 0; pair < rhythms.length - 1; pair++) {
+    const rA = rhythms[pair];
+    const rB = rhythms[pair + 1];
+    const yTop = waveMargin + pair * waveHeight;
+    const yMid = yTop + waveHeight;
+    const yBot = yTop + waveHeight * 2;
+    
+    // sample interference across the band
+    const bandY = yMid - overshoot / 2;
+    const bandH = overshoot;
+    
+    // draw interference as vertical slices
+    const slices = Math.floor(W / 3);
+    for (let s = 0; s < slices; s++) {
+      const x = (s / slices) * W;
+      const h = ((x / W) * 24);
+      
+      const vA = rhythmValue(rA, h);
+      const vB = rhythmValue(rB, h);
+      const interference = vA * vB; // product: in-phase gives positive, out-of-phase gives negative
+      
+      // map to glow intensity
+      const glowI = clamp((interference + 0.3) / 0.6, 0, 1) * interferenceIntensity;
+      
+      if (glowI > 0.01) {
+        // blend colors of both rhythms
+        const blended = [
+          Math.round(lerp(rA.color[0], rB.color[0], 0.5)),
+          Math.round(lerp(rA.color[1], rB.color[1], 0.5)),
+          Math.round(lerp(rA.color[2], rB.color[2], 0.5))
+        ];
+        
+        const gradient = ctx.createLinearGradient(x, bandY, x, bandY + bandH);
+        const alpha = glowI * 0.45;
+        gradient.addColorStop(0, `rgba(${blended[0]},${blended[1]},${blended[2]},0)`);
+        gradient.addColorStop(0.5, `rgba(${blended[0]},${blended[1]},${blended[2]},${alpha})`);
+        gradient.addColorStop(1, `rgba(${blended[0]},${blended[1]},${blended[2]},0)`);
+        
+        ctx.fillStyle = gradient;
+        const sliceW = W / slices + 1;
+        ctx.fillRect(x, bandY, sliceW + 1, bandH);
+      }
+    }
+  }
+  
+  // ── draw each rhythm wave as a filled ribbon ──────────────────
+  rhythms.forEach((rhythm, idx) => {
+    const yCenter = waveMargin + idx * waveHeight + waveHeight / 2;
+    const amplitude = waveHeight * 0.38;
+    
+    // upper edge path
+    ctx.beginPath();
+    ctx.moveTo(0, yCenter);
+    for (let x = 0; x <= W; x += 2) {
+      const h = (x / W) * 24;
+      const v = rhythmValue(rhythm, h);
+      const y = yCenter - v * amplitude;
+      ctx.lineTo(x, y);
+    }
+    // close the ribbon
+    for (let x = W; x >= 0; x -= 2) {
+      const h = (x / W) * 24;
+      const v = rhythmValue(rhythm, h);
+      const y = yCenter - v * amplitude * 0.25; // narrow base
+      ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    
+    // warm gradient fill
+    const [cr, cg, cb] = rhythm.color;
+    const ribbonGrad = ctx.createLinearGradient(0, yCenter - amplitude, 0, yCenter + amplitude * 0.1);
+    ribbonGrad.addColorStop(0, `rgba(${cr},${cg},${cb},${waveOpacity * 0.75})`);
+    ribbonGrad.addColorStop(0.5, `rgba(${cr},${cg},${cb},${waveOpacity * 0.5})`);
+    ribbonGrad.addColorStop(1, `rgba(${cr},${cg},${cb},${waveOpacity * 0.15})`);
+    ctx.fillStyle = ribbonGrad;
+    ctx.fill();
+    
+    // thin line along the wave crest
+    ctx.strokeStyle = `rgba(${cr},${cg},${cb},${waveOpacity * 0.9})`;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    for (let x = 0; x <= W; x += 2) {
+      const h = (x / W) * 24;
+      const v = rhythmValue(rhythm, h);
+      const y = yCenter - v * amplitude;
+      if (x === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    
+    // bloom glow along the crest (gesture-responsive)
+    if (bloomRadius > 2) {
+      ctx.strokeStyle = `rgba(${cr},${cg},${cb},${0.06 + speedNorm * 0.06})`;
+      ctx.lineWidth = bloomRadius * 2;
+      ctx.beginPath();
+      for (let x = 0; x <= W; x += 3) {
+        const h = (x / W) * 24;
+        const v = rhythmValue(rhythm, h);
+        const y = yCenter - v * amplitude;
+        if (x === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+  });
+  
+  // ── composite center ribbon ───────────────────────────────────
+  const compositeY = H / 2;
+  const compositeAmp = waveHeight * 2.2;
+  
+  ctx.beginPath();
+  for (let x = 0; x <= W; x += 1.5) {
+    const h = (x / W) * 24;
+    const v = compositeWave(h) / rhythms.length;
+    const y = compositeY - v * compositeAmp;
+    if (x === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  // close ribbon bottom
+  for (let x = W; x >= 0; x -= 1.5) {
+    const h = (x / W) * 24;
+    const v = compositeWave(h) / rhythms.length;
+    const y = compositeY - v * compositeAmp * 0.3;
+    ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  
+  const compGrad = ctx.createLinearGradient(0, compositeY - compositeAmp, 0, compositeY + compositeAmp * 0.1);
+  compGrad.addColorStop(0, `rgba(220,195,150,0.28)`);
+  compGrad.addColorStop(0.5, `rgba(196,163,90,0.16)`);
+  compGrad.addColorStop(1, 'rgba(196,163,90,0.04)');
+  ctx.fillStyle = compGrad;
+  ctx.fill();
+  
+  ctx.strokeStyle = 'rgba(220,195,150,0.5)';
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  for (let x = 0; x <= W; x += 1.5) {
+    const h = (x / W) * 24;
+    const v = compositeWave(h) / rhythms.length;
+    const y = compositeY - v * compositeAmp;
+    if (x === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  
+  // ── dawn/dusk hour markers on the composite ribbon ────────────
+  const markerHours = [6, 18];
+  markerHours.forEach(hour => {
+    const mx = (hour / 24) * W;
+    const compV = compositeWave(hour) / rhythms.length;
+    const my = compositeY - compV * compositeAmp;
+    
+    ctx.fillStyle = hour === 6 
+      ? `rgba(196,163,90,${0.5 + Math.sin(time * 0.8) * 0.2})`
+      : `rgba(160,85,45,${0.5 + Math.sin(time * 0.8 + Math.PI) * 0.2})`;
+    ctx.beginPath();
+    ctx.arc(mx, my, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // subtle pulse ring
+    ctx.strokeStyle = hour === 6
+      ? `rgba(196,163,90,${0.2 + Math.sin(time * 0.8) * 0.1})`
+      : `rgba(160,85,45,${0.2 + Math.sin(time * 0.8 + Math.PI) * 0.1})`;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.arc(mx, my, 7 + Math.sin(time * 0.8 + hour) * 1.5, 0, Math.PI * 2);
+    ctx.stroke();
+  });
+  
+  // ── horizontal subtle scan lines ──────────────────────────────
+  ctx.fillStyle = 'rgba(0,0,0,0.03)';
+  for (let y = 0; y < H; y += 4) {
+    ctx.fillRect(0, y, W, 1);
+  }
+  
+  // ── edge vignette ─────────────────────────────────────────────
+  const vignetteGrad = ctx.createRadialGradient(W/2, H/2, Math.min(W, H)*0.45, W/2, H/2, Math.max(W, H)*0.8);
+  vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
+  vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.45)');
+  ctx.fillStyle = vignetteGrad;
+  ctx.fillRect(0, 0, W, H);
+  
+  // ── update DOM overlays ───────────────────────────────────────
+  const displayHour = Math.floor(timeOfDay);
+  const displayMin = Math.floor((timeOfDay - displayHour) * 60);
+  const hh = String(displayHour).padStart(2, '0');
+  const mm = String(displayMin).padStart(2, '0');
+  clockEl.textContent = `${hh}:${mm}`;
+  
+  // highlight dominant rhythm in data panel
+  const dominant = dominantRhythm(timeOfDay);
+  rhythmLabels.forEach((label, i) => {
+    if (i === dominant) {
+      label.style.color = '#f0e0c0';
+      label.style.textShadow = '0 0 10px rgba(196,163,90,0.5)';
+    } else {
+      label.style.color = '#8b6b4a';
+      label.style.textShadow = 'none';
+    }
+  });
+  
+  // ── phrase cycling ────────────────────────────────────────────
+  phraseTimer += 0.016;
+  const phraseInterval = 14;
+  const nextPhraseIdx = Math.floor(phraseTimer / phraseInterval) % phrases.length;
+  
+  if (nextPhraseIdx !== phraseIdx) {
+    phraseIdx = nextPhraseIdx;
+    phraseEl.textContent = phrases[phraseIdx];
+  }
+  
+  const phaseInPhrase = (phraseTimer % phraseInterval);
+  if (phaseInPhrase < 2.5) {
+    phraseAlpha = easeInOut(phaseInPhrase / 2.5);
+  } else if (phaseInPhrase > phraseInterval - 3.5) {
+    phraseAlpha = 1 - easeInOut((phaseInPhrase - (phraseInterval - 3.5)) / 3.5);
+  } else {
+    phraseAlpha = 1;
+  }
+  
+  phraseEl.style.opacity = phraseAlpha;
+  
+  // ── clock glow pulses at threshold hours ──────────────────────
+  const distToDawn = Math.abs(timeOfDay - 6);
+  const distToDusk = Math.abs(timeOfDay - 18);
+  const thresholdProximity = Math.min(distToDawn, distToDusk);
+  const clockGlow = thresholdProximity < 1.5 
+    ? lerp(0.7, 0.95, 1 - thresholdProximity / 1.5) 
+    : 0.7;
+  clockEl.style.opacity = clockGlow;
+  
+  requestAnimationFrame(draw);
+}
+
+// ── start ───────────────────────────────────────────────────────
+// initial phrase
+phraseEl.textContent = phrases[0];
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
