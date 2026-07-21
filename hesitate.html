@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hesitate</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #050505;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    cursor: default;
+    user-select: none;
+    -webkit-user-select: none;
+    height: 100vh;
+    width: 100vw;
+  }
+  canvas { display: block; }
+  #overlay {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #message {
+    color: rgba(255,255,255,0.85);
+    font-size: 1.6rem;
+    letter-spacing: 0.15em;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    text-align: center;
+    text-shadow: 0 0 40px rgba(255,255,255,0.3);
+  }
+  #message.visible { opacity: 1; }
+  #prompt {
+    position: fixed;
+    bottom: 3rem;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(255,255,255,0.25);
+    font-family: 'Courier New', monospace;
+    font-size: 0.85rem;
+    letter-spacing: 0.2em;
+    pointer-events: none;
+    transition: opacity 0.6s ease;
+  }
+  #phrase {
+    position: fixed;
+    top: 2.5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(255,255,255,0.18);
+    font-family: 'Courier New', monospace;
+    font-size: 0.8rem;
+    letter-spacing: 0.12em;
+    pointer-events: none;
+    transition: opacity 1.2s ease;
+    text-align: center;
+    max-width: 80vw;
+  }
+  #stats {
+    position: fixed;
+    top: 2rem;
+    right: 2.5rem;
+    color: rgba(255,255,255,0.3);
+    font-family: 'Courier New', monospace;
+    font-size: 0.75rem;
+    letter-spacing: 0.1em;
+    pointer-events: none;
+    text-align: right;
+    line-height: 1.6;
+    transition: opacity 0.5s ease;
+  }
+  #title-display {
+    position: fixed;
+    top: 3.5rem;
+    left: 2.5rem;
+    color: rgba(255,255,255,0.12);
+    font-family: 'Courier New', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.3em;
+    pointer-events: none;
+    text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="overlay"><div id="message"></div></div>
+<div id="prompt">hold space</div>
+<div id="stats"></div>
+<div id="phrase"></div>
+<div id="title-display">Hesitate</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const msg = document.getElementById('message');
+const promptEl = document.getElementById('prompt');
+const statsEl = document.getElementById('stats');
+const phraseEl = document.getElementById('phrase');
+
+let W, H, cx, cy;
+
+// --- Game State ---
+const STATE = { IDLE: 0, CHARGING: 1, FEEDBACK: 2, EXPLODING: 3 };
+let state = STATE.IDLE;
+let growth = 0;           // 0..1 normalized growth
+let targetGrowth = 0;
+let level = 0;
+let score = 0;
+let streak = 0;
+let bestStreak = 0;
+let totalAttempts = 0;
+let totalHits = 0;
+let feedbackTimer = 0;
+let feedbackType = '';    // 'early' | 'perfect' | 'late'
+let explodeParticles = [];
+let explodeTimer = 0;
+let spaceDown = false;
+let shakeAmount = 0;
+let comboText = '';
+let comboTimer = 0;
+let vignetteAlpha = 0;
+let pulseBeat = 0;
+
+// --- Threshold Zone Params ---
+function zoneStart() { return 0.35 + level * 0.012; }
+function zoneEnd() { return zoneStart() + Math.max(0.08, 0.18 - level * 0.008); }
+function zoneWidth() { return zoneEnd() - zoneStart(); }
+
+// --- Particles for explosion ---
+function spawnExplosion(x, y, count) {
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 1.5 + Math.random() * 8;
+    explodeParticles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 1,
+      decay: 0.008 + Math.random() * 0.025,
+      size: 1 + Math.random() * 3.5,
+    });
+  }
+}
+
+// --- Ring particles for perfect hit ---
+let ringParticles = [];
+function spawnRing(x, y, count) {
+  for (let i = 0; i < count; i++) {
+    const angle = (Math.PI * 2 * i) / count + Math.random() * 0.1;
+    const speed = 3 + Math.random() * 4;
+    ringParticles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 1,
+      decay: 0.015 + Math.random() * 0.02,
+      size: 1 + Math.random() * 2,
+    });
+  }
+}
+
+// --- Background stars ---
+let stars = [];
+function initStars() {
+  stars = [];
+  for (let i = 0; i < 60; i++) {
+    stars.push({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      r: 0.3 + Math.random() * 0.8,
+      twinkle: Math.random() * Math.PI * 2,
+      speed: 0.005 + Math.random() * 0.02,
+    });
+  }
+}
+
+// --- Poetic phrases ---
+const phrases = [
+  "the space between too soon and too late",
+  "every threshold is a held breath",
+  "you are the pause that decides",
+  "between the impulse and the act",
+  "a moment stretched to breaking",
+  "the thin gold ring of now",
+  "hold the gap — it is the only real thing",
+  "release is the crossing",
+  "what trembles at the edge of becoming",
+  "not yet. not yet. now.",
+  "the hinge where choice lives",
+  "between two failures, a door",
+];
+let phraseIdx = 0;
+let phraseTimer = 0;
+let phraseAlpha = 0;
+const PHRASE_INTERVAL = 9; // seconds
+
+// --- Resize ---
+function resize() {
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W;
+  canvas.height = H;
+  cx = W * 0.62;
+  cy = H * 0.68;
+  initStars();
+}
+window.addEventListener('resize', resize);
+resize();
+
+// --- Input ---
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (!spaceDown && state === STATE.IDLE) {
+      spaceDown = true;
+      growth = 0;
+      targetGrowth = 0;
+      state = STATE.CHARGING;
+      promptEl.style.opacity = '0';
+      msg.classList.remove('visible');
+    }
+  }
+  if (e.code === 'KeyR' && state === STATE.IDLE && totalAttempts > 0) {
+    score = 0;
+    level = 0;
+    streak = 0;
+    bestStreak = 0;
+    totalAttempts = 0;
+    totalHits = 0;
+    updateStats();
+  }
+});
+
+window.addEventListener('keyup', (e) => {
+  if (e.code === 'Space' && spaceDown) {
+    spaceDown = false;
+    if (state === STATE.CHARGING) {
+      totalAttempts++;
+      const zs = zoneStart();
+      const ze = zoneEnd();
+      if (growth < zs) {
+        // Too early
+        feedbackType = 'early';
+        feedbackTimer = 55;
+        streak = 0;
+        shakeAmount = 3;
+        vignetteAlpha = 0.4;
+        state = STATE.FEEDBACK;
+        msg.textContent = 'too soon';
+        msg.classList.add('visible');
+        setTimeout(() => msg.classList.remove('visible'), 1200);
+      } else if (growth >= zs && growth <= ze) {
+        // Perfect — in the threshold zone
+        feedbackType = 'perfect';
+        feedbackTimer = 40;
+        streak++;
+        if (streak > bestStreak) bestStreak = streak;
+        totalHits++;
+        const bonus = streak > 1 ? Math.min(streak - 1, 5) * 10 : 0;
+        const pts = 10 + level * 2 + bonus;
+        score += pts;
+        level++;
+        if (streak >= 3) {
+          comboText = streak >= 10 ? `${streak}x PERFECT` : streak >= 6 ? `${streak}x streak` : `${streak}x`;
+          comboTimer = 70;
+        }
+        spawnRing(cx, cy, 40);
+        state = STATE.FEEDBACK;
+        msg.textContent = bonus > 0 ? `perfect +${pts}` : 'perfect';
+        msg.classList.add('visible');
+        setTimeout(() => msg.classList.remove('visible'), 1000);
+      } else {
+        // Too late — explosion
+        feedbackType = 'late';
+        streak = 0;
+        shakeAmount = 8;
+        vignetteAlpha = 0.7;
+        state = STATE.EXPLODING;
+        explodeTimer = 90;
+        spawnExplosion(cx, cy, 80);
+        msg.textContent = 'too late';
+        msg.classList.add('visible');
+        setTimeout(() => msg.classList.remove('visible'), 1500);
+      }
+      updateStats();
+    }
+  }
+});
+
+// Touch support
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  if (state === STATE.IDLE) {
+    spaceDown = true;
+    growth = 0;
+    targetGrowth = 0;
+    state = STATE.CHARGING;
+    promptEl.style.opacity = '0';
+    msg.classList.remove('visible');
+  }
+});
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  if (spaceDown) {
+    // Same logic as keyup
+    spaceDown = false;
+    if (state === STATE.CHARGING) {
+      totalAttempts++;
+      const zs = zoneStart();
+      const ze = zoneEnd();
+      if (growth < zs) {
+        feedbackType = 'early';
+        feedbackTimer = 55;
+        streak = 0;
+        shakeAmount = 3;
+        vignetteAlpha = 0.4;
+        state = STATE.FEEDBACK;
+        msg.textContent = 'too soon';
+        msg.classList.add('visible');
+        setTimeout(() => msg.classList.remove('visible'), 1200);
+      } else if (growth >= zs && growth <= ze) {
+        feedbackType = 'perfect';
+        feedbackTimer = 40;
+        streak++;
+        if (streak > bestStreak) bestStreak = streak;
+        totalHits++;
+        const bonus = streak > 1 ? Math.min(streak - 1, 5) * 10 : 0;
+        score += 10 + level * 2 + bonus;
+        level++;
+        if (streak >= 3) {
+          comboText = streak >= 10 ? `${streak}x PERFECT` : streak >= 6 ? `${streak}x streak` : `${streak}x`;
+          comboTimer = 70;
+        }
+        spawnRing(cx, cy, 40);
+        state = STATE.FEEDBACK;
+        msg.textContent = bonus > 0 ? `perfect +${pts}` : 'perfect';
+        msg.classList.add('visible');
+        setTimeout(() => msg.classList.remove('visible'), 1000);
+      } else {
+        feedbackType = 'late';
+        streak = 0;
+        shakeAmount = 8;
+        vignetteAlpha = 0.7;
+        state = STATE.EXPLODING;
+        explodeTimer = 90;
+        spawnExplosion(cx, cy, 80);
+        msg.textContent = 'too late';
+        msg.classList.add('visible');
+        setTimeout(() => msg.classList.remove('visible'), 1500);
+      }
+      updateStats();
+    }
+  }
+});
+
+function updateStats() {
+  const acc = totalAttempts > 0 ? Math.round((totalHits / totalAttempts) * 100) : 0;
+  statsEl.innerHTML = 
+    `level ${level}<br>` +
+    `score ${score}<br>` +
+    `streak ${streak}<br>` +
+    `best ${bestStreak}<br>` +
+    `${acc}% hit`;
+}
+
+// --- Draw ---
+function drawBackground(time) {
+  // Subtle noise-like grain via very faint random dots (skip for perf, just gradient)
+  const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H));
+  grad.addColorStop(0, '#0a0a0a');
+  grad.addColorStop(0.5, '#060606');
+  grad.addColorStop(1, '#020202');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawStars(time) {
+  for (const s of stars) {
+    const alpha = 0.15 + 0.15 * Math.sin(s.twinkle + time * s.speed);
+    ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawTensionMeter() {
+  const meterX = W * 0.08;
+  const meterY = H * 0.25;
+  const meterH = H * 0.5;
+  const meterW = 3;
+  
+  // Track
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth = meterW;
+  ctx.beginPath();
+  ctx.moveTo(meterX, meterY);
+  ctx.lineTo(meterX, meterY + meterH);
+  ctx.stroke();
+  
+  // Zone markers
+  const zs = zoneStart();
+  const ze = zoneEnd();
+  const zsY = meterY + zs * meterH;
+  const zeY = meterY + ze * meterH;
+  
+  // Threshold zone highlight
+  ctx.strokeStyle = 'rgba(212,168,83,0.35)';
+  ctx.lineWidth = meterW + 4;
+  ctx.beginPath();
+  ctx.moveTo(meterX, zsY);
+  ctx.lineTo(meterX, zeY);
+  ctx.stroke();
+  
+  // Growth indicator
+  if (state === STATE.CHARGING) {
+    const gY = meterY + growth * meterH;
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.beginPath();
+    ctx.arc(meterX, gY, 5, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Glow
+    const glow = ctx.createRadialGradient(meterX, gY, 0, meterX, gY, 18);
+    glow.addColorStop(0, 'rgba(255,255,255,0.3)');
+    glow.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(meterX, gY, 18, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  
+  // Labels
+  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx.font = '9px "Courier New", monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('too late', meterX + 8, meterY + 10);
+  ctx.fillText('HOLD', meterX + 8, (zsY + zeY) / 2 + 4);
+  ctx.fillText('too soon', meterX + 8, meterY + meterH - 6);
+}
+
+function drawOrb(time) {
+  const maxRadius = Math.min(W, H) * 0.22;
+  const minRadius = 16;
+  
+  let radius, alpha, ringAlpha;
+  
+  if (state === STATE.CHARGING || state === STATE.FEEDBACK || state === STATE.EXPLODING) {
+    radius = minRadius + growth * (maxRadius - minRadius);
+    alpha = 0.6 + growth * 0.3;
+  } else {
+    // Idle pulse
+    const pulse = Math.sin(time * 0.002) * 0.5 + 0.5;
+    radius = minRadius + pulse * 8;
+    alpha = 0.5 + pulse * 0.2;
+  }
+  
+  // Determine if in zone
+  const inZone = state === STATE.CHARGING && growth >= zoneStart() && growth <= zoneEnd();
+  
+  // Outer glow
+  const glowRadius = radius * 2.2;
+  const glow = ctx.createRadialGradient(cx, cy, radius * 0.5, cx, cy, glowRadius);
+  if (inZone) {
+    // Gold threshold glow
+    glow.addColorStop(0, 'rgba(212,168,83,0.25)');
+    glow.addColorStop(0.5, 'rgba(212,168,83,0.08)');
+    glow.addColorStop(1, 'rgba(212,168,83,0)');
+  } else if (state === STATE.EXPLODING) {
+    glow.addColorStop(0, 'rgba(255,80,60,0.3)');
+    glow.addColorStop(0.5, 'rgba(255,80,60,0.06)');
+    glow.addColorStop(1, 'rgba(255,80,60,0)');
+  } else {
+    glow.addColorStop(0, 'rgba(180,180,200,0.15)');
+    glow.addColorStop(0.5, 'rgba(180,180,200,0.04)');
+    glow.addColorStop(1, 'rgba(180,180,200,0)');
+  }
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(cx, cy, glowRadius, 0, Math.PI * 2);
+  ctx.fill();
+  
+  // Main orb
+  const orbGrad = ctx.createRadialGradient(cx - radius * 0.2, cy - radius * 0.2, 0, cx, cy, radius);
+  if (inZone) {
+    orbGrad.addColorStop(0, 'rgba(255,245,220,0.9)');
+    orbGrad.addColorStop(0.4, 'rgba(212,168,83,0.5)');
+    orbGrad.addColorStop(1, 'rgba(212,168,83,0.05)');
+  } else if (state === STATE.EXPLODING) {
+    orbGrad.addColorStop(0, 'rgba(255,200,180,0.7)');
+    orbGrad.addColorStop(0.4, 'rgba(255,80,60,0.3)');
+    orbGrad.addColorStop(1, 'rgba(255,80,60,0)');
+  } else {
+    orbGrad.addColorStop(0, 'rgba(220,220,235,0.7)');
+    orbGrad.addColorStop(0.5, 'rgba(140,140,160,0.25)');
+    orbGrad.addColorStop(1, 'rgba(60,60,80,0.02)');
+  }
+  ctx.fillStyle = orbGrad;
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.fill();
+  
+  // Threshold ring
+  if (state === STATE.CHARGING) {
+    const zs = zoneStart();
+    const ze = zoneEnd();
+    const zsRadius = minRadius + zs * (maxRadius - minRadius);
+    const zeRadius = minRadius + ze * (maxRadius - minRadius);
+    
+    // Draw the threshold zone as a thin ring
+    const zoneGrad = ctx.createRadialGradient(cx, cy, zsRadius, cx, cy, zeRadius);
+    zoneGrad.addColorStop(0, 'rgba(212,168,83,0.05)');
+    zoneGrad.addColorStop(0.3, 'rgba(212,168,83,0.12)');
+    zoneGrad.addColorStop(0.7, 'rgba(212,168,83,0.12)');
+    zoneGrad.addColorStop(1, 'rgba(212,168,83,0.02)');
+    ctx.fillStyle = zoneGrad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, zeRadius, 0, Math.PI * 2);
+    ctx.arc(cx, cy, zsRadius, 0, Math.PI * 2, true);
+    ctx.fill();
+    
+    // Inner ring boundary
+    ctx.strokeStyle = 'rgba(212,168,83,0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(cx, cy, zsRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    
+    // Outer ring boundary
+    ctx.beginPath();
+    ctx.arc(cx, cy, zeRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    
+    // Ring dash marks at cardinal points
+    const dashLen = 6;
+    for (let a = 0; a < Math.PI * 2; a += Math.PI / 4) {
+      const midR = (zsRadius + zeRadius) / 2;
+      const dx = Math.cos(a);
+      const dy = Math.sin(a);
+      ctx.strokeStyle = 'rgba(212,168,83,0.35)';
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      ctx.moveTo(cx + dx * (midR - dashLen/2), cy + dy * (midR - dashLen/2));
+      ctx.lineTo(cx + dx * (midR + dashLen/2), cy + dy * (midR + dashLen/2));
+      ctx.stroke();
+    }
+  }
+  
+  // Bright core
+  const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius * 0.35);
+  core.addColorStop(0, 'rgba(255,255,255,0.55)');
+  core.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = core;
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius * 0.35, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawExplosionParticles(time) {
+  for (const p of explodeParticles) {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vx *= 0.985;
+    p.vy *= 0.985;
+    p.life -= p.decay;
+    if (p.life <= 0) continue;
+    const alpha = p.life * 0.8;
+    ctx.fillStyle = `rgba(255,${Math.floor(180 - p.life * 100)},${Math.floor(100 - p.life * 60)},${alpha})`;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  explodeParticles = explodeParticles.filter(p => p.life > 0);
+}
+
+function drawRingParticles(time) {
+  for (const p of ringParticles) {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vx *= 0.96;
+    p.vy *= 0.96;
+    p.life -= p.decay;
+    if (p.life <= 0) continue;
+    const alpha = p.life * 0.7;
+    ctx.fillStyle = `rgba(212,168,83,${alpha})`;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ringParticles = ringParticles.filter(p => p.life > 0);
+}
+
+function drawVignette() {
+  if (vignetteAlpha <= 0.001) return;
+  const grad = ctx.createRadialGradient(cx, cy, Math.min(W, H) * 0.15, cx, cy, Math.max(W, H) * 0.9);
+  grad.addColorStop(0, 'rgba(0,0,0,0)');
+  grad.addColorStop(1, `rgba(0,0,0,${vignetteAlpha})`);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawComboText() {
+  if (comboTimer <= 0) return;
+  const alpha = Math.min(1, comboTimer / 30) * 0.9;
+  const yOff = (70 - comboTimer) * 0.6;
+  ctx.fillStyle = `rgba(212,168,83,${alpha})`;
+  ctx.font = `${18 + streak * 0.8}px "Courier New", monospace`;
+  ctx.textAlign = 'center';
+  ctx.fillText(comboText, cx, cy - 80 - yOff);
+}
+
+// --- Grid lines (subtle architectural framing) ---
+function drawGrid() {
+  ctx.strokeStyle = 'rgba(255,255,255,0.015)';
+  ctx.lineWidth = 0.5;
+  const spacing = 80;
+  for (let x = spacing; x < W; x += spacing) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, H);
+    ctx.stroke();
+  }
+  for (let y = spacing; y < H; y += spacing) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+  }
+}
+
+// --- Main loop ---
+let lastTime = 0;
+function loop(timestamp) {
+  const dt = Math.min(timestamp - lastTime, 50);
+  lastTime = timestamp;
+  
+  // Update shake
+  shakeAmount *= 0.88;
+  if (shakeAmount < 0.05) shakeAmount = 0;
+  
+  // Update vignette
+  vignetteAlpha *= 0.94;
+  if (vignetteAlpha < 0.005) vignetteAlpha = 0;
+  
+  // Update combo
+  if (comboTimer > 0) comboTimer--;
+  
+  // State machine
+  if (state === STATE.CHARGING) {
+    const chargeSpeed = 0.0035 - level * 0.00012; // gets slightly faster per level
+    growth = Math.min(1, growth + Math.max(0.0008, chargeSpeed));
+  }
+  
+  if (state === STATE.FEEDBACK) {
+    feedbackTimer--;
+    if (feedbackTimer <= 0) {
+      state = STATE.IDLE;
+      growth = 0;
+      feedbackType = '';
+      promptEl.style.opacity = '1';
+    }
+  }
+  
+  if (state === STATE.EXPLODING) {
+    explodeTimer--;
+    if (explodeTimer <= 0) {
+      state = STATE.IDLE;
+      growth = 0;
+      explodeParticles = [];
+      promptEl.style.opacity = '1';
+    }
+    // Fade growth during explosion
+    growth *= 0.92;
+  }
+  
+  // Phrase cycling
+  phraseTimer += dt / 1000;
+  if (phraseTimer >= PHRASE_INTERVAL) {
+    phraseTimer = 0;
+    phraseAlpha = 0;
+    phraseIdx = (phraseIdx + 1) % phrases.length;
+  }
+  // Fade phrase in/out
+  if (phraseTimer < 1.5) {
+    phraseAlpha = phraseTimer / 1.5;
+  } else if (phraseTimer > PHRASE_INTERVAL - 1.5) {
+    phraseAlpha = (PHRASE_INTERVAL - phraseTimer) / 1.5;
+  } else {
+    phraseAlpha = 1;
+  }
+  phraseEl.style.opacity = phraseAlpha * 0.55;
+  phraseEl.textContent = phrases[phraseIdx];
+  
+  // --- Draw ---
+  ctx.clearRect(0, 0, W, H);
+  
+  // Apply camera shake
+  const sx = (Math.random() - 0.5) * shakeAmount * 2;
+  const sy = (Math.random() - 0.5) * shakeAmount * 2;
+  ctx.save();
+  ctx.translate(sx, sy);
+  
+  drawBackground(timestamp);
+  drawGrid();
+  drawStars(timestamp);
+  drawTensionMeter();
+  drawExplosionParticles(timestamp);
+  drawRingParticles(timestamp);
+  drawOrb(timestamp);
+  drawComboText();
+  drawVignette();
+  
+  ctx.restore();
+  
+  requestAnimationFrame(loop);
+}
+
+// --- Init ---
+updateStats();
+promptEl.style.opacity = '1';
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

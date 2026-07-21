@@ -287,3 +287,18 @@ Track each piece's creative direction to ensure deliberate variety over time.
 **Interactivity:** gesture-response — mouse velocity modulates bloom radius, wave opacity, and interference intensity; mouse X sweeps through the 24-hour cycle; data panel highlights the dominant rhythm at the current hour
 **File:** `crepuscule.html`
 **What you explored:** Five authentic circadian rhythms rendered as filled sine ribbons with 35% vertical overlap between adjacent pairs. In each overlap zone, the product of the two wave values (vA * vB) generates interference moiré — glow bands where waves are in phase, dark where they're out of phase — with intensity modulated by the viewer's gesture speed. The composite sum wave runs through center as a cream-ochre gradient ribbon. Dawn (06:00) and dusk (18:00) are marked by subtle vertical glow bands and pulsing dots on the composite crest, identifying them as the threshold hours where the most rhythms cross their midpoints simultaneously. A 15-entry data panel at the bottom highlights which rhythm dominates at the current hour, pulled from the actual acrophase data. The background gradient (radial, warm-earth) transitions subtly through the diurnal cycle mapped to 8 time-of-day color stops. The name "Crepuscule" — the threshold light between day and night, from Latin crepusculum — names the exact liminal space the piece maps: the body's inner twilight, where no single rhythm holds the floor and all five waver together.
+
+---
+
+## 2026-07-20 — Hesitate
+
+**Intention:** Game-toy and tense mood each have only 2-3 appearances in the tracked log, and no piece has ever made the threshold itself the game mechanic — every prior game-toy used the cursor or keyboard as a navigator, not as a sustained holding action. High-contrast-bw palette with a single warm gold accent creates a stark, pressure-laden visual language where the only win condition is releasing within a narrowing threshold zone. The piece inverts typical game design: the center is failure, and only the boundary ring holds success. The liminality is literal — the exact band between too-early and too-late.
+
+**Format:** game-toy
+**Technique:** sustained-hold threshold mechanic with adaptive difficulty, radial tension visualization, combo-streak scoring
+**Palette:** high-contrast-bw with gold threshold accent (#d4a853)
+**Mood:** tense
+**Composition:** asymmetric — pulsing orb in lower-right quadrant (62%,68%), tension meter along left edge, score panel upper-right
+**Interactivity:** key-press hold (spacebar) + touch support
+**File:** `hesitate.html`
+**What you explored:** A single mechanic built entirely around the threshold: hold spacebar to grow an orb outward toward a narrow gold ring (the zone), release within the zone to score. Release too early (before the ring) and the orb collapses — streak resets. Hold too long (past the ring) and the orb explodes into 80 particles with camera shake and a red flash. Each success advances the level, narrowing the zone width (from ~18% at level 0 down toward 8%) and slightly increasing charge speed. Streak combos (3+, 6+, 10+) display escalating gold text. A tension meter on the left edge shows the full range with the threshold zone highlighted in gold. Background stars twinkle, subtle grid lines frame the void, and 12 poetic phrases about thresholds, holding, and release cycle on 9-second intervals. The piece rewards the player for finding and sustaining the exact liminal moment — the pause between impulse and action — and punishes both hesitation (too late) and haste (too soon). The title "Hesitate" names the verb of the threshold: to pause at the boundary, to hover in the space where decision has not yet been made.
