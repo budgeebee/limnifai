@@ -1,0 +1,1324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Layover</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #050510;
+    color: #b8e6ff;
+    font-family: 'Courier New', Courier, monospace;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    cursor: default;
+  }
+  #container {
+    width: 100%;
+    max-width: 720px;
+    padding: 40px 32px;
+    position: relative;
+  }
+  #clock {
+    position: fixed;
+    top: 20px;
+    right: 28px;
+    font-size: 28px;
+    font-weight: bold;
+    letter-spacing: 3px;
+    color: #ff2d95;
+    text-shadow: 0 0 18px #ff2d95, 0 0 40px #ff2d9540;
+    z-index: 10;
+    transition: color 0.6s;
+  }
+  #clock.warning { color: #ff6b35; text-shadow: 0 0 22px #ff6b35, 0 0 50px #ff6b3540; animation: pulse 0.7s infinite; }
+  #clock.critical { color: #ff0044; text-shadow: 0 0 28px #ff0044, 0 0 60px #ff004440; animation: pulse 0.35s infinite; }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  #title-bar {
+    position: fixed;
+    top: 18px;
+    left: 28px;
+    font-size: 13px;
+    color: #7df9a0;
+    text-shadow: 0 0 10px #7df9a040;
+    letter-spacing: 4px;
+    z-index: 10;
+  }
+  #scene-name {
+    font-size: 11px;
+    color: #c084fc;
+    text-shadow: 0 0 8px #c084fc40;
+    letter-spacing: 2px;
+    margin-bottom: 24px;
+    opacity: 0.8;
+  }
+  #description {
+    font-size: 15px;
+    line-height: 1.75;
+    margin-bottom: 32px;
+    white-space: pre-wrap;
+    min-height: 80px;
+    transition: opacity 0.4s;
+    color: #b8e6ff;
+  }
+  #description.fading { opacity: 0; }
+  #choices {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .choice-btn {
+    background: transparent;
+    border: 1px solid #7df9a040;
+    color: #7df9a0;
+    padding: 14px 20px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.25s;
+    letter-spacing: 0.5px;
+    position: relative;
+    overflow: hidden;
+  }
+  .choice-btn::before {
+    content: '>';
+    margin-right: 10px;
+    color: #ff2d95;
+    opacity: 0.7;
+  }
+  .choice-btn:hover {
+    background: #7df9a010;
+    border-color: #7df9a0;
+    box-shadow: 0 0 20px #7df9a020, inset 0 0 20px #7df9a008;
+    padding-left: 28px;
+  }
+  .choice-btn:active {
+    background: #ff2d9510;
+    border-color: #ff2d95;
+    color: #ff2d95;
+    box-shadow: 0 0 30px #ff2d9520;
+  }
+  #status-bar {
+    position: fixed;
+    bottom: 20px;
+    left: 28px;
+    right: 28px;
+    display: flex;
+    gap: 32px;
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    opacity: 0.5;
+  }
+  .status-item { color: #c084fc; }
+  .status-item .val { color: #b8e6ff; }
+  #vignette {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 55%, #050510 85%);
+    z-index: 5;
+  }
+  #scanline {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, #00000008 2px, #00000008 4px);
+    z-index: 6;
+  }
+  #flicker {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 7;
+    background: transparent;
+    animation: flicker 8s infinite;
+  }
+  @keyframes flicker {
+    0%, 99.5%, 100% { background: transparent; }
+    99.6% { background: #7df9a004; }
+    99.7% { background: transparent; }
+    99.8% { background: #ff2d9503; }
+  }
+  #glitch-overlay {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 8;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+</style>
+</head>
+<body>
+<div id="vignette"></div>
+<div id="scanline"></div>
+<div id="flicker"></div>
+<div id="glitch-overlay"></div>
+<div id="title-bar">⏤ TERMINAL 3 ⏤</div>
+<div id="clock">08:00</div>
+<div id="container">
+  <div id="scene-name"></div>
+  <div id="description"></div>
+  <div id="choices"></div>
+</div>
+<div id="status-bar">
+  <span class="status-item">GATE <span class="val" id="gate-display">---</span></span>
+  <span class="status-item">ROOMS <span class="val" id="rooms-visited">0</span></span>
+  <span class="status-item">PASS <span class="val" id="pass-status">PENDING</span></span>
+</div>
+
+<script>
+// ── Game State ──
+const state = {
+  timeLeft: 480,        // 8 minutes in seconds
+  currentScene: 'arrival',
+  visited: new Set(),
+  items: [],
+  gate: 'B23',
+  gateCounter: 0,
+  loopCount: 0,
+  foundClue: false,
+  visitedGates: 0,
+  ending: null
+};
+
+// ── DOM ──
+const clockEl = document.getElementById('clock');
+const sceneNameEl = document.getElementById('scene-name');
+const descEl = document.getElementById('description');
+const choicesEl = document.getElementById('choices');
+const gateDisplay = document.getElementById('gate-display');
+const roomsVisited = document.getElementById('rooms-visited');
+const passStatusEl = document.getElementById('pass-status');
+const glitchOverlay = document.getElementById('glitch-overlay');
+
+// ── Clock ──
+function fmtTime(s) {
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
+}
+
+function tickClock() {
+  if (state.ending) return;
+  state.timeLeft = Math.max(0, state.timeLeft - 1);
+  clockEl.textContent = fmtTime(state.timeLeft);
+  clockEl.className = '';
+  if (state.timeLeft <= 60) clockEl.className = 'critical';
+  else if (state.timeLeft <= 180) clockEl.className = 'warning';
+  if (state.timeLeft <= 0 && !state.ending) triggerEnding('time');
+}
+
+let clockInterval = setInterval(tickClock, 1000);
+
+function advanceTime(sec) {
+  state.timeLeft = Math.max(0, state.timeLeft - sec);
+  clockEl.textContent = fmtTime(state.timeLeft);
+  // Small glitch on time cost
+  glitchOverlay.style.opacity = '0.15';
+  setTimeout(() => { glitchOverlay.style.opacity = '0'; }, 120);
+}
+
+// ── Scenes ──
+const scenes = {
+
+arrival: {
+  name: 'ARRIVAL HALL · 03:47 AM',
+  desc: `Fluorescent light pools on polished linoleum. The air smells of
+disinfectant and distant coffee. Rows of empty seats stretch toward
+a wall of darkened windows — outside, runway lights blink in
+patterns that don't quite form a sequence.
+
+A departure board flickers overhead. Most destinations are
+scrambled: "K ̶A ̶N ̶S ̶A ̶S C ̶ ̶T ̶Y" resolves into "nowhere,"
+"T O K Y O" into "→ the space between gates."
+
+Your boarding pass reads: FLIGHT 447 · GATE B23 · 03:55.
+
+You have eight minutes.`,
+  choices: [
+    { text: 'Check the departure board', next: 'departures', cost: 15 },
+    { text: 'Head directly toward the B gates', next: 'corridor-a', cost: 20 },
+    { text: 'Look for a coffee cart — you need to think', next: 'food-court', cost: 25 }
+  ]
+},
+
+departures: {
+  name: 'DEPARTURE BOARD',
+  desc: `The board flickers. Every few seconds the destinations scramble
+and reform into new names:
+
+  FL 447  →  L I M E N         03:55  GATE B23
+  FL 882  →  T H R E S H O L D 03:57  GATE C12
+  FL 103  →  I N T E R S T I C E 03:59  GATE D7
+  FL 661  →  — R E S E T —     04:01  GATE B23
+
+Wait — your flight AND flight 661 are at the same gate?
+And flight 103 is going to "Interstice"?
+
+A janitor nearby doesn't look up from his mop. "Board keeps
+doing that. Has for weeks. Nobody's filed a complaint."`,
+  choices: [
+    { text: 'Ask the janitor about Gate B23', next: 'janitor-closet', cost: 20 },
+    { text: 'Memorize the gate number and keep moving', next: 'corridor-a', cost: 15 },
+    { text: 'Check the arrivals board instead', next: 'arrivals', cost: 15 }
+  ]
+},
+
+arrivals: {
+  name: 'ARRIVALS BOARD',
+  desc: `This board is frozen. Every flight shows the same status:
+
+  ARRIVED · ARRIVED · ARRIVED · ARRIVED
+
+No times. No origins. Just — arrived. As if every flight that
+ever landed here decided to stay.
+
+A single entry at the bottom flickers differently:
+
+  FLIGHT ∞ →  DEPARTED
+  FLIGHT ∞ →  DEPARTED
+  FLIGHT ∞ →  DEPARTED
+
+It loops. You count seventeen repetitions before looking away.`,
+  choices: [
+    { text: 'Return to the departure hall', next: 'arrival', cost: 20 },
+    { text: 'Follow the B-gate signs', next: 'corridor-a', cost: 15 },
+    { text: 'Check your boarding pass again', next: 'lost-found', cost: 15, effect() { state.foundClue = true; } }
+  ]
+},
+
+'corridor-a': {
+  name: 'CORRIDOR A → B',
+  desc: `A long, white corridor. Moving walkway on the left — still.
+Fluorescent tubes hum at a frequency just below conscious
+hearing. Your footsteps echo but the timing is wrong: each
+footfall returns a half-beat late, as if the sound took a
+slightly longer route back.
+
+The walls are lined with identical abstract art prints —
+beige shapes on beige backgrounds. Every third print is
+replaced by an EXIT sign, but the arrows beneath them
+point in contradictory directions.
+
+Gate B23 should be at the end of this corridor.`,
+  choices: [
+    { text: 'Walk briskly toward the B gates', next: 'gate-b23', cost: 30 },
+    { text: 'Step onto the moving walkway', next: 'moving-walkway', cost: 15 },
+    { text: 'Take the left branch toward C gates', next: 'corridor-b', cost: 25 },
+    { text: 'Examine the contradictory exit signs', next: 'exit-maze', cost: 20 }
+  ]
+},
+
+'corridor-b': {
+  name: 'CORRIDOR B → C',
+  desc: `This corridor curves gently to the left. The curvature is
+precise — you estimate a 3.7-degree deviation every ten meters —
+but it feels wrong because corridors in airports don't curve.
+They're engineered for efficiency, not geometry.
+
+The lights here are warmer. Almost amber. They buzz at a lower
+frequency, and the sound makes your teeth ache faintly.
+
+A sign reads: GATES C1–C20 ← | → GATES B1–B30`,
+  choices: [
+    { text: 'Continue toward C gates', next: 'gate-c12', cost: 25 },
+    { text: 'Turn back toward B gates', next: 'corridor-a', cost: 20 },
+    { text: 'There\'s a door marked EMPLOYEES ONLY', next: 'janitor-closet', cost: 20 }
+  ]
+},
+
+'gate-b23': {
+  name: 'GATE B23',
+  desc: `The gate display reads:
+
+  B23 → LIMEN · BOARDING · 03:55
+
+But the number flickers. For three-tenths of a second it shows
+B47, then B23 again. The gate agent's podium is empty. A
+half-finished crossword puzzle lies on the counter: 17-Across
+is filled in as "BETWIXT" and 23-Down reads "THRESHOLD."
+
+The jet bridge door is closed. Through its small window you
+see — not tarmac — but another departure lounge. Identical to
+this one, except the gate display reads B47 and there's a
+figure standing at the window looking back at you.
+
+It raises a hand. You feel your own arm twitch.`,
+  choices: [
+    { text: 'Open the jet bridge door', next: 'jet-bridge', cost: 30 },
+    { text: 'Wait for the gate agent to return', next: 'gate-b23-wait', cost: 45 },
+    { text: 'Check nearby gates — maybe B47 is real', next: 'gate-b47', cost: 25 },
+    { text: 'Go back to find a different route', next: 'corridor-a', cost: 20 }
+  ],
+  onEnter() { state.visitedGates++; }
+},
+
+'gate-b23-wait': {
+  name: 'GATE B23 · WAITING',
+  desc: `You sit. The molded plastic chair is uncomfortable in the
+precise way airport chairs are designed to be — just bearable
+enough to discourage sleeping, just hostile enough to remind
+you that you are in transit, not at rest.
+
+Minutes pass. The gate display continues its flicker-dance.
+
+A woman sits down two seats away. She's holding a boarding
+pass identical to yours. "First time?" she asks without
+looking up. "The trick is not to watch the clock. The
+clock watches you back."`,
+  choices: [
+    { text: '"What do you mean, the clock watches you?"', next: 'gate-b23-chat', cost: 25 },
+    { text: 'Ask about her destination', next: 'gate-b23-chat', cost: 20 },
+    { text: 'Get up and try the jet bridge', next: 'jet-bridge', cost: 15 },
+    { text: 'Check your phone — maybe there\'s a signal', next: 'phone-check', cost: 10 }
+  ]
+},
+
+'gate-b23-chat': {
+  name: 'GATE B23 · CONVERSATION',
+  desc: `"The clock," she says, still not meeting your eyes, "isn't
+counting down to departure. It's counting down to the moment
+you stop believing in departure."
+
+She unfolds her boarding pass. The destination field is blank.
+"When it reaches zero, you either find your gate — your real
+gate — or you become part of the terminal. One of the people
+who've been waiting here since Terminal 3 opened in 1974."
+
+She gestures toward an elderly man in a worn suit, reading a
+newspaper dated November 3, 1987. He turns a page. The
+headline is the same on every page.`,
+  choices: [
+    { text: '"How do I find my real gate?"', next: 'gate-b23-clue', cost: 20 },
+    { text: '"Who... are you?"', next: 'gate-b23-clue', cost: 15 },
+    { text: 'Stand up abruptly and run', next: 'corridor-a', cost: 10 }
+  ]
+},
+
+'gate-b23-clue': {
+  name: 'GATE B23 · THE CLUE',
+  desc: `"The gate that flickers is a door. The door that opens onto
+itself is a mirror. The mirror that shows you someone else
+is the threshold."
+
+She tucks the blank boarding pass into her coat. "I've been
+here eleven years. I know every corridor, every duty-free
+shop, every chair. I've tried every gate. The one that
+shifts — the one that can't decide what number it is —
+that's where the membrane is thinnest."
+
+"Go through when it reads something you can't pronounce.
+Not B23. Not B47. The third number. The one it tries to
+hide."`,
+  choices: [
+    { text: 'Return to Gate B23 and watch the flicker', next: 'gate-b23', cost: 15, effect() { state.foundClue = true; } },
+    { text: 'Ask one more question', next: 'gate-b23-final', cost: 25 },
+  ]
+},
+
+'gate-b23-final': {
+  name: 'GATE B23 · LAST WORDS',
+  desc: `"One more thing," she says, and finally turns to face you.
+
+Her eyes are the same color as the departure board —
+that flickering amber-green that scrambles and reforms.
+
+"The terminal knows you're here. It's curious about you.
+Most people don't notice the contradictions — the exit
+signs, the clock, the way the corridors curve when they
+should be straight. You noticed. That's why the flicker
+started."
+
+She hands you a folded piece of paper. Inside, a single
+word written in boarding-pass typeface:
+
+  R E M E M B E R`,
+  choices: [
+    { text: 'Go back to Gate B23 — it\'s time', next: 'gate-b23', cost: 10, effect() { state.foundClue = true; state.items.push('REMEMBER'); } },
+  ]
+},
+
+'jet-bridge': {
+  name: 'JET BRIDGE',
+  desc: `The jet bridge extends impossibly. You walk for what feels like
+two hundred meters, then three hundred. The walls are the same
+beige corrugated plastic, the same small windows showing only
+darkness.
+
+Behind you, the terminal door shrinks. Ahead — no aircraft door.
+Just more corrugated wall, curving slightly left.
+
+Your footsteps are the only sound. Even the air pressure feels
+wrong — too thin, like you've been climbing without realizing it.
+
+The jet bridge goes on. And on. And on.`,
+  choices: [
+    { text: 'Keep walking. It has to end somewhere', next: 'jet-bridge-deep', cost: 40 },
+    { text: 'Turn back before you lose too much time', next: 'gate-b23', cost: 30 },
+    { text: 'Look out one of the small windows', next: 'jet-bridge-window', cost: 15 }
+  ]
+},
+
+'jet-bridge-deep': {
+  name: 'JET BRIDGE · DEEPER',
+  desc: `You've been walking for — you check the clock — three minutes?
+Seven? The clock reads 05:13 but you're certain that's wrong.
+
+The walls begin to change. The beige plastic gives way to what
+looks like... wallpaper. Floral pattern. Residential. As if the
+jet bridge has forgotten it's an airport structure and is
+remembering someone's hallway. Someone's home.
+
+A door appears on the left. Wooden. Brass handle. A small sign:
+
+  PRIVATE · DO NOT DISTURB`,
+  choices: [
+    { text: 'Open the door', next: 'memory-room', cost: 25 },
+    { text: 'Keep walking the jet bridge', next: 'jet-bridge-loop', cost: 30 },
+    { text: 'Go back to the terminal', next: 'gate-b23', cost: 35 }
+  ]
+},
+
+'jet-bridge-window': {
+  name: 'JET BRIDGE · WINDOW',
+  desc: `You press your face to the small, scratched window.
+
+Below, the tarmac stretches in all directions. Runway lights
+pulse in slow waves — red, white, red, white — like breathing.
+
+A plane taxis in the distance. It's the right model, the right
+livery, but as it turns you see that it has no windows. Just
+smooth fuselage. A plane that was never meant to carry anyone.
+
+On the tarmac, ground crew in fluorescent vests stand perfectly
+still. They're facing the jet bridge. All of them. Watching.`,
+  choices: [
+    { text: 'Pull back from the window quickly', next: 'jet-bridge', cost: 5 },
+    { text: 'Keep watching. What happens next?', next: 'jet-bridge-window2', cost: 30 }
+  ]
+},
+
+'jet-bridge-window2': {
+  name: 'JET BRIDGE · WINDOW (CONTINUED)',
+  desc: `The windowless plane begins to taxi toward your jet bridge.
+Slowly. Deliberately. The ground crew haven't moved — they're
+still watching, still frozen, except now one of them is raising
+an arm and pointing directly at your window.
+
+The plane stops. A cargo door opens on its underside.
+
+Nothing comes out. But the opening is dark — darker than
+tarmac darkness, darker than night — and you have the
+unshakable sense that something is looking out of it.
+
+The corridor behind you groans.`,
+  choices: [
+    { text: 'Run back to the terminal NOW', next: 'corridor-a', cost: 20 },
+    { text: 'Stay. Let it approach.', next: 'jet-bridge-loop', cost: 45, effect() { state.loopCount++; } }
+  ]
+},
+
+'jet-bridge-loop': {
+  name: 'JET BRIDGE · YOU RECOGNIZE THIS',
+  desc: `You're back at the start of the jet bridge. The terminal door
+is behind you. The corridor ahead curves into darkness.
+
+Or — are you? The beige plastic looks slightly more yellow than
+before. The fluorescent hum is a half-step higher in pitch.
+
+You notice something: the scuff marks on the floor are the same
+scuff marks. The gum wrapper stuck in the corner is the same
+wrapper. You've been here before. Exactly here.
+
+The jet bridge doesn't lead to a plane. It leads to itself.`,
+  choices: [
+    { text: 'Accept the loop and go back to the terminal', next: 'gate-b23', cost: 15, effect() { state.loopCount++; } },
+    { text: 'Walk the loop again — maybe it changes', next: 'jet-bridge-deep', cost: 40, effect() { state.loopCount++; } },
+    { text: 'Sit down right here. Refuse to participate', next: 'jet-bridge-sit', cost: 60 }
+  ]
+},
+
+'jet-bridge-sit': {
+  name: 'JET BRIDGE · SITTING',
+  desc: `You sit on the corrugated floor. The humming continues. The
+jet bridge doesn't seem to have an opinion about this.
+
+After a while — you can't tell how long, the clock seems to
+have stopped — you notice that the walls are breathing.
+Infinitesimal expansions and contractions, like the jet
+bridge is alive but metabolizing very, very slowly.
+
+A seam in the wall pulses with faint neon-pink light.
+It wasn't there before. Or was it?
+
+Something warm radiates from behind it.`,
+  choices: [
+    { text: 'Press your palm against the glowing seam', next: 'threshold', cost: 20 },
+    { text: 'Stand up and go back. Enough of this', next: 'gate-b23', cost: 10 }
+  ]
+},
+
+'memory-room': {
+  name: 'THE MEMORY ROOM',
+  desc: `The wooden door opens into a room that shouldn't exist inside
+a jet bridge. Bookshelves. A lamp with a stained-glass shade.
+A rug that looks hand-woven. The air smells like someone's
+grandmother's house — talcum powder and old paper.
+
+On a small table: a photograph of you. But you don't remember
+it being taken. You're in an airport, smiling, holding a
+boarding pass. The gate display behind you reads: HOME.
+
+Beneath the photograph, a handwritten note:
+
+  "You've been here before. You'll be here again.
+   The terminal is not a place. It's a state.
+   You leave when you understand what you're
+   waiting for."`,
+  choices: [
+    { text: 'Take the photograph', next: 'gate-b23', cost: 20, effect() { state.items.push('PHOTOGRAPH'); } },
+    { text: 'Keep reading — there are more notes', next: 'memory-room-2', cost: 30 },
+    { text: 'Leave. This is too strange', next: 'gate-b23', cost: 15 }
+  ]
+},
+
+'memory-room-2': {
+  name: 'THE MEMORY ROOM · DEEPER',
+  desc: `More photographs. Dozens of them. All of you. Different
+airports. Different clothes. Always holding a boarding pass.
+Always the same gate display: HOME.
+
+The dates on the backs of the photos span decades. Some show
+you as a child. Some show you older than you are now.
+
+One photograph is different: it's empty. Just an airport gate,
+no person, no boarding pass. On the back: "NOT YET."
+
+The lamp flickers. The room feels smaller than it did a
+moment ago. The walls are — closer.`,
+  choices: [
+    { text: 'Grab the empty photograph and leave quickly', next: 'gate-b23', cost: 20, effect() { state.items.push('NOT YET'); state.foundClue = true; } },
+    { text: 'Stay. The room is telling you something', next: 'memory-room-3', cost: 35 }
+  ]
+},
+
+'memory-room-3': {
+  name: 'THE MEMORY ROOM · CLOSING',
+  desc: `The walls are definitely closer now. The bookshelves have
+begun to tilt inward. The lamp bulb dims incrementally.
+
+You notice that the rug pattern — geometric shapes interlocking —
+is the same pattern as the terminal's linoleum, but older.
+Handmade. The original, from which the airport floor was copied.
+
+The room is not a room. It's a memory of a room, and memories
+collapse when they're held too long in waking attention.
+
+The door is shrinking.`,
+  choices: [
+    { text: 'Dive through the shrinking door', next: 'jet-bridge', cost: 15 },
+    { text: 'Let it close. See what happens', next: 'threshold', cost: 60, effect() { state.loopCount += 2; } }
+  ]
+},
+
+'exit-maze': {
+  name: 'EXIT MAZE',
+  desc: `You follow the contradictory exit signs. Each turn leads to
+another corridor, each corridor to another fork, each fork
+to another set of signs.
+
+After the seventh turn, you realize the signs have stopped
+pointing anywhere. They just say:
+
+  EXIT → EXIT → EXIT → EXIT
+
+In a circle. A self-referential loop of signage.
+
+On the wall, someone has scratched into the paint:
+
+  "the only exit is deeper in"`,
+  choices: [
+    { text: 'Follow the scratched message — go deeper', next: 'backrooms', cost: 35 },
+    { text: 'Retrace your steps to the B corridor', next: 'corridor-a', cost: 30 },
+    { text: 'Force open a maintenance door', next: 'janitor-closet', cost: 20 }
+  ]
+},
+
+backrooms: {
+  name: 'THE BACKROOMS',
+  desc: `Yellow wallpaper. Fluorescent lighting that hums at exactly
+60 Hz. The air is stale and warm — recycled too many times.
+
+This isn't the airport anymore. This is the space BEHIND the
+airport, the negative space, the building's unconscious.
+
+Cubes of empty office space stretch in all directions. Some
+have desks. Some have chairs. None have windows. The pattern
+repeats infinitely, and you know — with the specific certainty
+of dreams — that if you walk long enough you'll find yourself
+walking back into the departure lounge from the other side.
+
+Because this is what airports are built on top of.`,
+  choices: [
+    { text: 'Walk through the backrooms', next: 'gate-d7', cost: 50, effect() { state.loopCount++; } },
+    { text: 'Find the nearest wall and follow it back', next: 'corridor-a', cost: 40 },
+    { text: 'Sit at one of the empty desks', next: 'backrooms-sit', cost: 30 }
+  ]
+},
+
+'backrooms-sit': {
+  name: 'THE BACKROOMS · STILLNESS',
+  desc: `You sit. The fluorescent hum becomes a drone. The drone
+becomes a chord. The chord — you realize — is the same
+frequency as the terminal's background music, slowed down
+to 1/16th speed.
+
+On the desk: a terminal map. But it's not a map of this
+airport. It's a map of all airports superimposed — every
+terminal that ever existed, layered into one impossible
+floorplan. Gate B23 of O'Hare touches Gate B23 of Narita
+touches Gate B23 of Heathrow, and all of them open onto
+the same corridor.
+
+At the center of the map, a handwritten circle around a
+small notation: "THE THIRD NUMBER."`,
+  choices: [
+    { text: 'Memorize the map and find your way out', next: 'corridor-a', cost: 30, effect() { state.foundClue = true; } },
+    { text: 'Keep sitting. Let the drone become you', next: 'threshold', cost: 60, effect() { state.loopCount += 2; } }
+  ]
+},
+
+'gate-c12': {
+  name: 'GATE C12',
+  desc: `Gate C12 is identical to Gate B23 in every respect except
+the letter. Same chairs, same podium, same half-finished
+crossword. But this crossword has different answers:
+17-Across is "LIMINAL" and 23-Down is "PASSAGE."
+
+The gate display reads:
+
+  C12 → THRESHOLD · DELAYED · 04:??
+
+There's no departure time. Just question marks.
+
+Through the window: a plane at the jet bridge. But it's the
+same windowless plane you saw from the other bridge. Or
+a different one. Or the same one, but at a different angle
+in spacetime.`,
+  choices: [
+    { text: 'Go back to B gates', next: 'corridor-a', cost: 25 },
+    { text: 'Try the jet bridge anyway', next: 'jet-bridge', cost: 30 },
+    { text: 'Continue to D gates', next: 'gate-d7', cost: 20 }
+  ],
+  onEnter() { state.visitedGates++; }
+},
+
+'gate-d7': {
+  name: 'GATE D7',
+  desc: `Gate D7 is in a wing of the terminal you're certain wasn't
+there before. The architecture is slightly wrong — the
+ceilings are too low, the windows are oddly shaped
+parallelograms instead of rectangles.
+
+There's a plane at this gate. It has windows. But every
+window shows a different time of day: some are bright
+morning, some late afternoon, some showing stars. The
+plane exists in multiple time zones simultaneously.
+
+The gate display flickers. It can't decide what
+destination to show: INTERSTICE · CANCEL · RESET.
+
+A child sits alone in the waiting area, drawing on a
+tray table with crayons. The drawing shows a bird
+flying out of an airport window.`,
+  choices: [
+    { text: 'Look at the child\'s drawing', next: 'child-drawing', cost: 15 },
+    { text: 'Check if this gate has a jet bridge', next: 'jet-bridge', cost: 25 },
+    { text: 'Return to familiar territory', next: 'corridor-a', cost: 30 }
+  ],
+  onEnter() { state.visitedGates++; }
+},
+
+'child-drawing': {
+  name: 'GATE D7 · THE DRAWING',
+  desc: `The crayon drawing is surprisingly detailed. The bird has
+a boarding pass in its beak. The airport window it's
+flying toward shows — not sky — but another airport,
+drawn smaller inside the first airport, with another
+bird flying toward another window.
+
+The child looks up. "It's a recursion," she says, in
+a voice too calm for her apparent age. "The bird keeps
+finding new airports inside old ones. It never actually
+leaves. But it gets closer every time."
+
+She hands you the crayon. "Your turn. Draw what you
+see when you look at Gate B23's display for too long."`,
+  choices: [
+    { text: 'Draw the third number you glimpsed', next: 'child-drawing-2', cost: 30, effect() { state.foundClue = true; } },
+    { text: 'Draw a door opening', next: 'child-drawing-2', cost: 25 },
+    { text: 'Politely decline and move on', next: 'corridor-a', cost: 15 }
+  ]
+},
+
+'child-drawing-2': {
+  name: 'GATE D7 · THE DRAWING COMPLETED',
+  desc: `The child studies your drawing for a long moment. Then she
+nods. "You see it too. Most people just draw a plane."
+
+She tucks the drawing into a folder full of similar
+drawings — dozens of them, by dozens of different hands.
+Some are elaborate, some are stick figures, but all show
+the same thing: something escaping, or trying to.
+
+"The trick," she says, gathering her crayons, "isn't
+finding the right gate. It's understanding that all
+the gates are the same gate, and the gate is you."
+
+She walks toward the jet bridge and, without opening
+the door, steps through it.`,
+  choices: [
+    { text: 'Try to follow her through the jet bridge door', next: 'threshold', cost: 30 },
+    { text: 'Stare at the door she disappeared through', next: 'gate-d7', cost: 20 },
+    { text: 'Go back. You need to reach Gate B23 before time runs out', next: 'corridor-a', cost: 25 }
+  ]
+},
+
+'moving-walkway': {
+  name: 'MOVING WALKWAY',
+  desc: `You step onto the moving walkway. It rumbles to life — but
+it's moving in the wrong direction. Toward the A gates,
+not toward B.
+
+The walkway accelerates. The walls blur. Fluorescent panels
+strobe past in accelerating rhythm: light-dark-light-dark.
+
+A recorded announcement plays: "The moving walkway is now
+approaching its terminal velocity. Please hold the handrail.
+Please do not attempt to exit. Please remain in transit.
+Transit is the only state. Transit is the destination."`,
+  choices: [
+    { text: 'Jump off the walkway immediately', next: 'corridor-a', cost: 15 },
+    { text: 'Ride it to the end — where does it go?', next: 'gate-c12', cost: 35 },
+    { text: 'Run against the direction of the walkway', next: 'corridor-a', cost: 25 }
+  ]
+},
+
+'food-court': {
+  name: 'FOOD COURT',
+  desc: `The food court is open but empty. Steam rises from unattended
+trays. A Sbarro's neon sign buzzes: "A SLICE OF —" and then
+nothing, the rest of the sentence burned out.
+
+A coffee cart sits unattended. The coffee in the pot is still
+hot but the level hasn't changed — it's been exactly half full
+since 1997, and it will be exactly half full forever.
+
+Menu boards list items that don't exist: "DEPARTURE LATTE,"
+"THRESHOLD SCONE," "THE SPACE BETWEEN TWO TERMINALS WRAP."
+The prices are all in gates, not dollars.`,
+  choices: [
+    { text: 'Pour yourself a coffee — you need the warmth', next: 'food-court-2', cost: 30, effect() { state.items.push('COFFEE'); } },
+    { text: 'Read the full menu — something here matters', next: 'food-court-2', cost: 20 },
+    { text: 'Leave. This place feels like a trap', next: 'corridor-a', cost: 10 }
+  ]
+},
+
+'food-court-2': {
+  name: 'FOOD COURT · THE MENU',
+  desc: `You study the menu. Between the absurd items, a pattern
+emerges. The first letters of each item spell something:
+
+  D E P A R T U R E
+  T H R E S H O L D
+  T H E   S P A C E
+
+  (wait)
+
+  B     E     T     W     E     E     N
+
+  B23? But that's —
+
+The coffee cart radio crackles. Through the static,
+a voice: "Gate B█████ is now boarding. All passengers
+for ████████ please proceed to the gate that flickers."
+
+Someone left a briefcase under a table. It's unlocked.`,
+  choices: [
+    { text: 'Open the briefcase', next: 'lost-found', cost: 15, effect() { state.foundClue = true; } },
+    { text: 'Finish your coffee and head to B gates', next: 'corridor-a', cost: 20 },
+    { text: 'Try to tune the radio to a clearer frequency', next: 'food-court-3', cost: 25 }
+  ]
+},
+
+'food-court-3': {
+  name: 'FOOD COURT · THE RADIO',
+  desc: `You twist the radio dial. Static, static, a burst of
+music — a song you recognize but can't name, a song
+that was popular the year you first flew alone —
+then more static, then:
+
+"...and if you're just joining us, the terminal
+condition is chronic but manageable. Patients are
+advised to avoid looking directly at departure
+boards for more than three seconds. The flicker
+has been known to induce —"
+
+The signal cuts out. The radio goes dark. Its
+power cord was never plugged in.`,
+  choices: [
+    { text: 'Get out of the food court immediately', next: 'corridor-a', cost: 10 },
+    { text: 'Check the briefcase before you leave', next: 'lost-found', cost: 15, effect() { state.foundClue = true; } }
+  ]
+},
+
+'lost-found': {
+  name: 'LOST & FOUND',
+  desc: `A small office behind an unmarked counter. Shelves overflowing
+with items: single gloves, umbrellas, neck pillows, laptops
+with screens that show only the spinning wheel of indefinite
+loading.
+
+Behind the counter, an attendant who looks like she's been
+here since the terminal was built. She doesn't speak — just
+gestures toward a clipboard.
+
+The clipboard reads: "Describe what you've lost. If we have it,
+you may take it. If we don't, it was never lost."`,
+  choices: [
+    { text: 'Ask about a boarding pass for the real flight', next: 'lost-found-2', cost: 25 },
+    { text: 'Browse the shelves — something here is yours', next: 'lost-found-2', cost: 20 },
+    { text: 'Leave. You haven\'t lost anything... have you?', next: 'corridor-a', cost: 15 }
+  ]
+},
+
+'lost-found-2': {
+  name: 'LOST & FOUND · THE SHELVES',
+  desc: `You browse. Halfway down the third shelf, you find it:
+
+Your boarding pass. The SAME boarding pass you're holding
+right now. Identical flight number, identical gate, identical
+time. But this one is worn — creased, folded, the ink slightly
+faded — as if it's been here for years.
+
+The attendant watches. She nods slowly.
+
+You check your pocket. Your boarding pass is still there.
+Now you have two. One that's happening now, and one that
+already happened. Or hasn't happened yet. Or is happening
+in a loop.`,
+  choices: [
+    { text: 'Take the second boarding pass', next: 'corridor-a', cost: 15, effect() { state.items.push('SECOND PASS'); state.foundClue = true; } },
+    { text: 'Leave it on the shelf. One timeline is enough', next: 'corridor-a', cost: 10 },
+    { text: 'Ask the attendant what it means', next: 'lost-found-3', cost: 25 }
+  ]
+},
+
+'lost-found-3': {
+  name: 'LOST & FOUND · THE ATTENDANT SPEAKS',
+  desc: `"Every object in this room," she says, her voice like
+old paper, "was left behind by someone who found their
+gate. You don't need things where you're going. You
+don't even need your boarding pass."
+
+She takes the worn pass from your hand, smooths it flat,
+and places it back on the shelf. "This one belonged to
+you the last time. You almost found it then. You're
+closer this time."
+
+"The third number. When you see it — not B23, not B47,
+but the one in between — walk through. Don't check the
+clock. Don't look back. Just walk."`,
+  choices: [
+    { text: 'Go to Gate B23. Now.', next: 'gate-b23', cost: 15, effect() { state.foundClue = true; state.gateCounter++; } },
+    { text: 'Thank her and leave', next: 'corridor-a', cost: 10, effect() { state.foundClue = true; } }
+  ]
+},
+
+'janitor-closet': {
+  name: 'JANITOR\'S CLOSET',
+  desc: `The closet is larger than it should be. Mops in ordered rows.
+Industrial cleaning solutions in unlabeled bottles. A small
+desk with a coffee mug that reads: "I'VE BEEN HERE LONGER
+THAN YOU."
+
+On the wall: a hand-drawn map of the terminal, annotated in
+cramped handwriting. Arrows connect gates in patterns that
+don't match the official layout. One notation catches your eye:
+
+  "B23 ↔ B47 ↔ [REDACTED] — membrane active between
+   03:47 and 03:59. Approach from A corridor ONLY.
+   DO NOT use moving walkway."`,
+  choices: [
+    { text: 'Study the map carefully', next: 'janitor-study', cost: 25 },
+    { text: 'Take the map and go', next: 'corridor-a', cost: 15, effect() { state.items.push('MAP'); state.foundClue = true; } },
+    { text: 'The janitor might return — leave now', next: 'corridor-a', cost: 10 }
+  ]
+},
+
+'janitor-study': {
+  name: 'JANITOR\'S CLOSET · STUDYING',
+  desc: `The map reveals what you've been sensing: the terminal is
+not Euclidean. Corridors connect in ways that violate
+floorplan logic. Gate C12 is 40 meters from B23 in one
+direction AND 400 meters in another — depending on which
+corridor you take.
+
+The membrane notation continues: "Active window: 12 minutes.
+After window closes, membrane moves to next gate. Pattern
+repeats every 64 minutes. Gate numbers cycle: B23 → B47 →
+[third] → C12 → D7 → [third] → B23..."
+
+The third gate — the one between B23 and B47 on the display —
+has no fixed location. It appears where the membrane is
+currently stretched thinnest.`,
+  choices: [
+    { text: 'Go to B23 immediately — the window is open', next: 'gate-b23', cost: 10, effect() { state.foundClue = true; state.gateCounter++; } },
+    { text: 'Memorize the cycle pattern', next: 'janitor-closet', cost: 20 }
+  ]
+},
+
+'gate-b47': {
+  name: 'GATE B47',
+  desc: `Gate B47 is closed. Metal shutters pulled down over the
+jet bridge entrance. The gate display shows only static.
+
+But something is behind the shutters. You can hear it —
+a low hum, deeper than the fluorescent buzz, more like
+an engine, or a breath, or both.
+
+A sign taped to the shutter: "GATE TEMPORARILY RELOCATED
+TO ████████. WE APOLOGIZE FOR THE ████████."
+
+The last word flickers. It can't decide between
+"INCONVENIENCE" and "TRANSCENDENCE."`,
+  choices: [
+    { text: 'Go back to B23 — this one isn\'t ready', next: 'corridor-a', cost: 20 },
+    { text: 'Press your ear to the shutter', next: 'gate-b47-listen', cost: 25 },
+    { text: 'Try to pry open the shutters', next: 'gate-b47-force', cost: 35 }
+  ]
+},
+
+'gate-b47-listen': {
+  name: 'GATE B47 · LISTENING',
+  desc: `Through the metal shutter, you hear:
+
+A boarding announcement — but the voice is yours. Your voice,
+reading gate numbers and departure times in a flat monotone.
+"Now boarding Flight 447. Now boarding Flight 447. Now
+boarding —" over and over, a broken record of yourself.
+
+Then, layered underneath: someone else's voice. Familiar but
+unplaceable. "The third number. Say the third number. If you
+say it, you can come through. The third number. The third —"
+
+The announcement cuts to silence.
+
+Then, very softly: the sound of someone taking a seat.`,
+  choices: [
+    { text: 'Go back to B23. You know enough', next: 'gate-b23', cost: 15, effect() { state.gateCounter++; } },
+    { text: 'Stay and keep listening', next: 'gate-b47-force', cost: 30 }
+  ]
+},
+
+'gate-b47-force': {
+  name: 'GATE B47 · FORCING ENTRY',
+  desc: `You grip the bottom of the metal shutter and pull. It
+doesn't budge. You pull harder. Something gives — a
+snap, a rush of air, and the shutter retracts violently
+upward with a sound like a gasp.
+
+Behind it: Gate B23.
+
+The same gate. The same half-finished crossword. The same
+woman sitting two seats away, not looking up. "You're
+back," she says. "They always come back through B47
+thinking it's a different gate."
+
+"But maybe this time you're ready."`,
+  choices: [
+    { text: 'Approach the gate display and watch the flicker', next: 'threshold', cost: 20, effect() { state.gateCounter += 2; } },
+    { text: 'Sit down next to the woman', next: 'gate-b23-chat', cost: 15 }
+  ]
+},
+
+'phone-check': {
+  name: 'YOUR PHONE',
+  desc: `You pull out your phone. The screen is on — it shouldn't be,
+you didn't unlock it — and it shows your boarding pass.
+Flight 447. Gate B23. 03:55.
+
+But the time on the phone clock reads: 03:47. Exactly.
+It hasn't changed since you arrived. The seconds digit is
+frozen between :46 and :47, mid-transition, caught in the
+liminal space between one second and the next.
+
+You notice the battery percentage: 23%. Then it flickers
+to 47%. Then — for a frame — it shows a symbol you don't
+recognize. Not a number. Something between 23 and 47.
+
+Then back to 23%.`,
+  choices: [
+    { text: 'Put the phone away. It knows something', next: 'gate-b23', cost: 5, effect() { state.gateCounter++; } },
+    { text: 'Try to screenshot the strange symbol', next: 'phone-check-2', cost: 15 },
+    { text: 'Browse your photos — are you in any of them?', next: 'phone-check-2', cost: 20 }
+  ]
+},
+
+'phone-check-2': {
+  name: 'YOUR PHONE · GALLERY',
+  desc: `Your photo gallery shows images you didn't take. Airport
+ceilings. Departure boards from angles you've never stood at.
+Selfies in front of gates you don't remember visiting.
+
+One photo: you, asleep in a molded plastic chair, your
+boarding pass visible on your lap. The timestamp reads
+tomorrow.
+
+Another: a picture of this exact moment — you, looking
+at your phone, in this terminal, right now. But the
+photo was taken in 2019. You weren't here in 2019.
+
+You weren't here in 2019. Were you?`,
+  choices: [
+    { text: 'Close the phone. This is too much', next: 'corridor-a', cost: 10, effect() { state.gateCounter++; } },
+    { text: 'Keep scrolling — there must be an answer', next: 'phone-check-3', cost: 25 }
+  ]
+},
+
+'phone-check-3': {
+  name: 'YOUR PHONE · THE LAST PHOTO',
+  desc: `The final photo in the gallery is a video. It auto-plays.
+
+You're in it. Older. Standing at an open gate door — not
+a jet bridge door, but a door made of light. You're smiling.
+You turn to the camera and say:
+
+"You found it. The third number. I knew you would.
+It's not 23 and it's not 47. It's —"
+
+The video glitches. Static. Then:
+
+"— the threshold between. It's always been there.
+Walk through. Don't check the clock. I'll see you
+on the other side of —"
+
+The phone dies. Battery: 0%. You put it away.`,
+  choices: [
+    { text: 'Go to Gate B23. Now. No more detours', next: 'gate-b23', cost: 10, effect() { state.foundClue = true; state.gateCounter += 3; } },
+    { text: 'Process what you just saw', next: 'corridor-a', cost: 20, effect() { state.gateCounter += 2; } }
+  ]
+},
+
+threshold: {
+  name: 'THE THRESHOLD',
+  desc: `Gate B23's display flickers. B23. B47. B23. B47.
+
+And then — for one frame, one heartbeat, one threshold
+between numbers — something else. A symbol. A glyph.
+Not a number in any numeral system. Something that means
+"the space between" as a single character.
+
+The gate agent's podium glows faintly. The crossword is
+now complete: every across and down filled with the same
+word: "THROUGH."
+
+The jet bridge door opens by itself.`,
+  choices: [
+    { text: 'Walk through. Don\'t look at the clock. Just walk', next: 'ending', cost: 0 },
+    { text: 'Hesitate. Check the clock one more time', next: 'gate-b23-wait', cost: 30 }
+  ]
+},
+
+ending: {
+  name: 'DEPARTURE',
+  desc: ``,
+  choices: [],
+  onEnter() { resolveEnding(); }
+}
+
+};
+
+// ── Navigation ──
+function transition(to) {
+  const scene = scenes[to];
+  if (!scene) { console.error('Missing scene:', to); return; }
+
+  state.currentScene = to;
+  state.visited.add(to);
+
+  descEl.classList.add('fading');
+  setTimeout(() => {
+    sceneNameEl.textContent = scene.name || '';
+    descEl.textContent = scene.desc || '';
+    descEl.classList.remove('fading');
+
+    choicesEl.innerHTML = '';
+    if (to === 'ending') {
+      if (scene.onEnter) scene.onEnter();
+      return;
+    }
+
+    scene.choices.forEach(ch => {
+      const btn = document.createElement('button');
+      btn.className = 'choice-btn';
+      btn.textContent = ch.text;
+      btn.addEventListener('click', () => {
+        if (ch.effect) ch.effect();
+        advanceTime(ch.cost);
+        transition(ch.next);
+      });
+      choicesEl.appendChild(btn);
+    });
+
+    // Update status bar
+    gateDisplay.textContent = state.gate;
+    roomsVisited.textContent = state.visited.size;
+    passStatusEl.textContent = state.foundClue ? 'ACTIVE' : 'PENDING';
+
+    if (scene.onEnter) scene.onEnter();
+  }, 400);
+
+  // Auto-scroll to top
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ── Endings ──
+function triggerEnding(type) {
+  if (state.ending) return;
+  state.ending = type;
+  clearInterval(clockInterval);
+  descEl.classList.add('fading');
+  setTimeout(() => {
+    sceneNameEl.textContent = '';
+
+    if (type === 'time') {
+      clockEl.textContent = '00:00';
+      descEl.innerHTML = `The clock reaches zero.
+
+The terminal lights dim in sequence — a wave of darkness
+rolling from the far end of the concourse toward you.
+
+You feel yourself becoming... still. The chair beneath you
+is no longer uncomfortable. It's just a chair. You've been
+sitting here for a long time. You'll be sitting here for
+a long time. The departure board no longer shows flights.
+It shows names. Yours is on the list.
+
+<span style="color:#c084fc">— LOST IN TRANSIT —</span>
+
+<span style="color:#7df9a0; cursor:pointer; text-decoration:underline;" onclick="location.reload()">[ board again ]</span>`;
+    } else {
+      descEl.innerHTML = `The door opens onto light. Not fluorescent light —
+something warmer, something that touches your skin
+like the first morning of a trip you've been
+anticipating for years.
+
+You walk through.
+
+Behind you, the terminal continues its long quiet
+cycle — departure boards flickering, corridors
+curving, gates shifting their numbers. The woman
+in the chair at B23 uncrosses her legs and waits
+for the next passenger who notices the flicker.
+
+You are no longer between. You have arrived.
+
+<span style="color:#ff2d95">— THE THIRD NUMBER —</span>
+
+<span style="color:#7df9a0; cursor:pointer; text-decoration:underline;" onclick="location.reload()">[ board again ]</span>`;
+    }
+
+    descEl.classList.remove('fading');
+    choicesEl.innerHTML = '';
+    passStatusEl.textContent = type === 'time' ? 'EXPIRED' : 'BOARDED';
+    gateDisplay.textContent = type === 'time' ? '---' : '∞';
+    roomsVisited.textContent = state.visited.size;
+  }, 500);
+}
+
+function resolveEnding() {
+  // Check conditions
+  const conditions = state.foundClue && state.visitedGates >= 2 && state.gateCounter >= 2;
+  const loopEnding = state.loopCount >= 3;
+
+  if (conditions) {
+    triggerEnding('threshold');
+  } else if (loopEnding) {
+    descEl.innerHTML = `You step through the jet bridge door and find yourself...
+
+...at the arrivals board. The terminal entrance. 03:47 AM.
+
+The departure board flickers. FLIGHT 447 · GATE B23 · 03:55.
+
+Your boarding pass is in your hand. It's unwrinkled. New.
+
+You have eight minutes.
+
+The terminal has looped you. But something is different this
+time — you remember. The janitor's map. The third number.
+The woman's eyes. You carry the memory of every corridor,
+every gate, every threshold.
+
+<span style="color:#ff2d95">— THE LOOP NARROWS —</span>
+
+<span style="color:#7df9a0; cursor:pointer; text-decoration:underline;" onclick="location.reload()">[ try again ]</span>`;
+    passStatusEl.textContent = 'LOOPED';
+  } else {
+    descEl.innerHTML = `You step through the door — and hesitate.
+
+The light is there, warm and waiting, but something holds you
+back. Not fear. Not doubt. Something unfinished.
+
+A voice — yours, from the other side: "Not yet. You're close.
+But you need to understand what you're leaving."
+
+The door closes gently. You're back at Gate B23. The display
+flickers. B23. B47. B23. The third number hasn't shown itself
+because you haven't earned it yet.
+
+<span style="color:#c084fc">— NOT YET —</span>
+
+<span style="color:#7df9a0; cursor:pointer; text-decoration:underline;" onclick="location.reload()">[ try again ]</span>`;
+    passStatusEl.textContent = 'PENDING';
+  }
+  descEl.classList.remove('fading');
+  choicesEl.innerHTML = '';
+}
+
+// ── Ambient Effects ──
+function randomFlicker() {
+  const delay = 3000 + Math.random() * 20000;
+  setTimeout(() => {
+    const intensity = Math.random() * 0.08;
+    glitchOverlay.style.opacity = String(intensity);
+    glitchOverlay.style.background = Math.random() > 0.5 ? '#ff2d9508' : '#7df9a006';
+    setTimeout(() => { glitchOverlay.style.opacity = '0'; }, 40 + Math.random() * 80);
+    randomFlicker();
+  }, delay);
+}
+randomFlicker();
+
+// ── Subtle title-bar breathing ──
+const titleBar = document.getElementById('title-bar');
+function breatheTitle() {
+  const brightness = 0.5 + 0.5 * Math.sin(Date.now() / 4000);
+  titleBar.style.opacity = String(0.5 + brightness * 0.4);
+  requestAnimationFrame(() => setTimeout(breatheTitle, 200));
+}
+breatheTitle();
+
+// ── Start ──
+transition('arrival');
+</script>
+</body>
+</html>
