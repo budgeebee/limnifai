@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Littoral</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; }
+  body {
+    background: #14111c;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    cursor: default;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #container {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 1;
+  }
+  .bar {
+    position: absolute;
+    border-radius: 1.5px;
+    will-change: height, width, opacity;
+    pointer-events: none;
+  }
+  .dot {
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+    will-change: transform, opacity;
+    background: rgba(240, 200, 160, 0.25);
+  }
+  #poem-overlay {
+    position: fixed;
+    bottom: 11%;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 2;
+    color: rgba(196, 181, 224, 0);
+    font-size: 1.05rem;
+    font-style: italic;
+    letter-spacing: 0.04em;
+    text-align: center;
+    transition: opacity 1.8s ease, color 2.5s ease;
+    pointer-events: none;
+    max-width: 80vw;
+    line-height: 1.6;
+  }
+  #title-overlay {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 3;
+    color: rgba(232, 181, 200, 0);
+    font-size: 1.8rem;
+    letter-spacing: 0.12em;
+    text-transform: lowercase;
+    transition: opacity 2.5s ease;
+    pointer-events: none;
+  }
+  #vignette {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 4;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(20, 17, 28, 0.65) 100%);
+  }
+</style>
+</head>
+<body>
+<div id="container"></div>
+<div id="poem-overlay"></div>
+<div id="title-overlay">littoral</div>
+<div id="vignette"></div>
+
+<script>
+(function() {
+  const container = document.getElementById('container');
+  const poemOverlay = document.getElementById('poem-overlay');
+  const titleOverlay = document.getElementById('title-overlay');
+
+  // ── Palette (pastel-dream) ──
+  const PASTEL = [
+    { base: '#c4b5e0', bright: '#e0d5f5', glow: 'rgba(196,181,224,0.55)', name: 'lavender' },
+    { base: '#e8b5c8', bright: '#f5d0de', glow: 'rgba(232,181,200,0.55)', name: 'pink' },
+    { base: '#f0c8a0', bright: '#f8dcc0', glow: 'rgba(240,200,160,0.55)', name: 'peach' },
+    { base: '#b5d8c4', bright: '#d0f0e0', glow: 'rgba(181,216,196,0.55)', name: 'mint' },
+  ];
+
+  // ── Poem phrases ──
+  const PHRASES = [
+    'between high and low',
+    'the shore remembers nothing',
+    'where water becomes land',
+    'twice each day, the world inhales',
+    'barnacles dreaming of tide',
+    'what the moon pulls toward itself',
+    'a boundary that breathes',
+    'the space that was sea',
+    'this edge will not hold',
+    'liminal as the tide line',
+    'neither anchored nor adrift',
+    'the pause between waves',
+    'what retreats will return',
+    'a continent exhales',
+    'the intertidal hour',
+    'where foam kisses stone',
+  ];
+
+  // ── State ──
+  let mouseX = -500, mouseY = -500;
+  let time = 0;
+  let bars = [];
+  let dots = [];
+  let poemIndex = 0;
+  let poemTimer = 0;
+  let waveQueue = [];
+  let titleTimer = 0;
+  let titleState = 'in'; // 'in' | 'visible' | 'out' | 'gone'
+
+  const ATTRACT_RADIUS = 280;
+  const ATTRACT_STRONG = 100;
+
+  // ── Bar class ──
+  class Bar {
+    constructor(edge, pos, colorIdx) {
+      this.edge = edge;
+      this.pos = pos;           // 0..1 along edge
+      this.color = PASTEL[colorIdx % PASTEL.length];
+
+      // Vary dimensions by edge
+      const isH = (edge === 'top' || edge === 'bottom');
+      this.restLen = isH
+        ? 18 + Math.random() * 50
+        : 14 + Math.random() * 36;
+      this.maxLen = isH
+        ? this.restLen + 40 + Math.random() * 90
+        : this.restLen + 30 + Math.random() * 60;
+      this.thickness = 1.5 + Math.random() * 3.5;
+
+      // Breathing cycle
+      this.period = 7 + Math.random() * 22;
+      this.phase = Math.random() * Math.PI * 2;
+      this.amp = 3 + Math.random() * 14;
+
+      // Smooth state
+      this.len = this.restLen;
+      this.opacity = 0.25 + Math.random() * 0.2;
+      this.waveBoost = 0;
+
+      // DOM
+      this.el = document.createElement('div');
+      this.el.className = 'bar';
+      const s = this.el.style;
+      s.backgroundColor = this.color.base;
+
+      if (edge === 'top') {
+        s.top = '0';
+        s.left = (pos * 100).toFixed(2) + '%';
+        s.width = this.thickness + 'px';
+        s.transformOrigin = 'top center';
+      } else if (edge === 'bottom') {
+        s.bottom = '0';
+        s.left = (pos * 100).toFixed(2) + '%';
+        s.width = this.thickness + 'px';
+        s.transformOrigin = 'bottom center';
+      } else if (edge === 'left') {
+        s.left = '0';
+        s.top = (pos * 100).toFixed(2) + '%';
+        s.height = this.thickness + 'px';
+        s.transformOrigin = 'left center';
+      } else {
+        s.right = '0';
+        s.top = (pos * 100).toFixed(2) + '%';
+        s.height = this.thickness + 'px';
+        s.transformOrigin = 'right center';
+      }
+      container.appendChild(this.el);
+    }
+
+    getCenter() {
+      const W = window.innerWidth, H = window.innerHeight;
+      switch (this.edge) {
+        case 'top':    return { x: this.pos * W, y: this.len / 2 };
+        case 'bottom': return { x: this.pos * W, y: H - this.len / 2 };
+        case 'left':   return { x: this.len / 2, y: this.pos * H };
+        case 'right':  return { x: W - this.len / 2, y: this.pos * H };
+      }
+    }
+
+    update(t, mx, my) {
+      // Breathing
+      const breath = Math.sin(t * 2 * Math.PI / this.period + this.phase) * this.amp;
+
+      // Mouse attraction
+      const c = this.getCenter();
+      const dx = mx - c.x, dy = my - c.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      let attract = 0;
+      if (dist < ATTRACT_RADIUS) {
+        const t1 = 1 - dist / ATTRACT_RADIUS;
+        attract = t1 * t1;
+        if (dist < ATTRACT_STRONG) {
+          attract = attract * 0.7 + 0.3;
+        }
+      }
+
+      // Wave boost decay
+      this.waveBoost *= 0.94;
+      if (this.waveBoost < 0.3) this.waveBoost = 0;
+
+      // Target length
+      const targetLen = this.restLen + breath + attract * (this.maxLen - this.restLen) + this.waveBoost;
+      this.len += (targetLen - this.len) * 0.09;
+
+      // Target opacity
+      const targetOp = 0.25 + attract * 0.45 + (breath / (this.amp || 1)) * 0.12 + (this.waveBoost / 80) * 0.2;
+      this.opacity += (targetOp - this.opacity) * 0.07;
+
+      // Apply
+      const s = this.el.style;
+      const L = Math.round(Math.max(2, this.len));
+      if (this.edge === 'top' || this.edge === 'bottom') {
+        s.height = L + 'px';
+      } else {
+        s.width = L + 'px';
+      }
+      s.opacity = this.opacity.toFixed(2);
+
+      // Glow
+      const glowStrength = attract + this.waveBoost / 60;
+      if (glowStrength > 0.08) {
+        s.backgroundColor = this.color.bright;
+        s.boxShadow = `0 0 ${(2 + glowStrength * 16).toFixed(1)}px ${this.color.glow}`;
+      } else if (breath > this.amp * 0.6) {
+        s.backgroundColor = this.color.bright;
+        s.boxShadow = `0 0 3px ${this.color.glow}`;
+      } else {
+        s.backgroundColor = this.color.base;
+        s.boxShadow = 'none';
+      }
+    }
+  }
+
+  // ── Dot class ──
+  class Dot {
+    constructor() {
+      this.x = Math.random() * window.innerWidth;
+      this.y = Math.random() * window.innerHeight;
+      this.size = 1.5 + Math.random() * 2.5;
+      this.baseOpacity = 0.08 + Math.random() * 0.18;
+      this.opacity = this.baseOpacity;
+      // drift velocity
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 0.03 + Math.random() * 0.12;
+      this.vx = Math.cos(angle) * speed;
+      this.vy = Math.sin(angle) * speed;
+      this.period = 12 + Math.random() * 30;
+      this.phase = Math.random() * Math.PI * 2;
+      this.colorIdx = Math.floor(Math.random() * PASTEL.length);
+
+      this.el = document.createElement('div');
+      this.el.className = 'dot';
+      const s = this.el.style;
+      s.width = this.size + 'px';
+      s.height = this.size + 'px';
+      s.backgroundColor = PASTEL[this.colorIdx].base;
+      container.appendChild(this.el);
+    }
+
+    update(t) {
+      // Drift
+      this.x += this.vx;
+      this.y += this.vy;
+
+      // Wrap around edges with margin
+      const W = window.innerWidth, H = window.innerHeight;
+      if (this.x < -20) this.x = W + 20;
+      if (this.x > W + 20) this.x = -20;
+      if (this.y < -20) this.y = H + 20;
+      if (this.y > H + 20) this.y = -20;
+
+      // Pulsing opacity
+      const pulse = Math.sin(t * 2 * Math.PI / this.period + this.phase);
+      const targetOp = this.baseOpacity + (pulse > 0 ? pulse * 0.22 : 0);
+      this.opacity += (targetOp - this.opacity) * 0.04;
+
+      const s = this.el.style;
+      s.transform = `translate(${this.x.toFixed(1)}px, ${this.y.toFixed(1)}px)`;
+      s.opacity = this.opacity.toFixed(3);
+    }
+  }
+
+  // ── Wave pulse ──
+  function triggerWave() {
+    const edge = ['top','bottom','left','right'][Math.floor(Math.random() * 4)];
+    const startPos = Math.random();
+    const direction = Math.random() > 0.5 ? 1 : -1;
+
+    const edgeBars = bars.filter(b => b.edge === edge).sort((a, b) => a.pos - b.pos);
+
+    const startIdx = Math.floor(startPos * edgeBars.length);
+    const waveLength = 12 + Math.floor(Math.random() * 16);
+
+    for (let i = 0; i < waveLength; i++) {
+      const idx = (startIdx + i * direction + edgeBars.length) % edgeBars.length;
+      const bar = edgeBars[Math.abs(idx) % edgeBars.length];
+      if (bar) {
+        setTimeout(() => {
+          bar.waveBoost = 50 + Math.random() * 40;
+        }, i * 90 + Math.random() * 30);
+      }
+    }
+  }
+
+  // ── Initialization ──
+  function createBars() {
+    const configs = [
+      { edge: 'top', count: 28 },
+      { edge: 'bottom', count: 28 },
+      { edge: 'left', count: 16 },
+      { edge: 'right', count: 16 },
+    ];
+
+    configs.forEach(cfg => {
+      // Create with slight clustering — small random gaps between groups
+      const groupCount = cfg.edge === 'top' || cfg.edge === 'bottom' ? 5 : 3;
+      const groupSize = Math.floor(cfg.count / groupCount);
+      const gapWidth = 0.06; // fraction of edge for gap between groups
+
+      let posAccum = 0;
+      for (let g = 0; g < groupCount; g++) {
+        const actualSize = g === groupCount - 1
+          ? cfg.count - bars.filter(b => b.edge === cfg.edge).length
+          : groupSize;
+
+        for (let i = 0; i < actualSize; i++) {
+          const fracInGroup = i / actualSize;
+          // slight jitter in position
+          const jitter = (Math.random() - 0.5) * 0.015;
+          const pos = posAccum + fracInGroup * ((1 - gapWidth * groupCount) / groupCount) + jitter;
+          const colorIdx = Math.floor(Math.random() * PASTEL.length);
+          bars.push(new Bar(cfg.edge, Math.max(0.005, Math.min(0.995, pos)), colorIdx));
+        }
+        posAccum += (1 - gapWidth * groupCount) / groupCount + gapWidth;
+      }
+    });
+  }
+
+  function createDots(count) {
+    for (let i = 0; i < count; i++) {
+      // Bias dots toward center and away from dense edges
+      const W = window.innerWidth, H = window.innerHeight;
+      const margin = 0.12;
+      const dot = new Dot();
+      dot.x = W * (margin + Math.random() * (1 - 2 * margin));
+      dot.y = H * (margin + Math.random() * (1 - 2 * margin));
+      dots.push(dot);
+    }
+  }
+
+  // ── Poem cycle ──
+  function updatePoem(t) {
+    poemTimer += 0.016;
+    const displayDuration = 8;
+    const fadeDuration = 2.2;
+    const gapDuration = 2.8;
+    const cycleTotal = displayDuration + fadeDuration + gapDuration;
+
+    if (poemTimer > cycleTotal) {
+      poemTimer -= cycleTotal;
+      poemIndex = (poemIndex + 1) % PHRASES.length;
+      poemOverlay.textContent = PHRASES[poemIndex];
+    }
+
+    let op = 0;
+    if (poemTimer < fadeDuration) {
+      op = poemTimer / fadeDuration;
+    } else if (poemTimer < displayDuration) {
+      op = 1;
+    } else if (poemTimer < displayDuration + fadeDuration) {
+      op = 1 - (poemTimer - displayDuration) / fadeDuration;
+    }
+
+    // Color shift through palette based on poem index
+    const c = PASTEL[poemIndex % PASTEL.length];
+    poemOverlay.style.opacity = (op * 0.75).toFixed(2);
+    poemOverlay.style.color = op > 0.3 ? c.bright : c.base;
+  }
+
+  // ── Title animation ──
+  function updateTitle(t) {
+    titleTimer += 0.016;
+    if (titleState === 'in') {
+      if (titleTimer < 0.8) {
+        titleOverlay.style.opacity = (titleTimer / 0.8 * 0.7).toFixed(2);
+      } else if (titleTimer < 3.5) {
+        titleOverlay.style.opacity = '0.7';
+        titleState = 'visible';
+      }
+    } else if (titleState === 'visible') {
+      if (titleTimer > 4.5) {
+        titleState = 'out';
+      }
+    } else if (titleState === 'out') {
+      const fadeProgress = (titleTimer - 4.5) / 1.8;
+      if (fadeProgress >= 1) {
+        titleOverlay.style.opacity = '0';
+        titleState = 'gone';
+      } else {
+        titleOverlay.style.opacity = (0.7 * (1 - fadeProgress)).toFixed(2);
+      }
+    }
+  }
+
+  // ── Wave scheduler ──
+  let waveTimer = 0;
+  function scheduleWaves() {
+    waveTimer += 0.016;
+    const interval = 11 + Math.sin(time * 0.3) * 4;
+    if (waveTimer > interval) {
+      waveTimer = 0;
+      triggerWave();
+    }
+  }
+
+  // ── Main loop ──
+  function animate(timestamp) {
+    time = timestamp * 0.001;
+    const mx = mouseX, my = mouseY;
+
+    bars.forEach(b => b.update(time, mx, my));
+    dots.forEach(d => d.update(time));
+    updatePoem(time);
+    updateTitle(time);
+    scheduleWaves();
+
+    requestAnimationFrame(animate);
+  }
+
+  // ── Mouse tracking ──
+  document.addEventListener('mousemove', e => {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+  });
+  document.addEventListener('touchmove', e => {
+    if (e.touches.length > 0) {
+      mouseX = e.touches[0].clientX;
+      mouseY = e.touches[0].clientY;
+    }
+  }, { passive: true });
+  document.addEventListener('mouseleave', () => {
+    mouseX = -500;
+    mouseY = -500;
+  });
+
+  // ── Resize handling ──
+  window.addEventListener('resize', () => {
+    // Recalculate bar positions — bars use percentage positioning,
+    // so they automatically adapt. Just need to update dot positions
+    // if they're way outside bounds.
+    const W = window.innerWidth, H = window.innerHeight;
+    dots.forEach(d => {
+      if (d.x > W + 50) d.x = W - 30;
+      if (d.y > H + 50) d.y = H - 30;
+    });
+  });
+
+  // ── Start ──
+  createBars();
+  createDots(38);
+  poemOverlay.textContent = PHRASES[0];
+  titleOverlay.style.opacity = '0';
+
+  // Fade in title after slight delay
+  setTimeout(() => { titleTimer = 0; titleState = 'in'; }, 400);
+
+  requestAnimationFrame(animate);
+
+  // Log
+  console.log('%c🪸 Littoral %c— %c' + bars.length + ' bars, ' + dots.length + ' dots %c— edge-dominant dom-art',
+    'color:#e8b5c8;font-size:1.1em;', '', 'color:#c4b5e0;', '');
+})();
+</script>
+</body>
+</html>
