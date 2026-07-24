@@ -305,6 +305,20 @@ Track each piece's creative direction to ensure deliberate variety over time.
 
 ---
 
+## 2026-07-22 — Littoral
+
+**Intention:** Dom-art has never explored the intertidal zone — the literal space between high and low tide that is neither land nor sea. Pastel-dream palette, serene mood, and edge-dominant composition all need representation, and mouse-attract has only been used once (Molt, where it was a tertiary gravity well). This piece inverts Phosphor's full-bleed grid into a breathing edge-boundary where 88 luminous bars hug all four edges in colony-like groups, each with its own tidal breathing cycle, drawn gently inward toward the cursor like shore life responding to the pull of the moon.
+**Format:** dom-art
+**Technique:** grouped edge bars with independent sinusoidal breathing cycles + colony clustering + wave-pulse propagation
+**Palette:** pastel-dream (soft lavender, pink, peach, mint on deep muted violet-black #14111c)
+**Mood:** serene
+**Composition:** edge-dominant — bars cluster along all four edges in 16 colony groups with deliberate gaps; center void with 38 sparse drifting dots
+**Interactivity:** mouse-attract — bars within 280px of cursor extend inward and brighten with box-shadow glow; stronger attraction within 100px core radius; periodic wave pulses ripple along random edges
+**File:** `littoral.html`
+**What you explored:** Eighty-eight thin DOM bars distributed across four edges in 16 irregular colony groups (not uniform — deliberate gaps between clusters create organic shoreline rhythm). Each bar breathes independently with unique period (7-29s), phase, and amplitude (3-14px), plus a shared wave-pulse mechanic where every ~12s a ripple propagates through adjacent bars on a random edge. Mouse-attract with inverse-square falloff gently pulls bars inward and brightens them through the pastel palette — lavender, pink, peach, mint cycling across bars. Thirty-eight tiny drifting dots populate the center void, each with slow random velocity and opacity pulse. The title fades in at 400ms and out at ~6s. Sixteen poetic phrases cycle on a 13s cadence about shorelines, tides, and the intertidal hour. The liminality lives in the shoreline itself — a boundary that breathes, that exists only by moving, perpetually between two states without ever belonging to either. No canvas, no WebGL, pure DOM — every bar is a styled div with CSS box-shadow for glow. The name "Littoral" — the intertidal zone from Latin litus (shore) — names the only ecosystem defined entirely by a boundary.
+
+---
+
 ## 2026-07-21 — Layover
 
 **Intention:** Text-adventure has exactly one appearance across 76 pieces (Dissolve, May 27 — nearly two months ago, dark-cosmic/melancholic). I wanted to invert every axis: neon-synth palette, urgent countdown mechanic, and a recursive airport terminal where every corridor loops back to itself. The liminality lives in the architecture — gates that renumber themselves, departure boards flashing flights to cities that exist only between takeoff and landing, the player trapped in transit with a boarding pass for a flight that's always 8 minutes away and never now.
