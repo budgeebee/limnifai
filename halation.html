@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Halation</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #080402;
+    overflow: hidden;
+    cursor: crosshair;
+    font-family: Georgia, 'Times New Roman', serif;
+  }
+  canvas { display: block; }
+  #text-overlay {
+    position: fixed;
+    bottom: 48px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #f5d0a9;
+    font-size: 15px;
+    letter-spacing: 0.08em;
+    opacity: 0;
+    transition: opacity 2.5s ease;
+    pointer-events: none;
+    text-align: center;
+    max-width: 80vw;
+    text-shadow: 0 0 20px rgba(200,120,60,0.4), 0 0 60px rgba(200,100,40,0.2);
+  }
+  #title-overlay {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #f5d0a9;
+    font-size: 42px;
+    letter-spacing: 0.15em;
+    opacity: 0;
+    transition: opacity 1.8s ease;
+    pointer-events: none;
+    text-shadow: 0 0 30px rgba(220,140,60,0.5), 0 0 80px rgba(180,80,30,0.25);
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="title-overlay">halation</div>
+<div id="text-overlay"></div>
+<script>
+(function() {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const titleOverlay = document.getElementById('title-overlay');
+  const textOverlay = document.getElementById('text-overlay');
+
+  let W, H, dpr;
+  let mouseX = -1000, mouseY = -1000;
+  let mouseActive = false;
+  let time = 0;
+
+  // ── Simplex-like noise (compact 3D) ──────────────────────────────
+  const grad3 = [
+    [1,1,0],[-1,1,0],[1,-1,0],[-1,-1,0],[1,0,1],[-1,0,1],[1,0,-1],[-1,0,-1],
+    [0,1,1],[0,-1,1],[0,1,-1],[0,-1,-1]
+  ];
+  const perm = new Uint8Array(512);
+  const permMod12 = new Uint8Array(512);
+  (function(){
+    const p = [];
+    for (let i = 0; i < 256; i++) p[i] = i;
+    for (let i = 255; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [p[i], p[j]] = [p[j], p[i]];
+    }
+    for (let i = 0; i < 512; i++) {
+      perm[i] = p[i & 255];
+      permMod12[i] = perm[i] % 12;
+    }
+  })();
+
+  function dot3(g, x, y, z) {
+    return g[0] * x + g[1] * y + g[2] * z;
+  }
+
+  function noise3D(x, y, z) {
+    const X = Math.floor(x) & 255, Y = Math.floor(y) & 255, Z = Math.floor(z) & 255;
+    const xf = x - Math.floor(x), yf = y - Math.floor(y), zf = z - Math.floor(z);
+    const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf), w = zf * zf * (3 - 2 * zf);
+    const i = perm[X] + Y, j = perm[X + 1] + Y;
+    const a = perm[i] + Z, b = perm[j] + Z;
+    const aa = perm[a], ab = perm[a + 1], ba = perm[b], bb = perm[b + 1];
+    const n000 = dot3(grad3[permMod12[aa]], xf, yf, zf);
+    const n100 = dot3(grad3[permMod12[ba]], xf - 1, yf, zf);
+    const n010 = dot3(grad3[permMod12[ab]], xf, yf - 1, zf);
+    const n110 = dot3(grad3[permMod12[bb]], xf - 1, yf - 1, zf);
+    const n001 = dot3(grad3[permMod12[aa + 1]], xf, yf, zf - 1);
+    const n101 = dot3(grad3[permMod12[ba + 1]], xf - 1, yf, zf - 1);
+    const n011 = dot3(grad3[permMod12[ab + 1]], xf, yf - 1, zf - 1);
+    const n111 = dot3(grad3[permMod12[bb + 1]], xf - 1, yf - 1, zf - 1);
+
+    const lerp = (a,b,t) => a + t * (b - a);
+    return lerp(
+      lerp(lerp(n000, n100, u), lerp(n010, n110, u), v),
+      lerp(lerp(n001, n101, u), lerp(n011, n111, u), v),
+      w
+    );
+  }
+
+  function fbm(x, y, z, octaves = 3) {
+    let val = 0, amp = 0.5, freq = 1, max = 0;
+    for (let o = 0; o < octaves; o++) {
+      val += amp * noise3D(x * freq, y * freq, z * freq);
+      max += amp;
+      amp *= 0.5;
+      freq *= 2;
+    }
+    return val / max;
+  }
+
+  // ── Resize ───────────────────────────────────────────────────────
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(dpr, dpr);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ── Gradient Source ──────────────────────────────────────────────
+  const warmSunsetStops = [
+    { colors: ['#f5d0a9','#e8934f','#c44a2a','#6b1c10','#080402'], label: 'gold-coral' },
+    { colors: ['#fce4c8','#f0a860','#d45a30','#8b2214','#080402'], label: 'cream-amber' },
+    { colors: ['#f7dbae','#eb9a52','#cf4e28','#7a1e12','#080402'], label: 'pale-ochre' },
+    { colors: ['#fbe2c0','#f2b870','#e06038','#9a2816','#080402'], label: 'cream-sienna' },
+    { colors: ['#fde8d0','#f4c080','#e87048','#a0301a','#080402'], label: 'peach-coral' },
+    { colors: ['#f9d8b4','#eea458','#d8502c','#852014','#080402'], label: 'ochre-terracotta' },
+  ];
+
+  class GradientSource {
+    constructor(cornerX, cornerY, index) {
+      this.cornerX = cornerX;
+      this.cornerY = cornerY;
+      this.x = cornerX;
+      this.y = cornerY;
+      this.baseRadius = 380 + Math.random() * 300;
+      this.radius = this.baseRadius;
+      this.noiseSeedX = Math.random() * 1000;
+      this.noiseSeedY = Math.random() * 1000 + 500;
+      this.noiseSeedR = Math.random() * 1000 + 1000;
+      this.phase = Math.random() * Math.PI * 2;
+      this.colorIndex = index % warmSunsetStops.length;
+      this.opacity = 0.65 + Math.random() * 0.3;
+    }
+
+    update(t) {
+      const sec = t * 0.001;
+
+      // Position drift via layered sine + noise
+      const driftScale = 0.25;
+      const nx = fbm(this.cornerX * 0.002 + sec * 0.03 + this.noiseSeedX,
+                      this.cornerY * 0.002 + sec * 0.027,
+                      sec * 0.015) * 120 * driftScale;
+      const ny = fbm(this.cornerY * 0.002 + sec * 0.031 + this.noiseSeedY,
+                      this.cornerX * 0.002 + sec * 0.029,
+                      sec * 0.017) * 100 * driftScale;
+
+      // Sine drift for smoother motion
+      const sx = Math.sin(sec * 0.12 + this.phase) * 40;
+      const sy = Math.cos(sec * 0.09 + this.phase * 1.3) * 35;
+
+      // Pull toward corner when far, push away when close
+      const cornerDistX = this.x - this.cornerX;
+      const cornerDistY = this.y - this.cornerY;
+      const cornerForce = 0.003;
+
+      let targetX = this.cornerX + nx + sx;
+      let targetY = this.cornerY + ny + sy;
+
+      // Center repulsion — sources pushed away from canvas center
+      const cx = W / 2, cy = H / 2;
+      const centerDist = Math.sqrt((targetX - cx) ** 2 + (targetY - cy) ** 2);
+      const minCenterDist = 180;
+      if (centerDist < minCenterDist) {
+        const push = (minCenterDist - centerDist) / minCenterDist;
+        const angle = Math.atan2(targetY - cy, targetX - cx);
+        targetX += Math.cos(angle) * push * 120;
+        targetY += Math.sin(angle) * push * 120;
+      }
+
+      this.x += (targetX - this.x) * 0.015;
+      this.y += (targetY - this.y) * 0.015;
+
+      // Radius breathing
+      const rNoise = fbm(sec * 0.025 + this.noiseSeedR, 0, 0) * 0.3;
+      const rSine = Math.sin(sec * 0.06 + this.phase * 2) * 0.15;
+      this.radius = this.baseRadius * (0.8 + rNoise + rSine);
+
+      // Mouse warping — sources near cursor intensify
+      if (mouseActive) {
+        const mdx = this.x - mouseX;
+        const mdy = this.y - mouseY;
+        const mDist = Math.sqrt(mdx * mdx + mdy * mdy);
+        const mInfluence = Math.max(0, 1 - mDist / 400);
+        this.radius *= 1 + mInfluence * 0.6;
+        this.opacity = Math.min(1, this.opacity + mInfluence * 0.15);
+      } else {
+        this.opacity += (0.7 - this.opacity) * 0.005;
+      }
+
+      // Slow color palette cycling
+      const cycleSpeed = 45; // seconds per full cycle
+      this.colorIndex = ((index + sec / cycleSpeed) % warmSunsetStops.length + warmSunsetStops.length) % warmSunsetStops.length;
+    }
+
+    draw(ctx) {
+      const stops = warmSunsetStops[Math.floor(this.colorIndex) % warmSunsetStops.length];
+      const nextStops = warmSunsetStops[(Math.floor(this.colorIndex) + 1) % warmSunsetStops.length];
+      const t = this.colorIndex - Math.floor(this.colorIndex);
+
+      const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.radius);
+      for (let i = 0; i < 5; i++) {
+        const pos = i / 4;
+        const colorA = stops.colors[i];
+        const colorB = nextStops.colors[i];
+        const blended = lerpColor(colorA, colorB, t);
+        const alpha = this.opacity * (1 - pos * pos * 0.85);
+        grad.addColorStop(pos, hexToRgba(blended, alpha));
+      }
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function lerpColor(a, b, t) {
+    const ar = parseInt(a.slice(1,3), 16), ag = parseInt(a.slice(3,5), 16), ab = parseInt(a.slice(5,7), 16);
+    const br = parseInt(b.slice(1,3), 16), bg = parseInt(b.slice(3,5), 16), bb = parseInt(b.slice(5,7), 16);
+    const r = Math.round(ar + (br - ar) * t);
+    const g = Math.round(ag + (bg - ag) * t);
+    const bv = Math.round(ab + (bb - ab) * t);
+    return '#' + [r,g,bv].map(v => v.toString(16).padStart(2,'0')).join('');
+  }
+
+  function hexToRgba(hex, alpha) {
+    const r = parseInt(hex.slice(1,3), 16), g = parseInt(hex.slice(3,5), 16), b = parseInt(hex.slice(5,7), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+
+  // ── Create gradient sources in four corners ─────────────────────
+  const sources = [];
+  const corners = [
+    { x: () => W * 0.06, y: () => H * 0.06, label: 'tl' },
+    { x: () => W * 0.94, y: () => H * 0.05, label: 'tr' },
+    { x: () => W * 0.05, y: () => H * 0.94, label: 'bl' },
+    { x: () => W * 0.93, y: () => H * 0.93, label: 'br' },
+  ];
+
+  function initSources() {
+    sources.length = 0;
+    corners.forEach((corner, ci) => {
+      const count = ci < 2 ? 2 : 2; // 2 sources per corner = 8 total
+      for (let i = 0; i < count; i++) {
+        sources.push(new GradientSource(corner.x(), corner.y(), ci * 2 + i));
+      }
+    });
+  }
+  initSources();
+
+  // ── Center pulse ─────────────────────────────────────────────────
+  function drawCenterPulse(t) {
+    const cx = W / 2, cy = H / 2;
+    const sec = t * 0.001;
+    const pulsePhase = (sec * 0.05) % (Math.PI * 2);
+    const pulseR = 50 + Math.sin(pulsePhase) * 18 + Math.sin(pulsePhase * 2.3) * 8;
+
+    // Subtle concentric rings
+    for (let r = 0; r < 3; r++) {
+      const ringR = pulseR + r * 55;
+      const ringAlpha = 0.04 - r * 0.012;
+      if (ringAlpha <= 0) continue;
+
+      const grad = ctx.createRadialGradient(cx, cy, ringR * 0.85, cx, cy, ringR * 1.15);
+      grad.addColorStop(0, `rgba(245,208,169,0)`);
+      grad.addColorStop(0.45, `rgba(245,208,169,${ringAlpha})`);
+      grad.addColorStop(0.55, `rgba(245,208,169,${ringAlpha})`);
+      grad.addColorStop(1, `rgba(245,208,169,0)`);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // Central glow dot
+    const dotGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, pulseR * 0.7);
+    const dotAlpha = 0.06 + Math.sin(pulsePhase) * 0.03;
+    dotGrad.addColorStop(0, `rgba(245,208,169,${dotAlpha + 0.04})`);
+    dotGrad.addColorStop(0.5, `rgba(245,208,169,${dotAlpha * 0.4})`);
+    dotGrad.addColorStop(1, 'rgba(245,208,169,0)');
+    ctx.fillStyle = dotGrad;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // ── Corner vignette ──────────────────────────────────────────────
+  function drawVignette() {
+    // Faint radial vignette centered on each corner to emphasize composition
+    const alpha = 0.25;
+    corners.forEach(corner => {
+      const grad = ctx.createRadialGradient(corner.x(), corner.y(), 0, corner.x(), corner.y(), Math.max(W, H) * 0.6);
+      grad.addColorStop(0, `rgba(8,4,2,0)`);
+      grad.addColorStop(0.5, `rgba(8,4,2,${alpha * 0.3})`);
+      grad.addColorStop(1, `rgba(8,4,2,${alpha})`);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+    });
+  }
+
+  // ── Noise displacement post-process ──────────────────────────────
+  function applyNoiseDisplacement(t) {
+    const sec = t * 0.001;
+    const imageData = ctx.getImageData(0, 0, W, H);
+    const data = imageData.data;
+    const displacement = new Uint8ClampedArray(data.length);
+
+    // Only displace every 3rd pixel for performance, bilinearly sample
+    const step = 3;
+    const strength = 1.5;
+
+    for (let py = 0; py < H; py += step) {
+      for (let px = 0; px < W; px += step) {
+        const n = fbm(px * 0.008 + sec * 0.02, py * 0.008 + sec * 0.018, sec * 0.01) * strength;
+        const angle = fbm(px * 0.005 + sec * 0.015, py * 0.005 + sec * 0.022, 100) * Math.PI * 2;
+        const dx = Math.cos(angle) * n;
+        const dy = Math.sin(angle) * n;
+
+        const sx = Math.max(0, Math.min(W - 1, Math.round(px + dx)));
+        const sy = Math.max(0, Math.min(H - 1, Math.round(py + dy)));
+
+        const srcIdx = (sy * W + sx) * 4;
+        const dstIdx = (py * W + px) * 4;
+        for (let c = 0; c < 4; c++) {
+          displacement[dstIdx + c] = data[srcIdx + c];
+        }
+      }
+    }
+
+    // Fill in skipped pixels with nearest displacement
+    for (let py = 0; py < H; py++) {
+      for (let px = 0; px < W; px++) {
+        const idx = (py * W + px) * 4;
+        if (displacement[idx] === 0 && displacement[idx + 1] === 0 && displacement[idx + 2] === 0 && displacement[idx + 3] === 0) {
+          // Sample from nearest displaced pixel
+          const nx = Math.round(px / step) * step;
+          const ny = Math.round(py / step) * step;
+          const srcIdx = Math.min(H - 1, Math.max(0, ny)) * W + Math.min(W - 1, Math.max(0, nx));
+          for (let c = 0; c < 4; c++) {
+            displacement[idx + c] = data[srcIdx * 4 + c];
+          }
+        }
+      }
+    }
+
+    ctx.putImageData(new ImageData(displacement, W, H), 0, 0);
+  }
+
+  // ── Text overlay system ─────────────────────────────────────────
+  const phrases = [
+    'light that forgets its source',
+    'the boundary between gold and amber',
+    'a halo without a center',
+    'where coral surrenders to burgundy',
+    'the penumbral hour',
+    'warmth without origin',
+    'each gradient a threshold',
+    'between the flame and the glow',
+    'light spilling past its edges',
+    'the space between suns',
+    'a corona without a star',
+    'where color dissolves into color',
+    'the moment before the glow remembers darkness',
+    'at the edge of radiance',
+    'what the light leaves behind',
+  ];
+
+  let phraseIndex = 0;
+  let phraseTimer = 0;
+  const phraseInterval = 14; // seconds
+
+  function updateText(t) {
+    const sec = t * 0.001;
+    if (sec - phraseTimer > phraseInterval) {
+      phraseIndex = (phraseIndex + 1) % phrases.length;
+      phraseTimer = sec;
+      textOverlay.textContent = phrases[phraseIndex];
+      textOverlay.style.opacity = '0.7';
+      setTimeout(() => { textOverlay.style.opacity = '0'; }, 7000);
+    }
+  }
+
+  // ── Mouse / touch ────────────────────────────────────────────────
+  canvas.addEventListener('mousemove', e => {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+    mouseActive = true;
+  });
+  canvas.addEventListener('mouseleave', () => { mouseActive = false; });
+  canvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    mouseX = e.touches[0].clientX;
+    mouseY = e.touches[0].clientY;
+    mouseActive = true;
+  }, { passive: false });
+  canvas.addEventListener('touchend', () => { mouseActive = false; });
+
+  // ── Title fade ───────────────────────────────────────────────────
+  setTimeout(() => { titleOverlay.style.opacity = '0.85'; }, 600);
+  setTimeout(() => { titleOverlay.style.opacity = '0'; }, 5000);
+
+  // ── Animation loop ───────────────────────────────────────────────
+  let lastT = 0;
+  function animate(ts) {
+    requestAnimationFrame(animate);
+    time = ts;
+    const dt = ts - lastT;
+    lastT = ts;
+
+    // If mouse inactive for a while, decay toward corner
+    if (!mouseActive) {
+      mouseX = -1000;
+      mouseY = -1000;
+    }
+
+    // Update all sources
+    sources.forEach(s => s.update(ts, mouseX, mouseY));
+
+    // Clear
+    ctx.fillStyle = '#080402';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw all gradient sources with additive blending
+    ctx.globalCompositeOperation = 'lighter';
+    sources.forEach(s => s.draw(ctx));
+    ctx.globalCompositeOperation = 'source-over';
+
+    // Draw center pulse
+    drawCenterPulse(ts);
+
+    // Draw corner vignette
+    drawVignette();
+
+    // Apply subtle noise displacement
+    applyNoiseDisplacement(ts);
+
+    // Update text
+    updateText(ts);
+  }
+
+  requestAnimationFrame(animate);
+
+  // ── Handle resize: reposition corners ───────────────────────────
+  window.addEventListener('resize', () => {
+    resize();
+    sources.forEach((s, i) => {
+      const ci = Math.floor(i / 2);
+      s.cornerX = corners[ci].x();
+      s.cornerY = corners[ci].y();
+      s.x = s.cornerX;
+      s.y = s.cornerY;
+    });
+  });
+
+})();
+</script>
+</body>
+</html>
