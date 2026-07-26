@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scry</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #020209;
+    overflow: hidden;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    cursor: crosshair;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  canvas { display: block; }
+  #poem {
+    position: fixed;
+    bottom: 32px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(180, 170, 220, 0.55);
+    font-size: 14px;
+    letter-spacing: 0.06em;
+    text-align: center;
+    pointer-events: none;
+    transition: opacity 2s ease;
+    z-index: 10;
+    max-width: 80vw;
+    line-height: 1.5;
+  }
+  #title-overlay {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: rgba(200, 190, 240, 0.9);
+    font-size: 48px;
+    letter-spacing: 0.12em;
+    pointer-events: none;
+    transition: opacity 1.2s ease;
+    z-index: 10;
+    text-shadow: 0 0 40px rgba(140, 120, 220, 0.5);
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="title-overlay">Scry</div>
+<div id="poem"></div>
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const poemEl = document.getElementById('poem');
+  const titleEl = document.getElementById('title-overlay');
+
+  let W, H;
+  const PIXEL_RATIO = Math.min(window.devicePixelRatio || 1, 2);
+
+  function resize() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W * PIXEL_RATIO;
+    canvas.height = H * PIXEL_RATIO;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(PIXEL_RATIO, 0, 0, PIXEL_RATIO, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---- WORDS ----
+  const words = [
+    'threshold', 'becoming',  'dissolve',   'between',
+    'liminal',   'passage',   'edge',       'verge',
+    'membrane',  'cleave',    'seam',       'halation',
+    'phosphor',  'filigree',  'meristem',   'interstice',
+    'crepuscule','littoral',  'anfract',    'sinter',
+    'plume',     'kindle',    'murmur',     'cusp',
+    'palimpsest','molt',      'strike',     'descant',
+    'hesitate',  'layover',   'attune',     'flux',
+    'scry'
+  ];
+
+  const poems = [
+    'ink that dreams of being read',
+    'the word flickers on the threshold of form',
+    'between the particle and the letter: a held breath',
+    'language disperses the moment it arrives',
+    'every glyph is a temporary armistice with noise',
+    'you are reading what has not yet fully become',
+    'the ink knows it will scatter — it forms anyway',
+    'meaning is a brief coherence in a field of drift',
+    'hold your gaze: the letters are trying to remember',
+    'what is legible for one moment dissolves the next',
+    'the message arrives only when you stop looking for it',
+    'each word crosses from cloud to shape and back',
+    'form is a rumor the particles tell each other',
+    'between diffusion and definition: this',
+    'the scry shows only what is already fading'
+  ];
+
+  // ---- PARTICLES ----
+  const PARTICLE_COUNT = 380;
+  const particles = [];
+  const GLYPH_CELL = 6; // sampling resolution for font rasters
+
+  // Offscreen canvas for glyph sampling
+  const offC = document.createElement('canvas');
+  const offCtx = offC.getContext('2d');
+  offC.width = 800;
+  offC.height = 200;
+
+  // Ink glow canvas for stamping
+  const glowC = document.createElement('canvas');
+  const glowCtx = glowC.getContext('2d');
+  const GLOW_SIZE = 14;
+  glowC.width = GLOW_SIZE * 2;
+  glowC.height = GLOW_SIZE * 2;
+  {
+    const grad = glowCtx.createRadialGradient(GLOW_SIZE, GLOW_SIZE, 0, GLOW_SIZE, GLOW_SIZE, GLOW_SIZE);
+    grad.addColorStop(0, 'rgba(230, 220, 255, 1.0)');
+    grad.addColorStop(0.15, 'rgba(190, 170, 240, 0.9)');
+    grad.addColorStop(0.35, 'rgba(130, 100, 210, 0.55)');
+    grad.addColorStop(0.6, 'rgba(70, 45, 140, 0.18)');
+    grad.addColorStop(0.85, 'rgba(20, 10, 60, 0.04)');
+    grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    glowCtx.fillStyle = grad;
+    glowCtx.fillRect(0, 0, GLOW_SIZE * 2, GLOW_SIZE * 2);
+  }
+
+  // ---- CYCLE STATE ----
+  let wordIndex = 0;
+  let phaseTime = 0;
+  const INITIAL_FORM_WINDOW = 4200;    // ms to form & hold
+  const INITIAL_SCATTER_WINDOW = 2800; // ms to scatter
+  const MIN_FORM_WINDOW = 1800;
+  const MAX_SCATTER_WINDOW = 5200;
+  let formDuration = INITIAL_FORM_WINDOW;
+  let scatterDuration = INITIAL_SCATTER_WINDOW;
+  let urgency = 0; // ramps from 0→1 over the session
+  let inFormPhase = true; // true = coalescing, false = scattering
+  let transitionProgress = 0; // 0→1 within current phase
+
+  let targetPositions = []; // [{x, y}] glyph positions for current word
+  let wordWidth = 0;
+  let wordHeight = 0;
+  let wordOffsetX = 0;
+  let wordOffsetY = 0;
+
+  // ---- MOUSE ----
+  let mx = W / 2, my = H / 2;
+  let mouseActive = false;
+  let mouseStrength = 0;
+
+  // ---- STARS ----
+  const stars = [];
+  for (let i = 0; i < 100; i++) {
+    stars.push({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      r: Math.random() * 1.2 + 0.3,
+      twinkle: Math.random() * Math.PI * 2,
+      speed: 0.003 + Math.random() * 0.012,
+      alpha: 0.2 + Math.random() * 0.6
+    });
+  }
+
+  // ---- SIMPLEX-LIKE NOISE ----
+  const perm = new Uint8Array(512);
+  const grad3 = [
+    [1,1,0],[-1,1,0],[1,-1,0],[-1,-1,0],
+    [1,0,1],[-1,0,1],[1,0,-1],[-1,0,-1],
+    [0,1,1],[0,-1,1],[0,1,-1],[0,-1,-1]
+  ];
+  for (let i = 0; i < 256; i++) perm[i] = i;
+  for (let i = 255; i > 0; i--) {
+    const j = (Math.random() * (i + 1)) | 0;
+    [perm[i], perm[j]] = [perm[j], perm[i]];
+  }
+  for (let i = 0; i < 256; i++) perm[i + 256] = perm[i];
+
+  function dot3(g, x, y, z) { return g[0] * x + g[1] * y + g[2] * z; }
+  function noise3D(x, y, z) {
+    let X = Math.floor(x) & 255, Y = Math.floor(y) & 255, Z = Math.floor(z) & 255;
+    x -= Math.floor(x); y -= Math.floor(y); z -= Math.floor(z);
+    const u = x * x * (3 - 2 * x), v = y * y * (3 - 2 * y), w = z * z * (3 - 2 * z);
+    const p = perm;
+    const A = p[X] + Y, AA = p[A] + Z, AB = p[A + 1] + Z;
+    const B = p[X + 1] + Y, BA = p[B] + Z, BB = p[B + 1] + Z;
+    return (1 - u) * (1 - v) * (1 - w) * dot3(grad3[p[AA] % 12], x, y, z) +
+           (1 - u) * (1 - v) * w       * dot3(grad3[p[BA] % 12], x, y, z - 1) +
+           (1 - u) * v       * (1 - w) * dot3(grad3[p[AB] % 12], x, y - 1, z) +
+           (1 - u) * v       * w       * dot3(grad3[p[BB] % 12], x, y - 1, z - 1) +
+           u       * (1 - v) * (1 - w) * dot3(grad3[p[AA + 1] % 12], x - 1, y, z) +
+           u       * (1 - v) * w       * dot3(grad3[p[BA + 1] % 12], x - 1, y, z - 1) +
+           u       * v       * (1 - w) * dot3(grad3[p[AB + 1] % 12], x - 1, y - 1, z) +
+           u       * v       * w       * dot3(grad3[p[BB + 1] % 12], x - 1, y - 1, z - 1);
+  }
+
+  function fbm(x, y, t) {
+    let v = 0, amp = 0.5, freq = 1;
+    for (let i = 0; i < 4; i++) {
+      v += amp * noise3D(x * freq, y * freq, t * 0.3 * freq);
+      amp *= 0.5;
+      freq *= 2.1;
+    }
+    return v;
+  }
+
+  // ---- SAMPLE GLYPHS ----
+  function sampleWord(word) {
+    const fontSize = Math.min(84, Math.max(48, (W * 0.7) / word.length));
+    offCtx.clearRect(0, 0, offC.width, offC.height);
+    offCtx.fillStyle = '#ffffff';
+    offCtx.font = `bold ${fontSize}px Georgia, "Times New Roman", serif`;
+    offCtx.textAlign = 'center';
+    offCtx.textBaseline = 'middle';
+    offCtx.fillText(word, offC.width / 2, offC.height / 2);
+
+    const metrics = offCtx.measureText(word);
+    wordWidth = metrics.width;
+    wordHeight = fontSize * 1.2;
+
+    const imgData = offCtx.getImageData(0, 0, offC.width, offC.height);
+    const samples = [];
+    const cx = offC.width / 2;
+    const cy = offC.height / 2;
+    const sx = cx - wordWidth / 2;
+    const sy = cy - wordHeight / 2;
+
+    for (let y = sy; y < sy + wordHeight; y += GLYPH_CELL) {
+      for (let x = sx; x < sx + wordWidth; x += GLYPH_CELL) {
+        if (x < 0 || x >= offC.width || y < 0 || y >= offC.height) continue;
+        const idx = (Math.floor(y) * offC.width + Math.floor(x)) * 4;
+        if (imgData.data[idx + 3] > 80) {
+          samples.push({
+            x: (x - cx) * PIXEL_RATIO * 0.8,  // scale to canvas space
+            y: (y - cy) * PIXEL_RATIO * 0.8
+          });
+        }
+      }
+    }
+
+    wordOffsetX = W / 2;
+    wordOffsetY = H / 2;
+
+    return samples;
+  }
+
+  // ---- INIT PARTICLES ----
+  function initParticles() {
+    particles.length = 0;
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      particles.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        vx: 0,
+        vy: 0,
+        targetX: 0,
+        targetY: 0,
+        hasTarget: false,
+        life: Math.random(),
+        hueShift: Math.random() * 0.4  // individual color variation
+      });
+    }
+  }
+
+  function assignTargets() {
+    const available = [...targetPositions];
+    // Shuffle
+    for (let i = available.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [available[i], available[j]] = [available[j], available[i]];
+    }
+
+    const used = Math.min(PARTICLE_COUNT, available.length);
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      if (i < used) {
+        particles[i].targetX = available[i].x + wordOffsetX;
+        particles[i].targetY = available[i].y + wordOffsetY;
+        particles[i].hasTarget = true;
+      } else {
+        // extra particles orbit the word perimeter
+        const angle = (i - used) / (PARTICLE_COUNT - used) * Math.PI * 2 + performance.now() * 0.0003;
+        const radius = Math.max(wordWidth, wordHeight) * 0.6 + Math.sin(i * 0.7) * 40;
+        particles[i].targetX = wordOffsetX + Math.cos(angle) * radius;
+        particles[i].targetY = wordOffsetY + Math.sin(angle) * radius * 0.5;
+        particles[i].hasTarget = true;
+      }
+    }
+  }
+
+  function scatterParticles() {
+    // Each particle gets a drift destination using noise
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      const angle = noise3D(i * 0.031, 0, performance.now() * 0.0002) * Math.PI * 2;
+      const dist = 180 + noise3D(i * 0.047, 1, performance.now() * 0.00015) * 300;
+      particles[i].targetX = W / 2 + Math.cos(angle) * dist;
+      particles[i].targetY = H / 2 + Math.sin(angle) * dist * 0.65;
+      particles[i].hasTarget = true;
+    }
+  }
+
+  // ---- TRANSITION ----
+  function startWord() {
+    wordIndex = (wordIndex + 1) % words.length;
+    const word = words[wordIndex];
+    targetPositions = sampleWord(word);
+    assignTargets();
+    inFormPhase = true;
+    phaseTime = 0;
+    transitionProgress = 0;
+  }
+
+  function startScatter() {
+    scatterParticles();
+    inFormPhase = false;
+    phaseTime = 0;
+    transitionProgress = 0;
+    updatePoem();
+  }
+
+  function updatePoem() {
+    const poem = poems[Math.floor(Math.random() * poems.length)];
+    poemEl.textContent = poem;
+    poemEl.style.opacity = '0.55';
+    setTimeout(() => { poemEl.style.opacity = '0.18'; }, formDuration * 0.7);
+  }
+
+  // ---- COLOR PALETTE (dark-cosmic) ----
+  function particleColor(hueShift, brightness) {
+    // Map from deep indigo to lavender-white
+    const baseH = 0.73 + hueShift * 0.08; // violet range
+    const s = 0.4 + brightness * 0.5;
+    const l = 0.12 + brightness * 0.78;
+    return `hsl(${baseH * 360}, ${s * 100}%, ${l * 100}%)`;
+  }
+
+  // ---- RENDER ----
+  function render(timestamp) {
+    const dt = Math.min(50, timestamp - (render.lastTime || timestamp));
+    render.lastTime = timestamp;
+    const dtSec = dt / 1000;
+
+    // Update urgency
+    urgency = Math.min(1, urgency + dtSec * 0.008);
+    formDuration = INITIAL_FORM_WINDOW - urgency * (INITIAL_FORM_WINDOW - MIN_FORM_WINDOW);
+    scatterDuration = INITIAL_SCATTER_WINDOW + urgency * (MAX_SCATTER_WINDOW - INITIAL_SCATTER_WINDOW);
+
+    // Phase transition
+    phaseTime += dt;
+    if (inFormPhase && phaseTime > formDuration) {
+      startScatter();
+    } else if (!inFormPhase && phaseTime > scatterDuration) {
+      startWord();
+      updatePoem();
+    }
+    transitionProgress = inFormPhase
+      ? Math.min(1, phaseTime / formDuration)
+      : Math.min(1, phaseTime / scatterDuration);
+
+    // Mouse influence
+    const targetMouseStrength = mouseActive ? Math.min(1, mouseStrength + dtSec * 3) : Math.max(0, mouseStrength - dtSec * 1.5);
+    mouseStrength = targetMouseStrength;
+
+    // ---- UPDATE PARTICLES ----
+    const springK = 0.018 + urgency * 0.025;          // spring stiffness (increases with urgency)
+    const damping = 0.91 - urgency * 0.04;             // less damping = more jittery
+    const brownianStrength = 0.6 + urgency * 1.8;      // stronger diffusion when not forming
+    const mouseInfluenceRadius = 180;
+    const mouseRepelForce = 2.5;
+
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      const p = particles[i];
+      const noiseTime = timestamp * 0.0008 + i * 0.013;
+      const nx = (noise3D(p.x * 0.008, p.y * 0.008, noiseTime) - 0.5) * 2;
+      const ny = (noise3D(p.x * 0.008 + 100, p.y * 0.008 + 100, noiseTime) - 0.5) * 2;
+
+      if (p.hasTarget) {
+        const dx = p.targetX - p.x;
+        const dy = p.targetY - p.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (inFormPhase) {
+          // Strong spring toward glyph position
+          p.vx += dx * springK;
+          p.vy += dy * springK;
+
+          // Add subtle wobble based on urgency
+          if (dist < 40) {
+            p.vx += nx * brownianStrength * 0.3 * urgency;
+            p.vy += ny * brownianStrength * 0.3 * urgency;
+          }
+        } else {
+          // Gentler pull toward scatter destinations + brownian drift
+          p.vx += dx * springK * 0.35;
+          p.vy += dy * springK * 0.35;
+          p.vx += nx * brownianStrength;
+          p.vy += ny * brownianStrength;
+        }
+      }
+
+      // Damping
+      p.vx *= damping;
+      p.vy *= damping;
+
+      // Mouse repel — cursor scatters ink
+      const mdx = p.x - mx;
+      const mdy = p.y - my;
+      const mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+      if (mdist < mouseInfluenceRadius && mdist > 1) {
+        const force = mouseRepelForce * mouseStrength * (1 - mdist / mouseInfluenceRadius);
+        p.vx += (mdx / mdist) * force;
+        p.vy += (mdy / mdist) * force;
+        // Also weaken spring when mouse is near
+        if (inFormPhase && mdist < 80) {
+          p.vx += nx * 1.5;
+          p.vy += ny * 1.5;
+        }
+      }
+
+      // Integrate
+      p.x += p.vx;
+      p.y += p.vy;
+
+      // Soft boundary
+      const margin = 40;
+      if (p.x < margin) { p.vx += 0.4; p.x = margin; }
+      if (p.x > W - margin) { p.vx -= 0.4; p.x = W - margin; }
+      if (p.y < margin) { p.vy += 0.4; p.y = margin; }
+      if (p.y > H - margin) { p.vy -= 0.4; p.y = H - margin; }
+
+      // Life for color variation
+      p.life += dtSec * (0.04 + urgency * 0.06);
+      if (p.life > 1) p.life -= 1;
+    }
+
+    // ---- RENDER ----
+    // Fade trail
+    ctx.fillStyle = 'rgba(2, 2, 9, 0.22)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Stars
+    for (const s of stars) {
+      s.twinkle += s.speed * dtSec * 60;
+      const alpha = s.alpha * (0.5 + 0.5 * Math.sin(s.twinkle));
+      ctx.fillStyle = `rgba(200, 190, 230, ${alpha})`;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Center pulse (intensifies during form phase)
+    if (inFormPhase) {
+      const pulseAlpha = (1 - transitionProgress) * 0.06 + Math.sin(timestamp * 0.002) * 0.02;
+      const pulseR = 15 + Math.sin(timestamp * 0.003) * 8 + urgency * 40;
+      const pGrad = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, pulseR);
+      pGrad.addColorStop(0, `rgba(180, 160, 240, ${pulseAlpha * 1.5})`);
+      pGrad.addColorStop(1, 'rgba(180, 160, 240, 0)');
+      ctx.fillStyle = pGrad;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // Urgency indicator — subtle vignette pulse at edge
+    if (urgency > 0.3 && !inFormPhase) {
+      const vAlpha = urgency * 0.05;
+      const vGrad = ctx.createRadialGradient(W / 2, H / 2, W * 0.35, W / 2, H / 2, W * 0.72);
+      vGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+      vGrad.addColorStop(1, `rgba(100, 30, 180, ${vAlpha})`);
+      ctx.fillStyle = vGrad;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // Draw particles with backlit-ink glow
+    for (const p of particles) {
+      let brightness;
+      if (inFormPhase) {
+        // Brightness peaks in mid-formation
+        const formPeak = transitionProgress < 0.5
+          ? transitionProgress * 2
+          : 2 - transitionProgress * 2;
+        brightness = 0.35 + formPeak * 0.55;
+      } else {
+        // Fading during scatter
+        brightness = Math.max(0.08, 0.4 * (1 - transitionProgress));
+      }
+
+      // Mouse proximity dims (repel effect)
+      const mdx = p.x - mx;
+      const mdy = p.y - my;
+      const mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+      if (mdist < 100 && mouseStrength > 0.1) {
+        brightness *= 1 - (1 - mdist / 100) * mouseStrength * 0.4;
+      }
+
+      const color = particleColor(p.hueShift + p.life * 0.15, brightness);
+      ctx.fillStyle = color;
+      ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
+
+      // Stamp glow for high-brightness particles
+      if (brightness > 0.5) {
+        const glowAlpha = (brightness - 0.5) * 1.8;
+        ctx.globalAlpha = glowAlpha * 0.7;
+        ctx.drawImage(
+          glowC,
+          p.x - GLOW_SIZE, p.y - GLOW_SIZE,
+          GLOW_SIZE * 2, GLOW_SIZE * 2
+        );
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    // Word title overlay during form phase
+    if (inFormPhase) {
+      const titleAlpha = transitionProgress < 0.15
+        ? transitionProgress / 0.15 * 0.7
+        : (1 - Math.max(0, (transitionProgress - 0.85) / 0.15)) * 0.7;
+      if (titleAlpha > 0.01) {
+        ctx.fillStyle = `rgba(210, 200, 240, ${titleAlpha})`;
+        ctx.font = `bold ${Math.min(48, Math.max(28, W * 0.06))}px Georgia, "Times New Roman", serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(words[wordIndex], W / 2, H / 2);
+        // Subtle glow under text
+        ctx.shadowColor = 'rgba(160, 130, 230, 0.4)';
+        ctx.shadowBlur = 30;
+        ctx.fillText(words[wordIndex], W / 2, H / 2);
+        ctx.shadowBlur = 0;
+      }
+    }
+
+    // ---- FADE TITLE OVERLAY ----
+    if (timestamp < 5000) {
+      titleEl.style.opacity = timestamp < 800 ? '0' :
+        timestamp < 1800 ? ((timestamp - 800) / 1000) :
+        timestamp < 4200 ? '1' :
+        Math.max(0, 1 - (timestamp - 4200) / 800);
+    } else {
+      titleEl.style.opacity = '0';
+    }
+
+    requestAnimationFrame(render);
+  }
+  render.lastTime = 0;
+
+  // ---- EVENT LISTENERS ----
+  canvas.addEventListener('mousemove', e => {
+    mx = e.clientX;
+    my = e.clientY;
+    mouseActive = true;
+  });
+  canvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    mx = e.touches[0].clientX;
+    my = e.touches[0].clientY;
+    mouseActive = true;
+  }, { passive: false });
+  canvas.addEventListener('mouseleave', () => { mouseActive = false; });
+  canvas.addEventListener('mouseenter', e => {
+    mx = e.clientX;
+    my = e.clientY;
+    mouseActive = true;
+  });
+  canvas.addEventListener('click', () => {
+    // Click advances to next word immediately
+    if (inFormPhase) {
+      phaseTime = formDuration; // trigger scatter
+    } else {
+      startWord();
+      updatePoem();
+    }
+  });
+
+  // ---- INITIALIZE ----
+  initParticles();
+  targetPositions = sampleWord(words[0]);
+  assignTargets();
+  inFormPhase = true;
+  phaseTime = 0;
+  transitionProgress = 0;
+  updatePoem();
+
+  // Start fade-in for title
+  titleEl.style.opacity = '0';
+  setTimeout(() => { titleEl.style.opacity = '1'; }, 400);
+
+  requestAnimationFrame(render);
+})();
+</script>
+</body>
+</html>
