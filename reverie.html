@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reverie</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { 
+    background: #161310; 
+    overflow: hidden; 
+    cursor: none;
+    font-family: Georgia, 'Times New Roman', serif;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  canvas { display: block; position: fixed; top: 0; left: 0; }
+  #phrase {
+    position: fixed;
+    bottom: 52px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #c4a882;
+    font-size: 16px;
+    letter-spacing: 0.06em;
+    opacity: 0;
+    transition: opacity 2.4s ease;
+    pointer-events: none;
+    text-align: center;
+    max-width: 82vw;
+    text-shadow: 0 0 28px rgba(168, 148, 124, 0.25);
+    z-index: 2;
+  }
+  #title-el {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #d4c0a0;
+    font-size: 34px;
+    letter-spacing: 0.18em;
+    opacity: 0;
+    transition: opacity 2.8s ease;
+    pointer-events: none;
+    text-shadow: 0 0 48px rgba(180, 148, 116, 0.35), 0 0 120px rgba(160, 128, 96, 0.12);
+    z-index: 10;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="title-el">Reverie</div>
+<div id="phrase"></div>
+<script>
+(function() {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const titleEl = document.getElementById('title-el');
+  const phraseEl = document.getElementById('phrase');
+
+  // ── Offscreen ping-pong buffers for recursive feedback ──
+  let bufA, bufB;
+  let ctxA, ctxB;
+  let currentCtx, previousCtx;
+  let currentBuf, previousBuf;
+
+  // ── Dimensions ──
+  let W, H;
+
+  // ── Mouse ──
+  let mx = 0, my = 0;
+  let mousePresent = false;
+  let mouseSmoothX = 0, mouseSmoothY = 0;
+
+  // ── Time ──
+  let t = 0;
+  let frameCount = 0;
+
+  // ── Palette: muted-nature ──
+  const PALETTE = [
+    { name:'sage',      base:[122,140,110], light:[164,184,152], dark:[68,88,58],   glow:[182,200,168] },
+    { name:'dusty-rose',base:[184,149,138], light:[212,184,170], dark:[130,88,76],   glow:[210,178,164] },
+    { name:'slate',     base:[122,131,138], light:[164,173,170], dark:[68,78,86],    glow:[168,178,172] },
+    { name:'stone',     base:[168,152,128], light:[212,200,176], dark:[114,98,78],   glow:[200,186,162] },
+    { name:'lichen',    base:[148,156,122], light:[186,194,160], dark:[94,102,72],   glow:[194,202,168] },
+  ];
+
+  // ── Hash-based smooth noise (no external deps) ──
+  const perm = new Uint8Array(512);
+  function seedPerm(s) {
+    for (let i = 0; i < 256; i++) perm[i] = i;
+    for (let i = 255; i > 0; i--) {
+      const j = ((s * 16807 + i * 48271 + (s>>4) * 32416190071) >>> 0) % (i + 1);
+      [perm[i], perm[j]] = [perm[j], perm[i]];
+    }
+    for (let i = 0; i < 256; i++) perm[i + 256] = perm[i];
+  }
+  seedPerm(137);
+
+  function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); } // quintic smoothstep
+  function lerp(a,b,t) { return a + (b - a) * t; }
+
+  function noise2D(x, y) {
+    const xi = Math.floor(x) & 255, yi = Math.floor(y) & 255;
+    const xf = x - Math.floor(x), yf = y - Math.floor(y);
+    const u = fade(xf), v = fade(yf);
+    const a = perm[perm[xi] + yi], b = perm[perm[xi + 1] + yi];
+    const c = perm[perm[xi] + yi + 1], d = perm[perm[xi + 1] + yi + 1];
+    return lerp(lerp(a, b, u), lerp(c, d, u), v) / 255;
+  }
+
+  function fbm(x, y, oct) {
+    let val = 0, amp = 1, freq = 1, mx = 0;
+    for (let i = 0; i < oct; i++) {
+      val += noise2D(x * freq, y * freq) * amp;
+      mx += amp; amp *= 0.5; freq *= 2.1;
+    }
+    return val / mx;
+  }
+
+  // ── Seed particle ──
+  class Bloom {
+    constructor(x, y, palette) {
+      this.x = x;
+      this.y = y;
+      this.palette = palette || PALETTE[Math.floor(Math.random() * PALETTE.length)];
+      this.radius = 5 + Math.random() * 20;
+      this.vx = (Math.random() - 0.5) * 0.5;
+      this.vy = (Math.random() - 0.5) * 0.5 - 0.25; // gentle rise
+      this.life = 1;
+      this.decayRate = 0.0025 + Math.random() * 0.0055;
+      this.phase = Math.random() * Math.PI * 2;
+      this.phaseSpeed = 0.008 + Math.random() * 0.025;
+      this.asymmetry = 1 + (Math.random() - 0.5) * 0.25; // slightly oblong
+    }
+
+    update() {
+      // Noise-driven drift
+      const n = noise2D(this.x * 0.0035, this.y * 0.0035 + t * 0.018);
+      this.vx += (n - 0.5) * 0.07;
+      this.vy += (noise2D(this.x * 0.0035 + 200, this.y * 0.0035 + t * 0.018) - 0.5) * 0.07;
+      this.vx *= 0.985;
+      this.vy *= 0.985;
+      this.x += this.vx;
+      this.y += this.vy;
+
+      // Soft boundary containment
+      const m = 4;
+      if (this.x < m) this.x = m;
+      if (this.x > W - m) this.x = W - m;
+      if (this.y < m) this.y = m;
+      if (this.y > H - m) this.y = H - m;
+
+      this.life -= this.decayRate;
+      this.phase += this.phaseSpeed;
+      const pulse = 1 + Math.sin(this.phase) * 0.14;
+      this.r = this.radius * pulse * Math.pow(this.life, 0.4);
+    }
+
+    alive() { return this.life > 0.008 && this.r > 0.3; }
+  }
+
+  const blooms = [];
+  const MAX_BLOOMS = 300;
+
+  // ── Spawn helpers ──
+  function spawnBloom(x, y, palette) {
+    if (blooms.length >= MAX_BLOOMS) blooms.shift();
+    blooms.push(new Bloom(x, y, palette));
+  }
+
+  function spawnCluster(cx, cy, count, palette) {
+    const p = palette || PALETTE[Math.floor(Math.random() * PALETTE.length)];
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = Math.random() * 45;
+      spawnBloom(cx + Math.cos(angle) * dist, cy + Math.sin(angle) * dist, p);
+    }
+  }
+
+  // ── Draw a bloom onto a context ──
+  function drawBloom(ctx, b) {
+    if (b.r < 0.3) return;
+    const r = b.r, x = b.x, y = b.y;
+    const p = b.palette;
+    const a = Math.min(1, b.life * 1.6);
+
+    // Wide outer halo
+    const halo = ctx.createRadialGradient(x, y, r * 0.15, x, y, r * 1.5);
+    halo.addColorStop(0, `rgba(${p.glow[0]},${p.glow[1]},${p.glow[2]},${a * 0.45})`);
+    halo.addColorStop(0.45, `rgba(${p.light[0]},${p.light[1]},${p.light[2]},${a * 0.22})`);
+    halo.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(x, y, r * 1.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Mid glow
+    const mid = ctx.createRadialGradient(x, y, r * 0.08, x, y, r * 0.8);
+    mid.addColorStop(0, `rgba(${p.light[0]},${p.light[1]},${p.light[2]},${a * 0.55})`);
+    mid.addColorStop(0.5, `rgba(${p.base[0]},${p.base[1]},${p.base[2]},${a * 0.3})`);
+    mid.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = mid;
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Bright core
+    const core = ctx.createRadialGradient(x, y, 0, x, y, r * 0.3);
+    core.addColorStop(0, `rgba(232,226,212,${a * 0.85})`);
+    core.addColorStop(0.4, `rgba(${p.glow[0]},${p.glow[1]},${p.glow[2]},${a * 0.45})`);
+    core.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = core;
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // ── Poetic phrases ──
+  const phrases = [
+    "the echo remembers what the source forgets",
+    "each fading ring a softer version of the truth",
+    "what lingers is not the image but its ghost",
+    "the space between arrival and vanishing",
+    "afterimage: the eye's refusal to let go",
+    "memory is just light that hasn't finished leaving",
+    "every shape dissolves toward its own absence",
+    "the threshold where presence becomes trace",
+    "what remains when the signal fades to breath",
+    "a bloom that exists only in its own decay",
+    "the afterword of light",
+    "reverberation of a moment already gone",
+    "fading is not forgetting — it is becoming echo",
+    "between the strike and the silence",
+    "each ghost a step further from the source",
+  ];
+
+  let phraseIdx = 0;
+  let phraseAlpha = 0;
+  let phraseTargetAlpha = 0;
+  let phraseTimer = 0;
+  const PHRASE_DURATION = 15; // seconds display
+  const PHRASE_FADE = 3;       // seconds crossfade
+
+  // ── Bloom events ──
+  let bloomEventCooldown = 0;
+  const BLOOM_MIN_INTERVAL = 8;  // seconds
+  const BLOOM_MAX_INTERVAL = 22;
+
+  function triggerBloomEvent() {
+    const cx = W * 0.25 + Math.random() * W * 0.5;
+    const cy = H * 0.2 + Math.random() * H * 0.55;
+    const count = 6 + Math.floor(Math.random() * 16);
+    const palette = PALETTE[Math.floor(Math.random() * PALETTE.length)];
+    spawnCluster(cx, cy, count, palette);
+
+    // Sometimes spawn a secondary smaller cluster
+    if (Math.random() < 0.45) {
+      const sx = W * 0.2 + Math.random() * W * 0.6;
+      const sy = H * 0.2 + Math.random() * H * 0.6;
+      spawnCluster(sx, sy, Math.floor(count * 0.4), PALETTE[Math.floor(Math.random() * PALETTE.length)]);
+    }
+
+    bloomEventCooldown = BLOOM_MIN_INTERVAL + Math.random() * (BLOOM_MAX_INTERVAL - BLOOM_MIN_INTERVAL);
+  }
+
+  // ── Resize ──
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Recreate offscreen buffers
+    bufA = document.createElement('canvas');
+    bufB = document.createElement('canvas');
+    bufA.width = bufB.width = W;
+    bufA.height = bufB.height = H;
+    ctxA = bufA.getContext('2d');
+    ctxB = bufB.getContext('2d');
+
+    // Fill with background
+    ctxA.fillStyle = '#161310';
+    ctxA.fillRect(0, 0, W, H);
+    ctxB.fillStyle = '#161310';
+    ctxB.fillRect(0, 0, W, H);
+
+    currentBuf = bufA;
+    previousBuf = bufB;
+    currentCtx = ctxA;
+    previousCtx = ctxB;
+
+    // Clear blooms (they're coordinate-dependent)
+    blooms.length = 0;
+  }
+
+  function swapBuffers() {
+    const tmpBuf = previousBuf, tmpCtx = previousCtx;
+    previousBuf = currentBuf;
+    previousCtx = currentCtx;
+    currentBuf = tmpBuf;
+    currentCtx = tmpCtx;
+  }
+
+  // ── Vignette ──
+  function drawVignette(ctx) {
+    const grad = ctx.createRadialGradient(W/2, H/2, Math.min(W,H) * 0.42, W/2, H/2, Math.max(W,H) * 0.72);
+    grad.addColorStop(0, 'rgba(22,19,16,0)');
+    grad.addColorStop(0.55, 'rgba(22,19,16,0.08)');
+    grad.addColorStop(1, 'rgba(22,19,16,0.55)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // ── Main draw loop ──
+  function draw(ts) {
+    frameCount++;
+
+    // ── Timekeeping ──
+    if (frameCount === 1) {
+      // First frame — skip delta, initialize
+      t += 0.016;
+    } else {
+      const dt = Math.min(0.05, (ts - lastTs) / 1000);
+      t += dt;
+      phraseTimer += dt;
+      bloomEventCooldown -= dt;
+    }
+    lastTs = ts;
+
+    // ── Smooth mouse ──
+    const smoothFactor = 0.06;
+    mouseSmoothX = lerp(mouseSmoothX, mx, smoothFactor);
+    mouseSmoothY = lerp(mouseSmoothY, my, smoothFactor);
+
+    // ── Decay & transform parameters (breathe on a slow cycle) ──
+    const breathe = Math.sin(t * 0.12) * 0.5 + 0.5; // 0→1 over ~52s
+    const baseFade = 0.972 + breathe * 0.012;         // 0.972 → 0.984
+    const baseScale = 0.9978 + breathe * 0.0012;       // 0.9978 → 0.999
+    const baseRotation = 0.00008 + breathe * 0.00012;  // tiny rotation
+    const baseShiftX = 0.12 + breathe * 0.18;          // horizontal drift
+    const baseShiftY = 0.06 + breathe * 0.1;
+
+    // Mouse subtly warps decay and transform
+    let mxNorm = 0, myNorm = 0, mouseDist = 0;
+    if (mousePresent) {
+      mxNorm = mouseSmoothX / W;
+      myNorm = mouseSmoothY / H;
+      mouseDist = Math.sqrt(
+        (mouseSmoothX - W/2) * (mouseSmoothX - W/2) / (W*W) +
+        (mouseSmoothY - H/2) * (mouseSmoothY - H/2) / (H*H)
+      );
+    }
+
+    const mouseFadeMod = mousePresent ? lerp(1, 0.994, mouseDist) : 1;
+    const fadeAmount = baseFade * mouseFadeMod;
+    const mouseRotMod = mousePresent ? 1 + (mxNorm - 0.5) * 0.6 : 1;
+    const rotation = baseRotation * mouseRotMod;
+    const shiftX = baseShiftX + (mousePresent ? (mxNorm - 0.5) * 0.8 : 0);
+    const shiftY = baseShiftY + (mousePresent ? (myNorm - 0.5) * 0.5 : 0);
+
+    // ── Composite previous buffer onto current buffer ──
+    currentCtx.clearRect(0, 0, W, H);
+    currentCtx.save();
+    currentCtx.globalAlpha = fadeAmount;
+    currentCtx.translate(W/2, H/2);
+    currentCtx.rotate(rotation);
+    currentCtx.scale(baseScale, baseScale);
+    currentCtx.translate(-W/2 + shiftX, -H/2 + shiftY);
+    currentCtx.drawImage(previousBuf, 0, 0, W, H);
+    currentCtx.restore();
+
+    // ── Update & draw live blooms ──
+    for (let i = blooms.length - 1; i >= 0; i--) {
+      const b = blooms[i];
+      b.update();
+      if (b.alive()) {
+        drawBloom(currentCtx, b);
+      } else {
+        blooms.splice(i, 1);
+      }
+    }
+
+    // ── Spawn ambient blooms (background seeds) ──
+    const ambientCount = 2 + Math.floor(breathe * 3); // 2-5 per frame
+    for (let i = 0; i < ambientCount; i++) {
+      // Noise-driven placement favoring balanced distribution
+      const nx = fbm(t * 0.04 + i * 31, i * 17, 3);
+      const ny = fbm(t * 0.04 + i * 47 + 50, i * 23, 3);
+      const x = W * 0.15 + nx * W * 0.7;
+      const y = H * 0.1 + ny * H * 0.8;
+      spawnBloom(x, y);
+    }
+
+    // ── Bloom events ──
+    if (bloomEventCooldown <= 0) {
+      triggerBloomEvent();
+    }
+
+    // ── Render to main canvas ──
+    ctx.clearRect(0, 0, W, H);
+    ctx.drawImage(currentBuf, 0, 0, W, H);
+    drawVignette(ctx);
+
+    // ── Phrase cycling ──
+    if (phraseTimer > PHRASE_DURATION - PHRASE_FADE && phraseTimer < PHRASE_DURATION) {
+      phraseTargetAlpha = 0;
+    } else if (phraseTimer >= PHRASE_DURATION) {
+      phraseIdx = (phraseIdx + 1) % phrases.length;
+      phraseTimer = 0;
+      phraseTargetAlpha = 0.85;
+      phraseEl.textContent = phrases[phraseIdx];
+    } else if (phraseTimer < PHRASE_FADE) {
+      phraseTargetAlpha = 0.85;
+    }
+
+    phraseAlpha = lerp(phraseAlpha, phraseTargetAlpha, 0.03);
+    phraseEl.style.opacity = phraseAlpha;
+
+    // ── Title fade ──
+    if (frameCount < 90) {
+      titleEl.style.opacity = Math.min(1, frameCount / 40);
+    } else if (frameCount < 220) {
+      titleEl.style.opacity = Math.max(0, 1 - (frameCount - 90) / 130);
+    } else {
+      titleEl.style.opacity = 0;
+    }
+
+    // ── Swap buffers ──
+    swapBuffers();
+
+    requestAnimationFrame(draw);
+  }
+
+  let lastTs = 0;
+
+  // ── Event listeners ──
+  function onMouseMove(e) {
+    mx = e.clientX;
+    my = e.clientY;
+    mousePresent = true;
+  }
+  function onMouseLeave() { mousePresent = false; }
+  function onMouseEnter(e) {
+    mx = e.clientX;
+    my = e.clientY;
+    mousePresent = true;
+  }
+  function onTouchMove(e) {
+    if (e.touches.length > 0) {
+      mx = e.touches[0].clientX;
+      my = e.touches[0].clientY;
+      mousePresent = true;
+    }
+  }
+  function onTouchEnd() { mousePresent = false; }
+
+  window.addEventListener('mousemove', onMouseMove, { passive: true });
+  window.addEventListener('mouseleave', onMouseLeave);
+  window.addEventListener('mouseenter', onMouseEnter);
+  window.addEventListener('touchmove', onTouchMove, { passive: true });
+  window.addEventListener('touchend', onTouchEnd);
+  window.addEventListener('resize', resize);
+
+  // ── Init ──
+  resize();
+  phraseEl.textContent = phrases[0];
+  phraseTargetAlpha = 0.85;
+
+  // Seed initial blooms for a warm start
+  for (let i = 0; i < 30; i++) {
+    const x = W * 0.15 + Math.random() * W * 0.7;
+    const y = H * 0.1 + Math.random() * H * 0.8;
+    spawnBloom(x, y);
+  }
+  triggerBloomEvent();
+
+  // ── Go ──
+  lastTs = performance.now();
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>
