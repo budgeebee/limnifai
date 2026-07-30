@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tremor</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0f0b14;
+    overflow: hidden;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    cursor: crosshair;
+    user-select: none;
+    -webkit-user-select: none;
+    height: 100vh;
+    width: 100vw;
+  }
+  canvas { display: block; }
+  #phrase {
+    position: fixed;
+    bottom: 48px;
+    width: 100%;
+    text-align: center;
+    color: rgba(232, 210, 230, 0.72);
+    font-size: 15px;
+    letter-spacing: 0.06em;
+    pointer-events: none;
+    transition: opacity 1.8s ease;
+    z-index: 10;
+  }
+  #title-overlay {
+    position: fixed;
+    top: 46%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 22px;
+    color: rgba(220, 180, 210, 0.85);
+    letter-spacing: 0.14em;
+    pointer-events: none;
+    z-index: 11;
+    opacity: 1;
+    transition: opacity 2s ease;
+  }
+  #tension-label {
+    position: fixed;
+    top: 32px;
+    right: 40px;
+    font-size: 12px;
+    color: rgba(180, 150, 200, 0.55);
+    letter-spacing: 0.1em;
+    pointer-events: none;
+    z-index: 10;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="phrase"></div>
+<div id="title-overlay">TREMOR</div>
+<div id="tension-label">tension —</div>
+
+<script>
+// ─── Tremor: threshold-of-stability sound-experience ───
+// Five oscillator voices in a celestial add9 chord. Mouse velocity drives
+// a tension parameter that progressively destabilizes each voice through
+// frequency wobble, FM sidebands, and noise bloom — the chord trembles
+// at the edge of its own structure. Hold still to restore consonance.
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const phraseEl = document.getElementById('phrase');
+const titleEl = document.getElementById('title-overlay');
+const tensionLabel = document.getElementById('tension-label');
+
+// ─── Dimensions ───
+let W, H, cx, cy;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  cx = W / 2;
+  cy = H / 2;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ─── Phrase cycle ───
+const phrases = [
+  'the chord remembers its shape',
+  'between resonance and fracture',
+  'a vibration held at the edge of itself',
+  'stillness is the only anchor',
+  'every tone carries the seed of its own noise',
+  'the tremor is the threshold',
+  'listen to what wavers',
+  'consonance is a held breath',
+  'the field trembles where you move fastest',
+  'rest here, the chord will find you again',
+  'instability has its own harmony',
+  'the edge of sound is not silence',
+  'what shakes is still singing',
+  'hold still long enough to hear the center',
+  'tremor: the verb of almost-breaking'
+];
+let phraseIdx = 0;
+let phraseCycleTimer = 0;
+const phraseInterval = 12; // seconds
+
+function cyclePhrase(dt) {
+  phraseCycleTimer += dt;
+  if (phraseCycleTimer > phraseInterval) {
+    phraseCycleTimer -= phraseInterval;
+    phraseEl.style.opacity = '0';
+    setTimeout(() => {
+      phraseIdx = (phraseIdx + 1) % phrases.length;
+      phraseEl.textContent = phrases[phraseIdx];
+      phraseEl.style.opacity = '0.72';
+    }, 1800);
+  }
+}
+
+// ─── Title fade ───
+let titleTimer = 0;
+const titleFadeOut = 6.0; // seconds
+
+// ─── Mouse velocity tracking ───
+let mx = cx, my = cy;
+let pmx = cx, pmy = cy;
+let rawVelocity = 0;
+let smoothedVelocity = 0;
+let tension = 0; // 0 = consonant, 1 = fractured
+const velSmooth = 0.12;
+const velMapMin = 40;   // px/s → tension 0
+const velMapMax = 600;  // px/s → tension 1
+
+canvas.addEventListener('mousemove', e => {
+  pmx = mx; pmy = my;
+  mx = e.clientX; my = e.clientY;
+});
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  pmx = mx; pmy = my;
+  mx = e.touches[0].clientX;
+  my = e.touches[0].clientY;
+}, { passive: false });
+
+// ─── Audio engine ───
+let audioCtx = null;
+let masterGain, reverbGain, dryGain;
+let voices = [];      // { osc, lfo, gain, lfoGain, fmOsc, fmGain }
+let noiseNode, noiseGain, noiseFilter;
+let baseFreqs, baseDetunes;
+let audioStarted = false;
+
+function initAudio() {
+  if (audioStarted) return;
+  audioStarted = true;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  // Master
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = 0.18;
+  masterGain.connect(audioCtx.destination);
+
+  // Simple feedback delay for reverb-ish space
+  const delay = audioCtx.createDelay(0.38);
+  delay.delayTime.value = 0.38;
+  const feedback = audioCtx.createGain();
+  feedback.gain.value = 0.28;
+  const delayMix = audioCtx.createGain();
+  delayMix.gain.value = 0.35;
+
+  dryGain = audioCtx.createGain();
+  dryGain.gain.value = 0.65;
+  dryGain.connect(masterGain);
+
+  reverbGain = audioCtx.createGain();
+  reverbGain.gain.value = 0.35;
+  reverbGain.connect(masterGain);
+
+  delay.connect(feedback);
+  feedback.connect(delay);
+  delay.connect(reverbGain);
+  // dry path: voices → dryGain → master
+  // wet path: voices → delay → reverbGain → master
+  // voices also feed delay input
+
+  // Base frequencies: A3 add9 chord — A3(220), C#4(277.18), E4(329.63), B4(493.88), A4(440)
+  baseFreqs = [220, 277.18, 329.63, 493.88, 440];
+  baseDetunes = [0, 1.5, -1.2, 0.8, -0.5]; // subtle chorusing even at rest
+
+  // Create 5 chord voices
+  for (let i = 0; i < 5; i++) {
+    const osc = audioCtx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = baseFreqs[i];
+    osc.detune.value = baseDetunes[i];
+
+    // LFO for wobble (modulates frequency)
+    const lfo = audioCtx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.value = 0.5 + i * 0.3;
+
+    const lfoGain = audioCtx.createGain();
+    lfoGain.gain.value = 0; // tension-driven
+    lfo.connect(lfoGain);
+    lfoGain.connect(osc.frequency);
+
+    // Gain for this voice
+    const gain = audioCtx.createGain();
+    gain.gain.value = 0.14; // per-voice volume
+
+    // FM sideband oscillator (for high-tension fracture)
+    const fmOsc = audioCtx.createOscillator();
+    fmOsc.type = 'sine';
+    fmOsc.frequency.value = baseFreqs[i] * (1.7 + i * 0.4);
+
+    const fmGain = audioCtx.createGain();
+    fmGain.gain.value = 0;
+    fmOsc.connect(fmGain);
+    fmGain.connect(osc.frequency);
+
+    // Routing: osc → voice gain → dry + delay
+    osc.connect(gain);
+    gain.connect(dryGain);
+    gain.connect(delay);
+
+    osc.start();
+    lfo.start();
+    fmOsc.start();
+
+    voices.push({ osc, lfo, gain, lfoGain, fmOsc, fmGain });
+  }
+
+  // Noise source for high-tension fracture bloom
+  const bufferSize = audioCtx.sampleRate * 2;
+  const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+  const data = noiseBuffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+
+  noiseNode = audioCtx.createBufferSource();
+  noiseNode.buffer = noiseBuffer;
+  noiseNode.loop = true;
+
+  noiseFilter = audioCtx.createBiquadFilter();
+  noiseFilter.type = 'bandpass';
+  noiseFilter.frequency.value = 1200;
+  noiseFilter.Q.value = 1.5;
+
+  noiseGain = audioCtx.createGain();
+  noiseGain.gain.value = 0;
+
+  noiseNode.connect(noiseFilter);
+  noiseFilter.connect(noiseGain);
+  noiseGain.connect(dryGain);
+  noiseGain.connect(delay);
+  noiseNode.start();
+}
+
+// Start audio on first interaction
+canvas.addEventListener('click', initAudio);
+canvas.addEventListener('touchstart', initAudio, { once: true });
+document.addEventListener('keydown', initAudio, { once: true });
+
+// ─── Audio update ───
+function updateAudio(t, dt) {
+  if (!audioStarted) return;
+
+  const clampedTension = Math.min(1, Math.max(0, tension));
+
+  voices.forEach((v, i) => {
+    // Wobble depth: 0 → ~2.5 semitones (expressed as cents: 0 → 250)
+    const wobbleCents = clampedTension * 250 * (1 + i * 0.15);
+    v.lfoGain.gain.setTargetAtTime(wobbleCents, audioCtx.currentTime, 0.05);
+
+    // Wobble rate: 0.5Hz → 14Hz
+    const wobbleRate = 0.5 + clampedTension * 13.5 * (1 + i * 0.2);
+    v.lfo.frequency.setTargetAtTime(wobbleRate, audioCtx.currentTime, 0.05);
+
+    // LFO waveform shifts from sine → triangle-ish at high tension (use square for agitation?)
+    // Actually, let's keep sine but add harmonic content through FM
+
+    // FM sideband: only active above tension 0.35
+    const fmThreshold = 0.35;
+    const fmAmount = Math.max(0, (clampedTension - fmThreshold) / (1 - fmThreshold));
+    const fmDepth = fmAmount * 80 * (1 + i * 0.3);
+    v.fmGain.gain.setTargetAtTime(fmDepth, audioCtx.currentTime, 0.08);
+
+    // Slight gain dip at high tension (voices get thinner as they fracture)
+    const voiceGain = 0.14 * (1 - clampedTension * 0.35);
+    v.gain.gain.setTargetAtTime(voiceGain, audioCtx.currentTime, 0.08);
+  });
+
+  // Noise bloom: ramps up above tension 0.5
+  const noiseThreshold = 0.5;
+  const noiseAmount = Math.max(0, (clampedTension - noiseThreshold) / (1 - noiseThreshold));
+  noiseGain.gain.setTargetAtTime(noiseAmount * 0.06, audioCtx.currentTime, 0.1);
+  noiseFilter.frequency.setTargetAtTime(1200 + noiseAmount * 3000, audioCtx.currentTime, 0.1);
+  noiseFilter.Q.setTargetAtTime(1.5 + noiseAmount * 3, audioCtx.currentTime, 0.1);
+
+  // Global reverb increases slightly with tension
+  reverbGain.gain.setTargetAtTime(0.35 + clampedTension * 0.2, audioCtx.currentTime, 0.1);
+}
+
+// ─── Particle system ───
+// 5 rings of particles (one per voice), each with 10 orbiting particles
+const rings = [];
+const colors = [
+  { r: 220, g: 150, b: 170 }, // soft pink
+  { r: 180, g: 150, b: 210 }, // lavender
+  { r: 240, g: 190, b: 160 }, // peach
+  { r: 170, g: 210, b: 185 }, // mint
+  { r: 235, g: 220, b: 225 }  // cream
+];
+
+for (let i = 0; i < 5; i++) {
+  const ring = {
+    radius: 80 + i * 48,
+    particles: [],
+    color: colors[i],
+    baseSpeed: 0.4 + i * 0.15
+  };
+  for (let j = 0; j < 10; j++) {
+    ring.particles.push({
+      angle: (j / 10) * Math.PI * 2 + (i * 0.5),
+      wobbleOffset: Math.random() * Math.PI * 2
+    });
+  }
+  rings.push(ring);
+}
+
+// ─── Floating ambient dots ───
+const ambientDots = [];
+for (let i = 0; i < 50; i++) {
+  ambientDots.push({
+    x: Math.random() * W,
+    y: Math.random() * H,
+    vx: (Math.random() - 0.5) * 0.3,
+    vy: (Math.random() - 0.5) * 0.3,
+    r: Math.random() * 1.5 + 0.5,
+    alpha: Math.random() * 0.3 + 0.1,
+    alphaPhase: Math.random() * Math.PI * 2,
+    alphaSpeed: 0.3 + Math.random() * 0.7
+  });
+}
+
+// ─── Render ───
+function draw(t, dt) {
+  ctx.clearRect(0, 0, W, H);
+
+  // Background: deep indigo transitioning to pastel gradient based on tension
+  const bgGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H) * 0.8);
+  const bgR = Math.floor(15 + tension * 8);
+  const bgG = Math.floor(11 + tension * 4);
+  const bgB = Math.floor(20 - tension * 6);
+  bgGrad.addColorStop(0, `rgb(${bgR},${bgG},${bgB})`);
+  bgGrad.addColorStop(0.5, `rgb(${Math.floor(18 + tension*6)},${Math.floor(14+tension*3)},${Math.floor(22-tension*4)})`);
+  bgGrad.addColorStop(1, `rgb(${Math.floor(12+tension*5)},${Math.floor(8+tension*4)},${Math.floor(16-tension*6)})`);
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Ambient dots
+  ambientDots.forEach(d => {
+    d.x += d.vx;
+    d.y += d.vy;
+    if (d.x < 0) d.x = W;
+    if (d.x > W) d.x = 0;
+    if (d.y < 0) d.y = H;
+    if (d.y > H) d.y = 0;
+    const alpha = d.alpha + Math.sin(t * d.alphaSpeed + d.alphaPhase) * 0.08;
+    ctx.beginPath();
+    ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(210,190,220,${Math.max(0.04,alpha)})`;
+    ctx.fill();
+  });
+
+  // Center tension ring — glows brighter and wider with tension
+  const ringBaseRadius = 55;
+  const ringWidth = 8 + tension * 22;
+  const ringAlpha = 0.35 + tension * 0.5;
+  const ringGlow = ctx.createRadialGradient(cx, cy, ringBaseRadius - ringWidth, cx, cy, ringBaseRadius + ringWidth);
+  const ringR = Math.floor(210 + tension * 30);
+  const ringG = Math.floor(160 + tension * 10);
+  const ringB = Math.floor(210 - tension * 40);
+  ringGlow.addColorStop(0, `rgba(${ringR},${ringG},${ringB},0)`);
+  ringGlow.addColorStop(0.4, `rgba(${ringR},${ringG},${ringB},${ringAlpha * 0.6})`);
+  ringGlow.addColorStop(0.7, `rgba(${ringR},${ringG},${ringB},${ringAlpha})`);
+  ringGlow.addColorStop(1, `rgba(${ringR},${ringG},${ringB},0)`);
+  ctx.beginPath();
+  ctx.arc(cx, cy, ringBaseRadius, 0, Math.PI * 2);
+  ctx.fillStyle = ringGlow;
+  ctx.fill();
+
+  // Inner glow dot
+  const innerGlow = ctx.createRadialGradient(cx, cy, 0, cx, cy, 18);
+  innerGlow.addColorStop(0, `rgba(240,225,235,${0.65 + tension * 0.25})`);
+  innerGlow.addColorStop(0.5, `rgba(220,190,210,${0.35 + tension * 0.15})`);
+  innerGlow.addColorStop(1, 'rgba(180,150,190,0)');
+  ctx.beginPath();
+  ctx.arc(cx, cy, 18, 0, Math.PI * 2);
+  ctx.fillStyle = innerGlow;
+  ctx.fill();
+
+  // Particle rings
+  rings.forEach((ring, ri) => {
+    ring.particles.forEach((p, pi) => {
+      // Base orbital speed + tension-driven wobble
+      const wobbleAmp = tension * 18 * (1 + ri * 0.3);
+      const wobbleFreq = 2.5 + tension * 5 * (1 + ri * 0.25);
+      const wobble = Math.sin(t * wobbleFreq + p.wobbleOffset) * wobbleAmp;
+      const currentRadius = ring.radius + wobble;
+      const speed = ring.baseSpeed + tension * 1.5;
+      p.angle += speed * dt;
+      if (p.angle > Math.PI * 2) p.angle -= Math.PI * 2;
+
+      const px = cx + Math.cos(p.angle) * currentRadius;
+      const py = cy + Math.sin(p.angle) * currentRadius;
+
+      // Particle glow
+      const pAlpha = 0.35 + tension * 0.35;
+      const pSize = 2.5 + tension * 1.5;
+      const pGlow = ctx.createRadialGradient(px, py, 0, px, py, pSize * 3);
+      const { r, g, b } = ring.color;
+      pGlow.addColorStop(0, `rgba(${r},${g},${b},${pAlpha})`);
+      pGlow.addColorStop(0.3, `rgba(${r},${g},${b},${pAlpha * 0.5})`);
+      pGlow.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.beginPath();
+      ctx.arc(px, py, pSize * 3, 0, Math.PI * 2);
+      ctx.fillStyle = pGlow;
+      ctx.fill();
+
+      // Particle core
+      ctx.beginPath();
+      ctx.arc(px, py, pSize * 0.8, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${Math.min(255,r+30)},${Math.min(255,g+30)},${Math.min(255,b+30)},${pAlpha + 0.2})`;
+      ctx.fill();
+    });
+  });
+
+  // Connection lines between adjacent ring particles when tension is high
+  if (tension > 0.3) {
+    const lineAlpha = (tension - 0.3) * 0.2;
+    for (let ri = 0; ri < rings.length - 1; ri++) {
+      for (let pi = 0; pi < rings[ri].particles.length; pi++) {
+        const p1 = rings[ri].particles[pi];
+        const p2 = rings[ri + 1].particles[pi];
+        const r1 = rings[ri].radius + Math.sin(t * (2.5 + tension * 5 * (1 + ri * 0.25)) + p1.wobbleOffset) * tension * 18 * (1 + ri * 0.3);
+        const r2 = rings[ri + 1].radius + Math.sin(t * (2.5 + tension * 5 * (1 + (ri + 1) * 0.25)) + p2.wobbleOffset) * tension * 18 * (1 + (ri + 1) * 0.3);
+        const x1 = cx + Math.cos(p1.angle) * r1;
+        const y1 = cy + Math.sin(p1.angle) * r1;
+        const x2 = cx + Math.cos(p2.angle) * r2;
+        const y2 = cy + Math.sin(p2.angle) * r2;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.strokeStyle = `rgba(200,170,210,${lineAlpha * 0.6})`;
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+      }
+    }
+  }
+
+  // Tension glow at the very center — a softly pulsing light
+  const pulseRadius = 30 + Math.sin(t * 0.8) * 6;
+  const centerPulse = ctx.createRadialGradient(cx, cy, 0, cx, cy, pulseRadius);
+  const cpAlpha = 0.25 + tension * 0.5;
+  centerPulse.addColorStop(0, `rgba(245,225,235,${cpAlpha})`);
+  centerPulse.addColorStop(1, 'rgba(245,225,235,0)');
+  ctx.beginPath();
+  ctx.arc(cx, cy, pulseRadius, 0, Math.PI * 2);
+  ctx.fillStyle = centerPulse;
+  ctx.fill();
+}
+
+// ─── Main loop ───
+let lastTime = performance.now();
+let lastVelUpdate = 0;
+const velUpdateInterval = 0.05; // seconds between velocity samples
+
+function loop(timestamp) {
+  requestAnimationFrame(loop);
+
+  let dt = (timestamp - lastTime) / 1000;
+  if (dt <= 0 || dt > 0.2) dt = 0.016; // cap
+  lastTime = timestamp;
+
+  // Calculate velocity
+  lastVelUpdate += dt;
+  if (lastVelUpdate >= velUpdateInterval) {
+    const dx = mx - pmx;
+    const dy = my - pmy;
+    rawVelocity = Math.sqrt(dx * dx + dy * dy) / lastVelUpdate;
+    lastVelUpdate = 0;
+  }
+
+  // Smooth velocity
+  smoothedVelocity += (rawVelocity - smoothedVelocity) * velSmooth;
+
+  // Map to tension [0, 1]
+  const rawTension = Math.max(0, Math.min(1, (smoothedVelocity - velMapMin) / (velMapMax - velMapMin)));
+  tension += (rawTension - tension) * 0.08;
+
+  // Audio
+  if (!audioStarted) {
+    // Pulsing visual prompt
+    const pulseAlpha = 0.3 + Math.sin(timestamp * 0.002) * 0.2;
+    ctx.save();
+    ctx.fillStyle = `rgba(220,200,225,${pulseAlpha})`;
+    ctx.font = '14px Georgia';
+    ctx.textAlign = 'center';
+    ctx.fillText('click or touch to begin', cx, cy + 100);
+    ctx.restore();
+  }
+  updateAudio(timestamp * 0.001, dt);
+
+  // Draw
+  draw(timestamp * 0.001, dt);
+
+  // Title fade
+  titleTimer += dt;
+  if (titleTimer > titleFadeOut) {
+    titleEl.style.opacity = '0';
+  }
+
+  // Phrase cycle
+  cyclePhrase(dt);
+
+  // Tension label
+  const pct = Math.round(tension * 100);
+  tensionLabel.textContent = `tension ${pct}%`;
+  tensionLabel.style.color = `rgba(${180+pct*0.6},${150-pct*0.5},${200-pct*0.8},${0.4+pct*0.005})`;
+}
+
+// ─── Initial phrase ───
+phraseEl.textContent = phrases[0];
+
+// ─── Start ───
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
