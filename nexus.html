@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nexus</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #050510; overflow: hidden; font-family: Georgia, serif; }
+  canvas { display: block; position: fixed; top: 0; left: 0; }
+  #phrase {
+    position: fixed; bottom: 28px; width: 100%; text-align: center;
+    color: rgba(200,180,255,0.55); font-size: 15px; letter-spacing: 0.06em;
+    pointer-events: none; transition: opacity 1.8s ease; z-index: 2;
+  }
+  #title {
+    position: fixed; top: 24px; width: 100%; text-align: center;
+    color: rgba(180,210,255,0.6); font-size: 22px; letter-spacing: 0.12em;
+    pointer-events: none; transition: opacity 2.4s ease; z-index: 2;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="title">NEXUS</div>
+<div id="phrase"></div>
+<script>
+'use strict';
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const phraseEl = document.getElementById('phrase');
+const titleEl = document.getElementById('title');
+
+let W, H;
+let mouse = { x: -999, y: -999, active: false };
+
+// ── Neon-synth palette (4 territory colors) ──
+const TERRITORY_COLORS = [
+  { r: 0, g: 235, b: 200 },   // electric cyan
+  { r: 255, g: 50, b: 150 },   // hot pink
+  { r: 140, g: 250, b: 60 },   // acid green
+  { r: 170, g: 80, b: 255 },   // electric purple
+];
+
+// ── 4 Voronoi sites — one per corner quadrant ──
+const sites = [
+  { x: 0.15, y: 0.15, bx: 0.08, by: 0.08, ex: 0.38, ey: 0.38, phase: 0 },
+  { x: 0.85, y: 0.15, bx: 0.62, by: 0.08, ex: 0.92, ey: 0.38, phase: 1.7 },
+  { x: 0.15, y: 0.85, bx: 0.08, by: 0.62, ex: 0.38, ey: 0.92, phase: 3.4 },
+  { x: 0.85, y: 0.85, bx: 0.62, by: 0.62, ex: 0.92, ey: 0.92, phase: 5.1 },
+];
+
+// ── Particle system ──
+const NUM_PARTICLES = 240;
+const particles = [];
+const TRAIL_LENGTH = 6;
+
+// ── Boundary crossing sparks ──
+const sparks = [];
+const MAX_SPARKS = 60;
+
+// ── Noise helpers (value noise via precomputed lattice) ──
+const NOISE_SIZE = 64;
+const noiseBuf = new Float32Array(NOISE_SIZE * NOISE_SIZE);
+function initNoise() {
+  for (let i = 0; i < NOISE_SIZE * NOISE_SIZE; i++) {
+    noiseBuf[i] = Math.random();
+  }
+}
+initNoise();
+
+function noise2D(x, y) {
+  const ix = Math.floor(x) & (NOISE_SIZE - 1);
+  const iy = Math.floor(y) & (NOISE_SIZE - 1);
+  const fx = x - Math.floor(x);
+  const fy = y - Math.floor(y);
+  const sx = fx * fx * (3 - 2 * fx);
+  const sy = fy * fy * (3 - 2 * fy);
+  const a = noiseBuf[ix + iy * NOISE_SIZE];
+  const b = noiseBuf[((ix + 1) & (NOISE_SIZE - 1)) + iy * NOISE_SIZE];
+  const c = noiseBuf[ix + ((iy + 1) & (NOISE_SIZE - 1)) * NOISE_SIZE];
+  const d = noiseBuf[((ix + 1) & (NOISE_SIZE - 1)) + ((iy + 1) & (NOISE_SIZE - 1)) * NOISE_SIZE];
+  return a + sx * (b - a) + sy * (c - a) + sx * sy * (a - b - c + d);
+}
+
+function fbm(x, y, octaves = 3) {
+  let val = 0, amp = 1, freq = 1, total = 0;
+  for (let i = 0; i < octaves; i++) {
+    val += amp * noise2D(x * freq, y * freq);
+    total += amp;
+    amp *= 0.5;
+    freq *= 2;
+  }
+  return val / total;
+}
+
+// ── Color blending ──
+function blendColors(c1, c2, t) {
+  return {
+    r: c1.r + (c2.r - c1.r) * t,
+    g: c1.g + (c2.g - c1.g) * t,
+    b: c1.b + (c2.b - c1.b) * t,
+  };
+}
+
+function colorStr(c, alpha = 1) {
+  return `rgba(${Math.round(c.r)},${Math.round(c.g)},${Math.round(c.b)},${alpha})`;
+}
+
+// ── Initialize particles ──
+function initParticles() {
+  particles.length = 0;
+  for (let i = 0; i < NUM_PARTICLES; i++) {
+    const px = Math.random();
+    const py = Math.random();
+    // Determine territory
+    let minDist = Infinity, territory = 0;
+    for (let s = 0; s < 4; s++) {
+      const dx = px - sites[s].x;
+      const dy = py - sites[s].y;
+      const d = dx * dx + dy * dy;
+      if (d < minDist) { minDist = d; territory = s; }
+    }
+    particles.push({
+      x: px, y: py,
+      vx: (Math.random() - 0.5) * 0.001,
+      vy: (Math.random() - 0.5) * 0.001,
+      territory,
+      prevTerritory: territory,
+      color: { ...TERRITORY_COLORS[territory] },
+      trail: [],
+      age: Math.random() * 200,
+      phase: Math.random() * Math.PI * 2,
+    });
+  }
+}
+
+initParticles();
+
+// ── Determine territory of a point ──
+function getTerritory(px, py) {
+  let minDist = Infinity, terr = 0;
+  for (let s = 0; s < 4; s++) {
+    const dx = px - sites[s].x;
+    const dy = py - sites[s].y;
+    const d = dx * dx + dy * dy;
+    if (d < minDist) { minDist = d; terr = s; }
+  }
+  return terr;
+}
+
+// ── Distance to nearest boundary (normalized) ──
+function boundaryProximity(px, py) {
+  const dists = [];
+  for (let s = 0; s < 4; s++) {
+    const dx = px - sites[s].x;
+    const dy = py - sites[s].y;
+    dists.push({ d: Math.sqrt(dx * dx + dy * dy), idx: s });
+  }
+  dists.sort((a, b) => a.d - b.d);
+  // proximity = 1 - (|d0 - d1| / avg), clamped to 0-1
+  const diff = Math.abs(dists[0].d - dists[1].d);
+  const avg = (dists[0].d + dists[1].d) / 2 || 0.001;
+  return Math.max(0, 1 - diff / (avg * 0.15));
+}
+
+// ── Spawn spark at boundary crossing ──
+function spawnSpark(x, y, t1, t2) {
+  if (sparks.length >= MAX_SPARKS) sparks.shift();
+  const blend = blendColors(TERRITORY_COLORS[t1], TERRITORY_COLORS[t2], 0.5);
+  sparks.push({
+    x, y,
+    vx: (Math.random() - 0.5) * 0.004,
+    vy: (Math.random() - 0.5) * 0.004,
+    life: 1,
+    decay: 0.015 + Math.random() * 0.025,
+    color: blend,
+    size: 1.5 + Math.random() * 3,
+  });
+}
+
+// ── Poetic phrases ──
+const phrases = [
+  "where territories touch and forget themselves",
+  "the membrane is not a wall but a passage",
+  "identity borrowed across a line too thin to hold",
+  "what crosses the threshold is never the same",
+  "boundaries exist only where two things meet",
+  "the edge dissolves the thing it defines",
+  "between cyan and pink, a color with no name",
+  "territory is only ever a temporary claim",
+  "the center holds because nothing stays there",
+  "each crossing writes a new allegiance",
+  "what are you when you're between your corners",
+  "the nexus is not a point but the act of passing through",
+  "you cannot belong to two places at once, except here",
+  "a line drawn in neon is still just a line",
+  "the space between is the only space that changes",
+];
+let phraseIdx = 0;
+let phraseTimer = 0;
+const PHRASE_INTERVAL = 14; // seconds
+let phraseOpacity = 0;
+
+// ── Resize ──
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ── Mouse/touch ──
+canvas.addEventListener('mousemove', (e) => {
+  mouse.x = e.clientX / W;
+  mouse.y = e.clientY / H;
+  mouse.active = true;
+});
+canvas.addEventListener('mouseleave', () => { mouse.active = false; });
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  mouse.x = e.touches[0].clientX / W;
+  mouse.y = e.touches[0].clientY / H;
+  mouse.active = true;
+}, { passive: false });
+canvas.addEventListener('touchend', () => { mouse.active = false; });
+
+// ── Click: respawn particles at cursor ──
+canvas.addEventListener('click', (e) => {
+  const cx = e.clientX / W;
+  const cy = e.clientY / H;
+  const terr = getTerritory(cx, cy);
+  for (let i = 0; i < 8; i++) {
+    const idx = Math.floor(Math.random() * particles.length);
+    const p = particles[idx];
+    p.x = cx + (Math.random() - 0.5) * 0.04;
+    p.y = cy + (Math.random() - 0.5) * 0.04;
+    p.vx = (Math.random() - 0.5) * 0.002;
+    p.vy = (Math.random() - 0.5) * 0.002;
+    p.territory = terr;
+    p.prevTerritory = terr;
+    p.color = { ...TERRITORY_COLORS[terr] };
+    p.trail = [];
+  }
+});
+
+// ── Main loop ──
+let frameCount = 0;
+let time = 0;
+const DT = 1 / 60;
+
+function update(dt) {
+  time += dt;
+
+  // Update site positions with noise drift
+  for (let s = 0; s < 4; s++) {
+    const site = sites[s];
+    const nx = fbm(time * 0.3 + site.phase, site.phase * 0.7, 3);
+    const ny = fbm(time * 0.27 + site.phase + 3, site.phase * 0.6 + 1, 3);
+    const cx = (site.bx + site.ex) / 2;
+    const cy = (site.by + site.ey) / 2;
+    const rx = (site.ex - site.bx) / 2;
+    const ry = (site.ey - site.by) / 2;
+    site.x = cx + nx * rx;
+    site.y = cy + ny * ry;
+
+    // Mouse pull on sites
+    if (mouse.active) {
+      const dx = mouse.x - site.x;
+      const dy = mouse.y - site.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 0.45) {
+        const force = (1 - dist / 0.45) * 0.0004;
+        site.x += dx * force;
+        site.y += dy * force;
+        // Clamp to quadrant
+        site.x = Math.max(site.bx - 0.02, Math.min(site.ex + 0.1, site.x));
+        site.y = Math.max(site.by - 0.02, Math.min(site.ey + 0.1, site.y));
+      }
+    }
+  }
+
+  // Update particles
+  for (const p of particles) {
+    // Territory-specific velocity field
+    const t = p.territory;
+    const nx = fbm(p.x * 5 + time * 0.15 + t * 2.3, p.y * 5 + time * 0.12, 2);
+    const ny = fbm(p.x * 5 + time * 0.13 + t * 1.7 + 1, p.y * 5 + time * 0.16, 2);
+    p.vx += (nx - 0.5) * 0.00015;
+    p.vy += (ny - 0.5) * 0.00015;
+
+    // Mouse attraction
+    if (mouse.active) {
+      const dx = mouse.x - p.x;
+      const dy = mouse.y - p.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) + 0.001;
+      if (dist < 0.3) {
+        const force = (1 - dist / 0.3) * 0.0005;
+        p.vx += (dx / dist) * force;
+        p.vy += (dy / dist) * force;
+      }
+    }
+
+    // Velocity damping
+    p.vx *= 0.992;
+    p.vy *= 0.992;
+
+    // Speed clamp
+    const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+    const maxSpeed = 0.004;
+    if (speed > maxSpeed) {
+      p.vx *= maxSpeed / speed;
+      p.vy *= maxSpeed / speed;
+    }
+
+    p.x += p.vx;
+    p.y += p.vy;
+
+    // Wrap at edges with soft bounce
+    if (p.x < 0) { p.x = 0; p.vx *= -0.4; }
+    if (p.x > 1) { p.x = 1; p.vx *= -0.4; }
+    if (p.y < 0) { p.y = 0; p.vy *= -0.4; }
+    if (p.y > 1) { p.y = 1; p.vy *= -0.4; }
+
+    // Trail
+    p.trail.push({ x: p.x, y: p.y });
+    if (p.trail.length > TRAIL_LENGTH) p.trail.shift();
+
+    // Check territory
+    const newTerr = getTerritory(p.x, p.y);
+    if (newTerr !== p.territory && newTerr !== p.prevTerritory) {
+      // Crossed a boundary
+      spawnSpark(p.x, p.y, p.territory, newTerr);
+      p.prevTerritory = p.territory;
+      p.territory = newTerr;
+      // Blend color toward new territory
+      const target = TERRITORY_COLORS[newTerr];
+      const prev = TERRITORY_COLORS[p.prevTerritory];
+      p.color = blendColors(prev, target, 0.35);
+    }
+    // Gradual color drift toward territory color
+    const target = TERRITORY_COLORS[p.territory];
+    p.color.r += (target.r - p.color.r) * 0.02;
+    p.color.g += (target.g - p.color.g) * 0.02;
+    p.color.b += (target.b - p.color.b) * 0.02;
+
+    p.age++;
+  }
+
+  // Update sparks
+  for (let i = sparks.length - 1; i >= 0; i--) {
+    const s = sparks[i];
+    s.x += s.vx;
+    s.y += s.vy;
+    s.life -= s.decay;
+    if (s.life <= 0) sparks.splice(i, 1);
+  }
+
+  // Phrase cycling
+  phraseTimer += dt;
+  if (phraseTimer >= PHRASE_INTERVAL) {
+    phraseTimer = 0;
+    phraseOpacity = 0;
+    phraseIdx = (phraseIdx + 1) % phrases.length;
+  }
+  const phraseElapsed = phraseTimer % PHRASE_INTERVAL;
+  if (phraseElapsed < 2.5) {
+    phraseOpacity = phraseElapsed / 2.5;
+  } else if (phraseElapsed > PHRASE_INTERVAL - 3) {
+    phraseOpacity = (PHRASE_INTERVAL - phraseElapsed) / 3;
+  } else {
+    phraseOpacity = 1;
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  // Background: deep void with subtle vignette
+  const bgGrad = ctx.createRadialGradient(W * 0.5, H * 0.5, 0, W * 0.5, H * 0.5, Math.max(W, H) * 0.75);
+  bgGrad.addColorStop(0, '#08081a');
+  bgGrad.addColorStop(0.4, '#060615');
+  bgGrad.addColorStop(1, '#020208');
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  // ── Draw Voronoi boundary membrane (grid sampled) ──
+  const gridRes = 50;
+  const cellW = W / gridRes;
+  const cellH = H / gridRes;
+  for (let gy = 0; gy <= gridRes; gy++) {
+    for (let gx = 0; gx <= gridRes; gx++) {
+      const px = gx / gridRes;
+      const py = gy / gridRes;
+      const bp = boundaryProximity(px, py);
+      if (bp > 0.15) {
+        // Find which two territories are adjacent here
+        const dists = [];
+        for (let s = 0; s < 4; s++) {
+          const dx = px - sites[s].x;
+          const dy = py - sites[s].y;
+          dists.push({ d: Math.sqrt(dx * dx + dy * dy), idx: s });
+        }
+        dists.sort((a, b) => a.d - b.d);
+        const blend = blendColors(
+          TERRITORY_COLORS[dists[0].idx],
+          TERRITORY_COLORS[dists[1].idx],
+          0.5
+        );
+        const alpha = bp * 0.4;
+        ctx.fillStyle = colorStr(blend, alpha);
+        ctx.fillRect(gx * cellW - 1, gy * cellH - 1, cellW + 2, cellH + 2);
+      }
+    }
+  }
+
+  // ── Draw Voronoi boundaries as thin glow lines ──
+  // Compute edges analytically: find all 6 perpendicular bisectors, clip to canvas
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 4; i++) {
+    for (let j = i + 1; j < 4; j++) {
+      const si = sites[i];
+      const sj = sites[j];
+      // Midpoint
+      const mx = (si.x + sj.x) / 2;
+      const my = (si.y + sj.y) / 2;
+      // Perpendicular direction
+      const dx = sj.x - si.x;
+      const dy = sj.y - si.y;
+      const len = Math.sqrt(dx * dx + dy * dy) || 0.001;
+      const perpX = -dy / len;
+      const perpY = dx / len;
+
+      // Draw segment through midpoint, clipped to canvas bounds
+      const extend = 1.5;
+      const ax = mx - perpX * extend;
+      const ay = my - perpY * extend;
+      const bx = mx + perpX * extend;
+      const by = my + perpY * extend;
+
+      // Only draw if this segment is near a true Voronoi edge
+      // (segment between the two nearest sites at points along the bisector)
+      const cx = (ax + bx) / 2;
+      const cy = (ay + by) / 2;
+      const nearBoundary = boundaryProximity(cx, cy);
+      if (nearBoundary > 0.3) {
+        const blend = blendColors(TERRITORY_COLORS[i], TERRITORY_COLORS[j], 0.5);
+        ctx.strokeStyle = colorStr(blend, nearBoundary * 0.35);
+        ctx.beginPath();
+        ctx.moveTo(ax * W, ay * H);
+        ctx.lineTo(bx * W, by * H);
+        ctx.stroke();
+      }
+    }
+  }
+
+  // ── Draw corner glow rings ──
+  for (let s = 0; s < 4; s++) {
+    const site = sites[s];
+    const sx = site.x * W;
+    const sy = site.y * H;
+    const pulse = 1 + Math.sin(time * 1.3 + site.phase) * 0.15;
+    const radius = 50 * pulse;
+
+    // Outer halo
+    const grad = ctx.createRadialGradient(sx, sy, radius * 0.3, sx, sy, radius);
+    const col = TERRITORY_COLORS[s];
+    grad.addColorStop(0, colorStr(col, 0.25));
+    grad.addColorStop(0.5, colorStr(col, 0.08));
+    grad.addColorStop(1, colorStr(col, 0));
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(sx, sy, radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Core dot
+    ctx.fillStyle = colorStr(col, 0.5 + pulse * 0.2);
+    ctx.beginPath();
+    ctx.arc(sx, sy, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // ── Draw sparks ──
+  for (const s of sparks) {
+    const sx = s.x * W;
+    const sy = s.y * H;
+    const alpha = s.life * 0.8;
+    const radius = s.size * s.life * 2;
+    const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius);
+    grad.addColorStop(0, colorStr(s.color, alpha));
+    grad.addColorStop(0.6, colorStr(s.color, alpha * 0.3));
+    grad.addColorStop(1, colorStr(s.color, 0));
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(sx, sy, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // ── Draw particles ──
+  for (const p of particles) {
+    const px = p.x * W;
+    const py = p.y * H;
+
+    // Trail
+    if (p.trail.length > 1) {
+      ctx.strokeStyle = colorStr(p.color, 0.25);
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(p.trail[0].x * W, p.trail[0].y * H);
+      for (let t = 1; t < p.trail.length; t++) {
+        ctx.lineTo(p.trail[t].x * W, p.trail[t].y * H);
+      }
+      ctx.stroke();
+    }
+
+    // Glow
+    const bp = boundaryProximity(p.x, p.y);
+    const glowRadius = 2.5 + bp * 4;
+    const glowAlpha = 0.35 + bp * 0.45;
+    const grad = ctx.createRadialGradient(px, py, 0, px, py, glowRadius);
+    grad.addColorStop(0, colorStr(p.color, glowAlpha));
+    grad.addColorStop(1, colorStr(p.color, 0));
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(px, py, glowRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Core
+    ctx.fillStyle = colorStr(p.color, 0.8);
+    ctx.beginPath();
+    ctx.arc(px, py, 1, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // ── Center nexus glow ──
+  // Bright when sites are pulled close to center (mouse active, high boundary density)
+  let centerProximity = 0;
+  let centerDensity = 0;
+  for (let s = 0; s < 4; s++) {
+    const dx = 0.5 - sites[s].x;
+    const dy = 0.5 - sites[s].y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    centerProximity = Math.max(centerProximity, 1 - dist / 0.6);
+  }
+  // Count particles near center
+  for (const p of particles) {
+    const dx = 0.5 - p.x;
+    const dy = 0.5 - p.y;
+    if (dx * dx + dy * dy < 0.04) centerDensity++;
+  }
+  const nexusIntensity = Math.min(1, centerProximity * 0.5 + centerDensity / 40);
+  if (nexusIntensity > 0.05) {
+    const nexusGrad = ctx.createRadialGradient(W * 0.5, H * 0.5, 0, W * 0.5, H * 0.5, Math.min(W, H) * 0.15);
+    const blendAll = blendColors(
+      blendColors(TERRITORY_COLORS[0], TERRITORY_COLORS[1], 0.5),
+      blendColors(TERRITORY_COLORS[2], TERRITORY_COLORS[3], 0.5),
+      0.5
+    );
+    nexusGrad.addColorStop(0, colorStr(blendAll, nexusIntensity * 0.2));
+    nexusGrad.addColorStop(1, colorStr(blendAll, 0));
+    ctx.fillStyle = nexusGrad;
+    ctx.beginPath();
+    ctx.arc(W * 0.5, H * 0.5, Math.min(W, H) * 0.15, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // ── Subtle scan line overlay ──
+  ctx.fillStyle = 'rgba(0,0,0,0.015)';
+  for (let y = 0; y < H; y += 3) {
+    ctx.fillRect(0, y, W, 1);
+  }
+
+  // ── Vignette ──
+  const vigGrad = ctx.createRadialGradient(W * 0.5, H * 0.5, Math.min(W, H) * 0.4, W * 0.5, H * 0.5, Math.max(W, H) * 0.72);
+  vigGrad.addColorStop(0, 'rgba(0,0,0,0)');
+  vigGrad.addColorStop(1, 'rgba(0,0,0,0.55)');
+  ctx.fillStyle = vigGrad;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function loop() {
+  update(DT);
+  draw();
+  phraseEl.textContent = phrases[phraseIdx];
+  phraseEl.style.opacity = phraseOpacity;
+  if (frameCount === 0) {
+    titleEl.style.opacity = 1;
+    setTimeout(() => { titleEl.style.opacity = 0; }, 5000);
+  }
+  frameCount++;
+  requestAnimationFrame(loop);
+}
+
+resize();
+initParticles();
+loop();
+
+// ── Handle resize ──
+window.addEventListener('resize', () => {
+  resize();
+});
+</script>
+</body>
+</html>
