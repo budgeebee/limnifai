@@ -342,5 +342,9 @@
   {
     "file": "nexus.html",
     "title": "Nexus"
+  },
+  {
+    "file": "shoal.html",
+    "title": "Shoal"
   }
 ]

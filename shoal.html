@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shoal</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a1219;
+    overflow: hidden;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    cursor: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  canvas { display: block; }
+  #overlay {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 10;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding-bottom: 8vh;
+  }
+  #phrase {
+    color: rgba(184, 212, 232, 0.55);
+    font-size: 1.15rem;
+    letter-spacing: 0.08em;
+    text-align: center;
+    transition: opacity 2.5s ease-in-out;
+    text-shadow: 0 0 20px rgba(123, 164, 196, 0.25);
+    max-width: 70vw;
+    line-height: 1.6;
+  }
+  #stats {
+    position: fixed;
+    top: 16px;
+    right: 20px;
+    color: rgba(184, 212, 232, 0.35);
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    pointer-events: none;
+    z-index: 10;
+    text-align: right;
+    line-height: 1.5;
+  }
+  #title-overlay {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    color: rgba(232, 240, 248, 0.9);
+    font-size: 2.2rem;
+    letter-spacing: 0.15em;
+    pointer-events: none;
+    z-index: 10;
+    opacity: 1;
+    transition: opacity 2s ease-out 0.8s;
+    text-shadow: 0 0 40px rgba(123, 164, 196, 0.5), 0 0 80px rgba(123, 164, 196, 0.2);
+  }
+  #title-overlay.fade { opacity: 0; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="overlay"><div id="phrase"></div></div>
+<div id="stats"></div>
+<div id="title-overlay">Shoal</div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let W, H, mouseX = -200, mouseY = -200;
+let mouseActive = false;
+let clickAttractor = null;
+let scatterTimer = 0;
+let scatterCooldown = 0;
+let cohesionFactor = 1.0;
+let targetCohesion = 1.0;
+
+const COLD_PALETTE = [
+  [123, 164, 196],   // pale blue
+  [184, 212, 232],   // ice blue
+  [200, 216, 232],   // silver
+  [74, 122, 148],    // mist
+  [232, 240, 248],   // fog white
+  [100, 140, 170],   // steel
+  [150, 185, 210],   // sky
+  [60, 100, 135],    // deep cold
+];
+
+const CORNER_ATTRACTORS = [
+  { x: 0.18, y: 0.18, color: [123, 164, 196], label: 'pale-blue' },
+  { x: 0.82, y: 0.15, color: [184, 212, 232], label: 'ice-blue' },
+  { x: 0.82, y: 0.85, color: [200, 216, 232], label: 'silver' },
+  { x: 0.22, y: 0.82, color: [74, 122, 148], label: 'mist' },
+];
+
+const ATTRACTOR_FORCE = 0.00025;   // gentle pull toward corners
+const MOUSE_REPEL_RADIUS = 160;
+const MOUSE_REPEL_FORCE = 0.85;
+const CLICK_RADIUS = 180;
+const CLICK_FORCE = 0.006;
+const CLICK_DURATION = 240;         // frames
+
+const phrases = [
+  "at the edge of the many, one becomes",
+  "every departure is a question the flock asks itself",
+  "coherence is not a state but a negotiation",
+  "the space between belonging and drifting",
+  "a single turn and the whole shape changes",
+  "they do not know they are beautiful / only that they must stay close",
+  "the threshold where individual becomes pattern",
+  "twenty thousand decisions per second / none of them conscious",
+  "to scatter is to forget what you were becoming",
+  "to gather is to remember a shape you never agreed to",
+  "between the corners, a clearing / between the birds, a silence",
+  "cohesion is a verb / it must be renewed every frame",
+  "the shoal is shallow water / the flock is shallow air",
+  "they orbit attractors they cannot see",
+  "at critical mass the whole thing tips / but never quite",
+];
+
+let phraseIdx = -1;
+let phraseEl = document.getElementById('phrase');
+let phraseOpacity = 0;
+let phraseTimer = 0;
+const PHRASE_INTERVAL = 13;   // seconds
+const PHRASE_FADE = 2.5;
+
+// --- Noise ---
+const NOISE_SIZE = 256;
+const noise = new Float32Array(NOISE_SIZE * NOISE_SIZE);
+function initNoise() {
+  const perm = new Uint8Array(512);
+  for (let i = 0; i < 256; i++) perm[i] = i;
+  for (let i = 255; i > 0; i--) {
+    const j = (Math.random() * (i + 1)) | 0;
+    [perm[i], perm[j]] = [perm[j], perm[i]];
+  }
+  for (let i = 0; i < 256; i++) perm[i + 256] = perm[i];
+
+  const grad = new Float32Array(512);
+  for (let i = 0; i < 256; i++) {
+    const a = Math.random() * Math.PI * 2;
+    grad[i] = Math.cos(a);
+    grad[i + 256] = Math.sin(a);
+  }
+
+  function dot(gi, x, y) {
+    return grad[gi] * x + grad[gi + 256] * y;
+  }
+
+  for (let y = 0; y < NOISE_SIZE; y++) {
+    for (let x = 0; x < NOISE_SIZE; x++) {
+      const X = (x / NOISE_SIZE) * 8;
+      const Y = (y / NOISE_SIZE) * 8;
+      const xi = Math.floor(X) & 255;
+      const yi = Math.floor(Y) & 255;
+      const xf = X - Math.floor(X);
+      const yf = Y - Math.floor(Y);
+      const u = xf * xf * (3 - 2 * xf);
+      const v = yf * yf * (3 - 2 * yf);
+      const aa = perm[perm[xi] + yi];
+      const ab = perm[perm[xi] + yi + 1];
+      const ba = perm[perm[xi + 1] + yi];
+      const bb = perm[perm[xi + 1] + yi + 1];
+      const n0 = dot(aa * 2, xf, yf);
+      const n1 = dot(ba * 2, xf - 1, yf);
+      const n2 = dot(ab * 2, xf, yf - 1);
+      const n3 = dot(bb * 2, xf - 1, yf - 1);
+      const ix0 = n0 + u * (n1 - n0);
+      const ix1 = n2 + u * (n3 - n2);
+      noise[y * NOISE_SIZE + x] = ix0 + v * (ix1 - ix0);
+    }
+  }
+}
+initNoise();
+
+function snoise(x, y) {
+  const xi = ((Math.floor(x * 32) % NOISE_SIZE) + NOISE_SIZE) % NOISE_SIZE;
+  const yi = ((Math.floor(y * 32) % NOISE_SIZE) + NOISE_SIZE) % NOISE_SIZE;
+  const xf = (x * 32) - Math.floor(x * 32);
+  const yf = (y * 32) - Math.floor(y * 32);
+  const u = xf * xf * (3 - 2 * xf);
+  const v = yf * yf * (3 - 2 * yf);
+  const x0 = xi, x1 = (xi + 1) % NOISE_SIZE;
+  const y0 = yi, y1 = (yi + 1) % NOISE_SIZE;
+  const n00 = noise[y0 * NOISE_SIZE + x0];
+  const n10 = noise[y0 * NOISE_SIZE + x1];
+  const n01 = noise[y1 * NOISE_SIZE + x0];
+  const n11 = noise[y1 * NOISE_SIZE + x1];
+  const ix0 = n00 + u * (n10 - n00);
+  const ix1 = n01 + u * (n11 - n01);
+  return ix0 + v * (ix1 - ix0);
+}
+
+// --- Boid ---
+const NUM_BOIDS = 160;
+const boids = [];
+
+class Boid {
+  constructor() {
+    this.reset();
+  }
+
+  reset() {
+    this.x = Math.random() * W;
+    this.y = Math.random() * H;
+    this.vx = (Math.random() - 0.5) * 2;
+    this.vy = (Math.random() - 0.5) * 2;
+    this.allegiance = -1;   // index of nearest corner attractor
+    this.prevAllegiance = -1;
+    this.flashAlpha = 0;
+    this.trail = [];
+    this.trailLen = 6;
+    this.size = 1.8 + Math.random() * 1.2;
+    this.colorIdx = Math.floor(Math.random() * 8);
+    this.flickerPhase = Math.random() * Math.PI * 2;
+  }
+
+  update(boidsArr, idx) {
+    // --- Flocking forces ---
+    let sepX = 0, sepY = 0, aliX = 0, aliY = 0, cohX = 0, cohY = 0;
+    let sepCount = 0, aliCount = 0, cohCount = 0;
+
+    const SEP_RADIUS = 22;
+    const ALI_RADIUS = 55;
+    const COH_RADIUS = 75;
+
+    for (let i = 0; i < boidsArr.length; i++) {
+      if (i === idx) continue;
+      const b = boidsArr[i];
+      const dx = this.x - b.x;
+      const dy = this.y - b.y;
+      const distSq = dx * dx + dy * dy;
+
+      if (distSq < SEP_RADIUS * SEP_RADIUS && distSq > 0.01) {
+        const dist = Math.sqrt(distSq);
+        const force = (SEP_RADIUS - dist) / SEP_RADIUS;
+        sepX += (dx / dist) * force;
+        sepY += (dy / dist) * force;
+        sepCount++;
+      }
+
+      if (distSq < ALI_RADIUS * ALI_RADIUS) {
+        aliX += b.vx;
+        aliY += b.vy;
+        aliCount++;
+      }
+
+      if (distSq < COH_RADIUS * COH_RADIUS) {
+        cohX += b.x;
+        cohY += b.y;
+        cohCount++;
+      }
+    }
+
+    let fx = 0, fy = 0;
+
+    // Separation
+    if (sepCount > 0) {
+      const weight = 1.8;
+      fx += (sepX / sepCount) * weight;
+      fy += (sepY / sepCount) * weight;
+    }
+
+    // Alignment
+    if (aliCount > 0) {
+      const weight = 0.7;
+      fx += (aliX / aliCount - this.vx) * weight;
+      fy += (aliY / aliCount - this.vy) * weight;
+    }
+
+    // Cohesion — modulated by cohesionFactor
+    if (cohCount > 0) {
+      const weight = 0.35 * cohesionFactor;
+      const cx = cohX / cohCount;
+      const cy = cohY / cohCount;
+      fx += (cx - this.x) * weight;
+      fy += (cy - this.y) * weight;
+    }
+
+    // --- Corner attractors ---
+    let bestDist = Infinity;
+    let bestAttr = 0;
+    for (let a = 0; a < 4; a++) {
+      const ax = CORNER_ATTRACTORS[a].x * W;
+      const ay = CORNER_ATTRACTORS[a].y * H;
+      const dx = ax - this.x;
+      const dy = ay - this.y;
+      const distSq = dx * dx + dy * dy;
+      fx += dx * ATTRACTOR_FORCE;
+      fy += dy * ATTRACTOR_FORCE;
+      if (distSq < bestDist) {
+        bestDist = distSq;
+        bestAttr = a;
+      }
+    }
+
+    this.prevAllegiance = this.allegiance;
+    this.allegiance = bestAttr;
+    if (this.prevAllegiance !== this.allegiance && this.prevAllegiance >= 0) {
+      this.flashAlpha = 1.0;
+    }
+
+    // --- Mouse repel ---
+    if (mouseActive) {
+      const mdx = this.x - mouseX;
+      const mdy = this.y - mouseY;
+      const mdistSq = mdx * mdx + mdy * mdy;
+      if (mdistSq < MOUSE_REPEL_RADIUS * MOUSE_REPEL_RADIUS && mdistSq > 0.1) {
+        const mdist = Math.sqrt(mdistSq);
+        const force = (1 - mdist / MOUSE_REPEL_RADIUS) * MOUSE_REPEL_FORCE;
+        fx += (mdx / mdist) * force;
+        fy += (mdy / mdist) * force;
+      }
+    }
+
+    // --- Click attractor ---
+    if (clickAttractor) {
+      const cdx = clickAttractor.x - this.x;
+      const cdy = clickAttractor.y - this.y;
+      const cdistSq = cdx * cdx + cdy * cdy;
+      if (cdistSq < CLICK_RADIUS * CLICK_RADIUS) {
+        const cdist = Math.sqrt(cdistSq);
+        const force = (1 - cdist / CLICK_RADIUS) * CLICK_FORCE;
+        fx += (cdx / cdist) * force * (1 + this.size * 0.3);
+        fy += (cdy / cdist) * force * (1 + this.size * 0.3);
+      }
+    }
+
+    // --- Noise wind ---
+    const windScale = 0.003;
+    const wind = snoise(this.x * windScale, this.y * windScale + 0.5) * 0.12;
+    const wind2 = snoise(this.x * windScale + 100, this.y * windScale) * 0.12;
+    fx += wind2;
+    fy += wind;
+
+    // --- Boundary soft bounce ---
+    const margin = 40;
+    if (this.x < margin) fx += (margin - this.x) * 0.015;
+    if (this.x > W - margin) fx -= (this.x - (W - margin)) * 0.015;
+    if (this.y < margin) fy += (margin - this.y) * 0.015;
+    if (this.y > H - margin) fy -= (this.y - (H - margin)) * 0.015;
+
+    // --- Apply forces ---
+    const maxForce = 2.5;
+    const fMag = Math.sqrt(fx * fx + fy * fy);
+    if (fMag > maxForce) {
+      fx = (fx / fMag) * maxForce;
+      fy = (fy / fMag) * maxForce;
+    }
+
+    this.vx += fx * 0.85;
+    this.vy += fy * 0.85;
+
+    // Speed limits
+    const minSpeed = 1.2;
+    const maxSpeed = 3.2;
+    const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+    if (speed < minSpeed) {
+      this.vx = (this.vx / speed) * minSpeed;
+      this.vy = (this.vy / speed) * minSpeed;
+    } else if (speed > maxSpeed) {
+      this.vx = (this.vx / speed) * maxSpeed;
+      this.vy = (this.vy / speed) * maxSpeed;
+    }
+
+    // --- Update position ---
+    this.x += this.vx;
+    this.y += this.vy;
+
+    // --- Trail ---
+    if (this.trail.length >= this.trailLen) this.trail.shift();
+    this.trail.push({ x: this.x, y: this.y, a: this.allegiance });
+
+    // --- Flicker ---
+    this.flickerPhase += 0.06 + Math.random() * 0.04;
+
+    // --- Flash decay ---
+    this.flashAlpha *= 0.88;
+  }
+
+  draw(ctx) {
+    const [cr, cg, cb] = COLD_PALETTE[this.colorIdx];
+    const allegianceColor = CORNER_ATTRACTORS[this.allegiance].color;
+    const blend = 0.45;
+    const r = Math.round(cr * (1 - blend) + allegianceColor[0] * blend);
+    const g = Math.round(cg * (1 - blend) + allegianceColor[1] * blend);
+    const b = Math.round(cb * (1 - blend) + allegianceColor[2] * blend);
+
+    const flicker = 0.85 + 0.15 * Math.sin(this.flickerPhase);
+
+    // Trail
+    for (let i = 0; i < this.trail.length - 1; i++) {
+      const t = this.trail[i];
+      const alpha = (i / this.trail.length) * 0.15 * flicker;
+      if (t && this.trail[i + 1]) {
+        ctx.beginPath();
+        ctx.moveTo(t.x, t.y);
+        ctx.lineTo(this.trail[i + 1].x, this.trail[i + 1].y);
+        ctx.strokeStyle = `rgba(${r},${g},${b},${alpha})`;
+        ctx.lineWidth = this.size * 0.5;
+        ctx.stroke();
+      }
+    }
+
+    // Glow halo
+    const glowAlpha = 0.18 * flicker;
+    const glow = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size * 4);
+    glow.addColorStop(0, `rgba(${r},${g},${b},${glowAlpha})`);
+    glow.addColorStop(0.5, `rgba(${r},${g},${b},${glowAlpha * 0.4})`);
+    glow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(this.x - this.size * 4, this.y - this.size * 4, this.size * 8, this.size * 8);
+
+    // Core dot
+    const coreAlpha = 0.7 * flicker + this.flashAlpha * 0.6;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size * 0.7, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${r},${g},${b},${coreAlpha})`;
+    ctx.fill();
+
+    // Flash ring
+    if (this.flashAlpha > 0.02) {
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.size * 2.2 * this.flashAlpha, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(232,240,248,${this.flashAlpha * 0.7})`;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+}
+
+// Initialize boids
+for (let i = 0; i < NUM_BOIDS; i++) {
+  boids.push(new Boid());
+}
+
+// --- Scatter event ---
+function triggerScatter() {
+  targetCohesion = -0.2;  // negative cohesion = anti-cohesion, boids repel from center of mass
+  setTimeout(() => { targetCohesion = 1.0; }, 1800);
+  scatterCooldown = 300 + Math.random() * 400;  // frames
+}
+
+// --- Resize ---
+function resize() {
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W;
+  canvas.height = H;
+  // Re-seed boids that are now off-screen
+  for (const b of boids) {
+    if (b.x > W || b.y > H) b.reset();
+  }
+}
+window.addEventListener('resize', resize);
+resize();
+
+// --- Mouse ---
+canvas.addEventListener('mousemove', (e) => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+  mouseActive = true;
+});
+canvas.addEventListener('mouseleave', () => { mouseActive = false; });
+canvas.addEventListener('click', (e) => {
+  clickAttractor = { x: e.clientX, y: e.clientY, frames: CLICK_DURATION };
+});
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  mouseX = e.touches[0].clientX;
+  mouseY = e.touches[0].clientY;
+  mouseActive = true;
+}, { passive: false });
+canvas.addEventListener('touchend', () => { mouseActive = false; });
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  clickAttractor = { x: e.touches[0].clientX, y: e.touches[0].clientY, frames: CLICK_DURATION };
+  mouseX = e.touches[0].clientX;
+  mouseY = e.touches[0].clientY;
+  mouseActive = true;
+}, { passive: false });
+
+// --- Phrase cycling ---
+function cyclePhrase() {
+  phraseIdx = (phraseIdx + 1) % phrases.length;
+  phraseEl.textContent = phrases[phraseIdx];
+  phraseEl.style.opacity = 1;
+  phraseOpacity = 1;
+  phraseTimer = PHRASE_INTERVAL - PHRASE_FADE;
+}
+
+// --- Title fade ---
+setTimeout(() => {
+  document.getElementById('title-overlay').classList.add('fade');
+}, 3500);
+
+// --- Render loop ---
+let frameCount = 0;
+let lastScatterCheck = 0;
+
+function updateStats() {
+  const counts = [0, 0, 0, 0];
+  for (const b of boids) counts[b.allegiance]++;
+  const maxCount = Math.max(...counts);
+  const domIdx = counts.indexOf(maxCount);
+  const labels = ['NE', 'NW', 'SE', 'SW'];
+  const domLabel = labels[domIdx];
+  const domPct = Math.round((maxCount / NUM_BOIDS) * 100);
+  document.getElementById('stats').innerHTML =
+    `cohesion ${Math.round(cohesionFactor * 100)}%<br>dominance ${domLabel} ${domPct}%<br>boids ${NUM_BOIDS}`;
+}
+
+function drawAttractorPulses() {
+  const pulsePhase = frameCount * 0.004;
+  for (const a of CORNER_ATTRACTORS) {
+    const ax = a.x * W;
+    const ay = a.y * H;
+    const pulseR = 40 + Math.sin(pulsePhase + a.x * 10) * 8;
+    const alpha = 0.22 + Math.sin(pulsePhase + a.y * 7) * 0.08;
+
+    const g = ctx.createRadialGradient(ax, ay, 0, ax, ay, pulseR);
+    g.addColorStop(0, `rgba(${a.color[0]},${a.color[1]},${a.color[2]},${alpha})`);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(ax - pulseR, ay - pulseR, pulseR * 2, pulseR * 2);
+
+    // Small core dot
+    ctx.beginPath();
+    ctx.arc(ax, ay, 3, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${a.color[0]},${a.color[1]},${a.color[2]},0.5)`;
+    ctx.fill();
+  }
+}
+
+function drawClickAttractor() {
+  if (!clickAttractor) return;
+  const t = clickAttractor.frames / CLICK_DURATION;
+  const r = CLICK_RADIUS * t;
+  const alpha = t * 0.3;
+
+  const g = ctx.createRadialGradient(clickAttractor.x, clickAttractor.y, 0,
+    clickAttractor.x, clickAttractor.y, r);
+  g.addColorStop(0, `rgba(184,212,232,${alpha})`);
+  g.addColorStop(0.6, `rgba(123,164,196,${alpha * 0.4})`);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(clickAttractor.x - r, clickAttractor.y - r, r * 2, r * 2);
+
+  // Ring
+  ctx.beginPath();
+  ctx.arc(clickAttractor.x, clickAttractor.y, r, 0, Math.PI * 2);
+  ctx.strokeStyle = `rgba(184,212,232,${alpha * 0.5})`;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+function drawCenterVoid() {
+  const cx = W / 2, cy = H / 2;
+  const voidR = Math.min(W, H) * 0.12;
+  const alpha = 0.16 + Math.sin(frameCount * 0.003) * 0.04;
+
+  const g = ctx.createRadialGradient(cx, cy, voidR * 0.3, cx, cy, voidR);
+  g.addColorStop(0, `rgba(10,18,25,0)`);
+  g.addColorStop(0.7, `rgba(10,18,25,${alpha})`);
+  g.addColorStop(1, 'rgba(10,18,25,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(cx - voidR, cy - voidR, voidR * 2, voidR * 2);
+
+  // Faint ring
+  ctx.beginPath();
+  ctx.arc(cx, cy, voidR, 0, Math.PI * 2);
+  ctx.strokeStyle = `rgba(184,212,232,${alpha * 0.5})`;
+  ctx.lineWidth = 0.5;
+  ctx.stroke();
+}
+
+function drawVignette() {
+  const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35,
+    W / 2, H / 2, Math.max(W, H) * 0.7);
+  vg.addColorStop(0, 'rgba(10,18,25,0)');
+  vg.addColorStop(1, 'rgba(10,18,25,0.55)');
+  ctx.fillStyle = vg;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function render() {
+  ctx.fillStyle = 'rgba(10,18,25,0.22)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Gentle fade trail
+  ctx.fillStyle = 'rgba(10,18,25,0.14)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Update click attractor
+  if (clickAttractor) {
+    clickAttractor.frames--;
+    if (clickAttractor.frames <= 0) clickAttractor = null;
+  }
+
+  // Cohesion lerp
+  cohesionFactor += (targetCohesion - cohesionFactor) * 0.03;
+
+  // Mouse inactivity decay
+  if (mouseActive) {
+    scatterTimer = 0;
+  } else {
+    scatterTimer++;
+  }
+
+  // Periodic scatter
+  if (scatterCooldown <= 0 && frameCount - lastScatterCheck > 600) {
+    if (Math.random() < 0.15 && cohesionFactor > 0.7) {
+      triggerScatter();
+      lastScatterCheck = frameCount;
+    } else if (frameCount - lastScatterCheck > 900) {
+      triggerScatter();
+      lastScatterCheck = frameCount;
+    }
+  }
+  if (scatterCooldown > 0) scatterCooldown--;
+
+  // Draw attractors
+  drawAttractorPulses();
+  drawClickAttractor();
+  drawCenterVoid();
+
+  // Update and draw boids
+  for (let i = 0; i < boids.length; i++) {
+    boids[i].update(boids, i);
+  }
+
+  // Sort boids by allegiance for layer depth
+  const sorted = [...boids].sort((a, b) => a.allegiance - b.allegiance);
+  for (const b of sorted) {
+    b.draw(ctx);
+  }
+
+  drawVignette();
+
+  // Stats
+  if (frameCount % 30 === 0) updateStats();
+
+  // Phrase timer
+  if (phraseTimer > 0) {
+    phraseTimer -= 1 / 60;
+    if (phraseTimer <= 0 && phraseOpacity > 0) {
+      phraseEl.style.opacity = 0;
+      phraseOpacity = 0;
+      phraseTimer = -1;
+      setTimeout(cyclePhrase, PHRASE_FADE * 1000);
+    }
+  }
+
+  frameCount++;
+  requestAnimationFrame(render);
+}
+
+// Start
+cyclePhrase();
+requestAnimationFrame(render);
+</script>
+</body>
+</html>
