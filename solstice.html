@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Solstice</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0a;
+    display: flex; align-items: center; justify-content: center;
+    height: 100vh; overflow: hidden;
+    font-family: 'Georgia', serif;
+    cursor: crosshair;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  canvas { display: block; }
+  #overlay {
+    position: fixed;
+    bottom: 2rem;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #888;
+    font-size: 0.85rem;
+    letter-spacing: 0.08em;
+    text-align: center;
+    transition: opacity 1.5s;
+    pointer-events: none;
+  }
+  #tooltip {
+    position: fixed;
+    top: 2rem;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #d4a853;
+    font-size: 1.1rem;
+    letter-spacing: 0.06em;
+    text-align: center;
+    transition: opacity 0.6s;
+    pointer-events: none;
+    opacity: 0;
+  }
+  #poem {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: rgba(255,255,255,0.12);
+    font-size: 1rem;
+    letter-spacing: 0.1em;
+    text-align: center;
+    pointer-events: none;
+    transition: opacity 3s;
+    max-width: 320px;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="tooltip"></div>
+<div id="poem"></div>
+<div id="overlay">move horizontally to sweep the year &bull; vertically to change latitude</div>
+
+<script>
+(function() {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const tooltip = document.getElementById('tooltip');
+  const poemEl = document.getElementById('poem');
+  const overlay = document.getElementById('overlay');
+
+  let W, H, cx, cy, R;
+  let mouseX = 0.5, mouseY = 0.5;
+  let targetMouseX = 0.5, targetMouseY = 0.5;
+  let isMouseDown = false;
+  let overlayOpacity = 1;
+
+  const poems = [
+    "the day breathes in",
+    "the night breathes out",
+    "between them\nthe threshold",
+    "light remembers\ndarkness",
+    "six months to the peak",
+    "six months to the deep",
+    "at the hinge\nthe world turns",
+    "twice a year\neverything balances",
+    "the longest light\nThe longest shadow",
+    "a ring of hours\nspinning",
+    "the arc of the sun\nwritten in gold",
+    "at the edge of seeing\nthe day holds still"
+  ];
+  let poemIndex = -1;
+  let poemTimer = 0;
+  let poemAlpha = 0;
+  const POEM_INTERVAL = 14; // seconds
+  const POEM_FADE = 3; // seconds fade in/out
+
+  // Data generation: daylight hours per day for a given latitude
+  function declination(dayOfYear) {
+    // Solar declination: 23.44° * sin(2π * (day - 80) / 365.25)
+    return 23.44 * Math.PI / 180 * Math.sin(2 * Math.PI * (dayOfYear - 80) / 365.25);
+  }
+
+  function daylightHours(latDeg, dayOfYear) {
+    const lat = latDeg * Math.PI / 180;
+    const decl = declination(dayOfYear);
+    const cosH = -Math.tan(lat) * Math.tan(decl);
+    if (cosH >= 1) return 24;   // polar day
+    if (cosH <= -1) return 0;   // polar night
+    return 2 * Math.acos(cosH) * 24 / (2 * Math.PI);
+  }
+
+  // Precompute data for latitudes 0..66
+  const latitudes = [];
+  for (let l = 0; l <= 66; l++) {
+    const data = [];
+    for (let d = 0; d < 365; d++) {
+      data.push(daylightHours(l, d));
+    }
+    latitudes.push(data);
+  }
+
+  function resize() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W;
+    canvas.height = H;
+    cx = W / 2;
+    cy = H / 2;
+    R = Math.min(W, H) * 0.38;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // Mouse tracking
+  window.addEventListener('mousemove', (e) => {
+    targetMouseX = e.clientX / W;
+    targetMouseY = e.clientY / H;
+  });
+  window.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    targetMouseX = e.touches[0].clientX / W;
+    targetMouseY = e.touches[0].clientY / H;
+    overlayOpacity = Math.max(0, overlayOpacity - 0.02);
+  });
+  window.addEventListener('mousedown', () => { isMouseDown = true; });
+  window.addEventListener('mouseup', () => { isMouseDown = false; });
+
+  // Smooth interpolation
+  function lerp(a, b, t) { return a + (b - a) * t; }
+
+  function getDayOfYear(mx) {
+    return Math.floor(mx * 365);
+  }
+
+  function getLatitude(my) {
+    return Math.floor(my * 66);
+  }
+
+  function monthName(doy) {
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const monthStarts = [0,31,59,90,120,151,181,212,243,273,304,334];
+    for (let i = months.length - 1; i >= 0; i--) {
+      if (doy >= monthStarts[i]) return months[i] + ' ' + (doy - monthStarts[i] + 1);
+    }
+    return '';
+  }
+
+  // Draw a single segment of the ring
+  function drawSegment(angle, arcWidth, innerR, outerR, color, alpha) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, innerR, angle, angle + arcWidth);
+    ctx.arc(cx, cy, outerR, angle + arcWidth, angle, true);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.globalAlpha = alpha;
+    ctx.fill();
+    ctx.restore();
+  }
+
+  let time = 0;
+  let lastFrame = performance.now();
+
+  function draw(timestamp) {
+    const dt = Math.min((timestamp - lastFrame) / 1000, 0.1);
+    lastFrame = timestamp;
+    time += dt;
+
+    // Smooth mouse
+    const smoothSpeed = isMouseDown ? 0.3 : 0.08;
+    mouseX = lerp(mouseX, targetMouseX, smoothSpeed);
+    mouseY = lerp(mouseY, targetMouseY, smoothSpeed);
+
+    const latIdx = getLatitude(mouseY);
+    const lat = latIdx;
+    const dayIdx = getDayOfYear(mouseX);
+    const data = latitudes[latIdx];
+
+    const maxDaylight = 24;
+    const minDaylight = 0;
+    const range = maxDaylight - minDaylight;
+
+    // Background
+    ctx.fillStyle = '#0a0a0a';
+    ctx.fillRect(0, 0, W, H);
+
+    // Subtle center glow
+    const breath = 1 + 0.03 * Math.sin(time * 0.4);
+    const glowGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 1.4);
+    glowGrad.addColorStop(0, 'rgba(40,40,40,0.15)');
+    glowGrad.addColorStop(0.5, 'rgba(20,20,20,0.05)');
+    glowGrad.addColorStop(1, 'rgba(10,10,10,0)');
+    ctx.fillStyle = glowGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Outer ring: all 365 days
+    const baseInnerR = R * 0.68;
+    const baseOuterR = R * 1.1;
+    const arcW = (2 * Math.PI) / 365;
+
+    for (let d = 0; d < 365; d++) {
+      const hours = data[d];
+      const frac = (hours - minDaylight) / range; // 0=darkest, 1=brightest
+      const angle = (d / 365) * 2 * Math.PI - Math.PI / 2;
+      const innerR = baseInnerR;
+      const outerR = baseInnerR + (baseOuterR - baseInnerR) * frac;
+
+      // Near the cursor day, brighten
+      let dist = Math.abs(d - dayIdx);
+      if (dist > 182) dist = 365 - dist;
+      const proximity = Math.max(0, 1 - dist / 15);
+
+      // Grayscale base
+      const baseGray = 30 + frac * 65;
+      const r = baseGray;
+      const g = baseGray;
+      const b = baseGray + frac * 8; // slight blue shift for brighter days
+
+      // Gold at solstices
+      const isSummerSolstice = (d >= 170 && d <= 174); // June 20-24
+      const isWinterSolstice = (d >= 353 || d <= 2);  // Dec 20-26
+      let accent = 0;
+      if (isSummerSolstice || isWinterSolstice) {
+        accent = isSummerSolstice ? 0.7 : 0.5;
+      }
+
+      // Equinox accents
+      const isSpringEquinox = (d >= 77 && d <= 81);  // Mar 18-22
+      const isAutumnEquinox = (d >= 263 && d <= 267); // Sep 20-24
+      let eqAccent = 0;
+      if (isSpringEquinox || isAutumnEquinox) {
+        eqAccent = 0.35;
+      }
+
+      let colorR = r, colorG = g, colorB = b;
+      let alpha = 0.55;
+
+      if (accent > 0) {
+        colorR = Math.min(255, r + 120 * accent);
+        colorG = Math.min(255, g + 100 * accent);
+        colorB = Math.min(255, b - 20 * accent + 30 * accent);
+        alpha = 0.55 + 0.35 * accent;
+      }
+      if (eqAccent > 0) {
+        colorR = Math.min(255, r + 60 * eqAccent);
+        colorG = Math.min(255, g + 60 * eqAccent);
+        colorB = Math.min(255, b + 20 * eqAccent);
+        alpha = 0.55 + 0.2 * eqAccent;
+      }
+
+      if (proximity > 0) {
+        const p = proximity;
+        colorR = Math.min(255, colorR + 180 * p);
+        colorG = Math.min(255, colorG + 170 * p);
+        colorB = Math.min(255, colorB + 140 * p);
+        alpha = Math.min(1, alpha + 0.45 * p);
+      }
+
+      const colorStr = `rgb(${Math.floor(colorR)},${Math.floor(colorG)},${Math.floor(colorB)})`;
+      drawSegment(angle, arcW, innerR, outerR, colorStr, alpha);
+    }
+
+    // Inner ring: polar night indicator for high latitudes
+    if (lat > 60) {
+      const polarDays = data.filter(h => h === 0).length;
+      if (polarDays > 0) {
+        const polarStart = data.findIndex(h => h === 0);
+        const polarEnd = 364 - [...data].reverse().findIndex(h => h === 0);
+        if (polarStart >= 0 && polarEnd < 365) {
+          const a1 = (polarStart / 365) * 2 * Math.PI - Math.PI / 2;
+          const a2 = (polarEnd / 365) * 2 * Math.PI - Math.PI / 2;
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(cx, cy, baseInnerR, a1, a2);
+          ctx.arc(cx, cy, baseInnerR - 4, a2, a1, true);
+          ctx.closePath();
+          ctx.fillStyle = 'rgba(10,10,14,0.8)';
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+    }
+
+    // Current day indicator line
+    const dayAngle = (dayIdx / 365) * 2 * Math.PI - Math.PI / 2;
+    const dayHours = data[dayIdx];
+    const dayFrac = (dayHours - minDaylight) / range;
+    const indicatorR = baseInnerR + (baseOuterR - baseInnerR) * dayFrac;
+
+    // Pulse on current day
+    const pulse = 1 + 0.06 * Math.sin(time * 3);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+    ctx.lineWidth = 1.5 * pulse;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(dayAngle) * (baseInnerR - 8),
+               cy + Math.sin(dayAngle) * (baseInnerR - 8));
+    ctx.lineTo(cx + Math.cos(dayAngle) * (indicatorR + 6),
+               cy + Math.sin(dayAngle) * (indicatorR + 6));
+    ctx.stroke();
+
+    // Dot at the tip
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.beginPath();
+    ctx.arc(cx + Math.cos(dayAngle) * (indicatorR + 5),
+            cy + Math.sin(dayAngle) * (indicatorR + 5),
+            2.5 * pulse, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Center ring: latitude label
+    ctx.save();
+    ctx.fillStyle = 'rgba(180,180,180,0.5)';
+    ctx.font = '13px Georgia';
+    ctx.textAlign = 'center';
+    ctx.fillText(Math.abs(lat) + '°' + (lat === 0 ? ' Equator' : 'N'), cx, cy - 8);
+
+    // Daylight hours under center
+    ctx.fillStyle = 'rgba(220,220,220,0.7)';
+    ctx.font = '15px Georgia';
+    const hrs = Math.floor(dayHours);
+    const mins = Math.floor((dayHours - hrs) * 60);
+    ctx.fillText(`${hrs}h ${mins}m daylight`, cx, cy + 14);
+    ctx.restore();
+
+    // Solstice / equinox markers
+    const markers = [
+      { doy: 172, label: '☀', desc: 'summer solstice', color: 'rgba(212,168,83,0.8)' },
+      { doy: 355, label: '☽', desc: 'winter solstice', color: 'rgba(180,150,100,0.6)' },
+      { doy: 79, label: '≋', desc: 'spring equinox', color: 'rgba(160,160,160,0.5)' },
+      { doy: 265, label: '≋', desc: 'autumn equinox', color: 'rgba(160,160,160,0.5)' }
+    ];
+
+    markers.forEach(m => {
+      const a = (m.doy / 365) * 2 * Math.PI - Math.PI / 2;
+      const mr = baseOuterR + 18;
+      ctx.save();
+      ctx.fillStyle = m.color;
+      ctx.font = '14px Georgia';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(m.label, cx + Math.cos(a) * mr, cy + Math.sin(a) * mr);
+
+      // Small connecting dot
+      ctx.fillStyle = m.color;
+      ctx.beginPath();
+      ctx.arc(cx + Math.cos(a) * baseOuterR, cy + Math.sin(a) * baseOuterR, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+
+    // Vignette
+    const vignette = ctx.createRadialGradient(cx, cy, R * 0.5, cx, cy, Math.max(W, H) * 0.75);
+    vignette.addColorStop(0, 'rgba(10,10,10,0)');
+    vignette.addColorStop(0.6, 'rgba(10,10,10,0.3)');
+    vignette.addColorStop(1, 'rgba(10,10,10,0.85)');
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, W, H);
+
+    // Tooltip
+    const dayName = monthName(dayIdx);
+    const nextDayIdx = (dayIdx + 1) % 365;
+    const nextHours = data[nextDayIdx];
+    const change = nextHours - dayHours;
+    const changeStr = change >= 0
+      ? `+${Math.floor(change * 60)}s more tomorrow`
+      : `${Math.floor(Math.abs(change) * 60)}s less tomorrow`;
+
+    tooltip.textContent = `${dayName} · ${lat}°N · ${hrs}h ${mins}m · ${changeStr}`;
+    tooltip.style.opacity = overlayOpacity < 0.8 ? '1' : '0';
+
+    // Poem cycle
+    poemTimer += dt;
+    if (poemIndex === -1 || poemTimer > POEM_INTERVAL + POEM_FADE * 2) {
+      poemTimer = 0;
+      poemIndex = (poemIndex + 1) % poems.length;
+      poemAlpha = 0;
+    }
+    const phaseTime = poemTimer;
+    if (phaseTime < POEM_FADE) {
+      poemAlpha = phaseTime / POEM_FADE;
+    } else if (phaseTime < POEM_INTERVAL) {
+      poemAlpha = 1;
+    } else {
+      poemAlpha = 1 - (phaseTime - POEM_INTERVAL) / POEM_FADE;
+    }
+    const poemBreath = 1 + 0.02 * Math.sin(time * 0.5);
+    poemEl.textContent = poems[poemIndex];
+    poemEl.style.opacity = Math.max(0, poemAlpha * poemBreath * 0.14);
+
+    // Overlay fade
+    if (overlayOpacity > 0 && targetMouseX !== 0.5) {
+      overlayOpacity = Math.max(0, overlayOpacity - dt * 0.15);
+    }
+    overlay.style.opacity = overlayOpacity;
+
+    requestAnimationFrame(draw);
+  }
+
+  requestAnimationFrame(draw);
+
+  // Touch support
+  canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    targetMouseX = e.touches[0].clientX / W;
+    targetMouseY = e.touches[0].clientY / H;
+    overlayOpacity = Math.max(0, overlayOpacity - 0.1);
+  });
+})();
+</script>
+</body>
+</html>
