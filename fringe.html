@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fringe</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0f0803;
+    overflow: hidden;
+    cursor: crosshair;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  canvas { display: block; }
+  #overlay {
+    position: fixed;
+    bottom: 10%;
+    left: 0;
+    width: 100%;
+    text-align: center;
+    pointer-events: none;
+    z-index: 10;
+  }
+  #phrase {
+    color: #c4a05a;
+    font-size: 0.95rem;
+    letter-spacing: 0.12em;
+    opacity: 0;
+    transition: opacity 1.4s ease;
+  }
+  #title-area {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    pointer-events: none;
+    z-index: 5;
+    opacity: 0;
+    transition: opacity 2s ease;
+  }
+  #title-word {
+    color: #3d1c0f;
+    font-size: 2.2rem;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+  }
+  #subtitle {
+    color: #3d1c0f;
+    font-size: 0.7rem;
+    letter-spacing: 0.3em;
+    margin-top: 0.3rem;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="overlay"><span id="phrase"></span></div>
+<div id="title-area"><div id="title-word">fringe</div><div id="subtitle">— the edge hums —</div></div>
+<script>
+// ═══════════════════════════════════════════════════════════════
+// FRINGE — Hexagonal Continuous-State Cellular Automaton
+// Warm-earth palette | Joyful mood | Edge-dominant composition
+// ═══════════════════════════════════════════════════════════════
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const phraseEl = document.getElementById('phrase');
+const titleArea = document.getElementById('title-area');
+
+// ── Hex grid constants ──
+const HEX_R = 13;
+const SQRT3 = Math.sqrt(3);
+const HEX_W = HEX_R * 1.5;
+const HEX_H = SQRT3 * HEX_R;
+
+// ── Grid state ──
+let W, H, COLS, ROWS;
+let grid, nextGrid;
+let frameCount = 0;
+
+// ── Neighbor offsets for odd-r hex grid ──
+const NEIGHBORS_EVEN = [[-1,-1],[-1,0],[0,-1],[0,1],[1,-1],[1,0]];
+const NEIGHBORS_ODD  = [[-1,0],[-1,1],[0,-1],[0,1],[1,0],[1,1]];
+
+// ── Color palette: warm-earth 5-stop ──
+function warmColor(t) {
+  // t in [0, 1] → interpolate through 5 warm-earth stops
+  const stops = [
+    { t: 0.00, r: 15, g: 8, b: 3 },     // deep warm void
+    { t: 0.25, r: 55, g: 24, b: 10 },    // dark sienna
+    { t: 0.50, r: 120, g: 72, b: 18 },   // ochre
+    { t: 0.75, r: 185, g: 106, b: 42 },  // terracotta
+    { t: 1.00, r: 232, g: 206, b: 148 }  // cream
+  ];
+  let lo = stops[0], hi = stops[stops.length - 1];
+  for (let i = 0; i < stops.length - 1; i++) {
+    if (t >= stops[i].t && t <= stops[i + 1].t) {
+      lo = stops[i]; hi = stops[i + 1]; break;
+    }
+  }
+  const f = lo.t === hi.t ? 0 : (t - lo.t) / (hi.t - lo.t);
+  return {
+    r: Math.round(lo.r + (hi.r - lo.r) * f),
+    g: Math.round(lo.g + (hi.g - lo.g) * f),
+    b: Math.round(lo.b + (hi.b - lo.b) * f)
+  };
+}
+
+// ── Hex geometry ──
+function hexCenter(c, r) {
+  return {
+    x: HEX_R + c * HEX_W,
+    y: HEX_R + r * HEX_H + (c & 1) * HEX_H * 0.5
+  };
+}
+
+function hexVertices(cx, cy) {
+  const pts = [];
+  for (let i = 0; i < 6; i++) {
+    const a = Math.PI / 6 + i * Math.PI / 3;
+    pts.push({ x: cx + HEX_R * Math.cos(a), y: cy + HEX_R * Math.sin(a) });
+  }
+  return pts;
+}
+
+// ── Grid init ──
+function initGrid() {
+  grid = new Float32Array(COLS * ROWS);
+  nextGrid = new Float32Array(COLS * ROWS);
+  // Random warm seeding along edges
+  for (let c = 0; c < COLS; c++) {
+    for (let r = 0; r < ROWS; r++) {
+      const idx = r * COLS + c;
+      const edgeDist = edgeProximity(c, r); // 0=deep, 1=edge
+      if (edgeDist > 0.7 && Math.random() < 0.15) {
+        grid[idx] = 0.3 + Math.random() * 0.7;
+      } else if (edgeDist > 0.4 && Math.random() < 0.03) {
+        grid[idx] = 0.1 + Math.random() * 0.3;
+      } else {
+        grid[idx] = Math.random() * 0.02;
+      }
+    }
+  }
+}
+
+function edgeProximity(c, r) {
+  const distL = c;
+  const distR = COLS - 1 - c;
+  const distT = r;
+  const distB = ROWS - 1 - r;
+  const minH = Math.min(distL, distR) / (COLS * 0.15);
+  const minV = Math.min(distT, distB) / (ROWS * 0.15);
+  return 1 - Math.min(1, Math.min(minH, minV));
+}
+
+function centerDist(c, r) {
+  const dx = (c - COLS / 2) / (COLS / 2);
+  const dy = (r - ROWS / 2) / (ROWS / 2);
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+// ── Mouse state ──
+let mouseX = -100, mouseY = -100;
+let mouseActive = false;
+
+// ── Ember particles ──
+const embers = [];
+const MAX_EMBERS = 90;
+
+function spawnEmber(cx, cy, intensity) {
+  if (embers.length >= MAX_EMBERS) return;
+  embers.push({
+    x: cx + (Math.random() - 0.5) * 6,
+    y: cy + (Math.random() - 0.5) * 6,
+    vx: (Math.random() - 0.5) * 0.4,
+    vy: -0.3 - Math.random() * 0.7,
+    life: 1,
+    decay: 0.008 + Math.random() * 0.025,
+    size: 1 + Math.random() * 2.5,
+    hue: intensity // state-value from source cell
+  });
+}
+
+function updateEmbers() {
+  for (let i = embers.length - 1; i >= 0; i--) {
+    const e = embers[i];
+    e.x += e.vx;
+    e.y += e.vy;
+    e.life -= e.decay;
+    if (e.life <= 0) { embers.splice(i, 1); }
+  }
+}
+
+function drawEmbers() {
+  for (const e of embers) {
+    const alpha = e.life * 0.55;
+    const col = warmColor(e.hue);
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, e.size * e.life, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${col.r},${col.g},${col.b},${alpha})`;
+    ctx.fill();
+    // soft glow
+    if (e.life > 0.3) {
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.size * e.life * 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${col.r},${col.g},${col.b},${alpha * 0.15})`;
+      ctx.fill();
+    }
+  }
+}
+
+// ── CA step ──
+function stepCA() {
+  for (let c = 0; c < COLS; c++) {
+    for (let r = 0; r < ROWS; r++) {
+      const idx = r * COLS + c;
+      const nbrs = (c & 1) === 0 ? NEIGHBORS_EVEN : NEIGHBORS_ODD;
+
+      // Neighbor average
+      let sum = 0, count = 0;
+      for (const [dc, dr] of nbrs) {
+        const nc = c + dc, nr = r + dr;
+        if (nc >= 0 && nc < COLS && nr >= 0 && nr < ROWS) {
+          sum += grid[nr * COLS + nc];
+          count++;
+        }
+      }
+      const avg = count > 0 ? sum / count : 0;
+
+      // Rule: persistence + neighbor coupling + noise
+      const noise = (Math.random() - 0.5) * 0.03;
+      let state = grid[idx] * 0.72 + avg * 0.23 + noise;
+
+      // Center dissipation: stronger near center, weaker near edges
+      const cd = centerDist(c, r);
+      const dissipate = 0.998 - cd * 0.012;
+      state *= dissipate;
+
+      // Edge seeding: spontaneous blooms along the fringe
+      const ep = edgeProximity(c, r);
+      if (ep > 0.85 && Math.random() < 0.004) {
+        state = Math.max(state, 0.4 + Math.random() * 0.6);
+      }
+      if (ep > 0.6 && ep <= 0.85 && Math.random() < 0.0015) {
+        state = Math.max(state, 0.25 + Math.random() * 0.35);
+      }
+
+      // Mouse proximity: gentle activation boost
+      if (mouseActive) {
+        const hc = hexCenter(c, r);
+        const dx = mouseX - hc.x;
+        const dy = mouseY - hc.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 90) {
+          const influence = (1 - dist / 90) * 0.18;
+          state += influence;
+        }
+      }
+
+      // Clamp
+      state = Math.max(0, Math.min(1, state));
+
+      // Ember spawn: active cells near edges produce particles
+      if (state > 0.4 && ep > 0.4 && Math.random() < state * 0.06) {
+        const hc = hexCenter(c, r);
+        spawnEmber(hc.x, hc.y, state);
+      }
+
+      nextGrid[idx] = state;
+    }
+  }
+  // Swap
+  [grid, nextGrid] = [nextGrid, grid];
+}
+
+// ── Click seed ──
+function seedCluster(cx, cy) {
+  const radius = 4;
+  for (let c = 0; c < COLS; c++) {
+    for (let r = 0; r < ROWS; r++) {
+      const hc = hexCenter(c, r);
+      const dx = hc.x - cx, dy = hc.y - cy;
+      const dist = Math.sqrt(dx * dx + dy * dy) / HEX_R;
+      if (dist < radius) {
+        const idx = r * COLS + c;
+        grid[idx] = Math.max(grid[idx], 0.6 + Math.random() * 0.4 * (1 - dist / radius));
+      }
+    }
+  }
+}
+
+// ── Render ──
+function render() {
+  ctx.fillStyle = '#0f0803';
+  ctx.fillRect(0, 0, W, H);
+
+  // Draw grid
+  for (let c = 0; c < COLS; c++) {
+    for (let r = 0; r < ROWS; r++) {
+      const idx = r * COLS + c;
+      const state = grid[idx];
+      if (state < 0.015) continue; // skip near-zero cells
+
+      const hc = hexCenter(c, r);
+      const verts = hexVertices(hc.x, hc.y);
+
+      // Fill
+      ctx.beginPath();
+      ctx.moveTo(verts[0].x, verts[0].y);
+      for (let i = 1; i < 6; i++) ctx.lineTo(verts[i].x, verts[i].y);
+      ctx.closePath();
+
+      const col = warmColor(state);
+      ctx.fillStyle = `rgb(${col.r},${col.g},${col.b})`;
+      ctx.fill();
+
+      // Glow stroke for brighter cells
+      if (state > 0.55) {
+        const glowAlpha = (state - 0.55) * 0.5;
+        ctx.strokeStyle = `rgba(220,180,100,${glowAlpha})`;
+        ctx.lineWidth = 0.6;
+        ctx.stroke();
+      }
+    }
+  }
+
+  // Center void pulse
+  const pulse = 0.5 + 0.5 * Math.sin(frameCount * 0.015);
+  const cx = W / 2, cy = H / 2;
+  for (let ring = 0; ring < 3; ring++) {
+    const r = 40 + ring * 30 + pulse * 8;
+    const alpha = 0.04 - ring * 0.01;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(139,105,20,${alpha})`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  // Draw embers
+  drawEmbers();
+
+  // Edge vignette glow
+  const gradient = ctx.createRadialGradient(cx, cy, Math.min(W, H) * 0.42, cx, cy, Math.max(W, H) * 0.7);
+  gradient.addColorStop(0, 'rgba(15,8,3,0)');
+  gradient.addColorStop(0.5, 'rgba(15,8,3,0)');
+  gradient.addColorStop(1, 'rgba(15,8,3,0.5)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, W, H);
+}
+
+// ── Poem phrases ──
+const phrases = [
+  "at the fringe of the clearing",
+  "warmth that knows its boundary",
+  "edges hum with becoming",
+  "the center holds its breath",
+  "cells that remember the light",
+  "what grows toward what withdraws",
+  "the hem of the visible world",
+  "each neighbor a small decision",
+  "propagation as joy",
+  "the pattern that almost arrives",
+  "bloom held at the threshold",
+  "where growth meets its own limit",
+  "the perimeter sings",
+  "a warmth that does not demand",
+  "fringe of form, fringe of formlessness"
+];
+
+let phraseIdx = 0;
+let phraseTimer = 0;
+const PHRASE_INTERVAL = 14 * 60; // ~14 seconds at 60fps
+
+function showPhrase(text) {
+  phraseEl.style.opacity = '1';
+  phraseEl.textContent = text;
+  setTimeout(() => {
+    if (phraseEl.textContent === text) {
+      phraseEl.style.opacity = '0';
+    }
+  }, 8000);
+}
+
+// ── Animation loop ──
+function animate() {
+  frameCount++;
+  stepCA();
+  updateEmbers();
+  render();
+
+  // Title fade
+  const titleOpacity = Math.max(0, 1 - frameCount / 240);
+  titleArea.style.opacity = Math.min(1, titleOpacity);
+
+  // Phrase cycling
+  phraseTimer++;
+  if (phraseTimer >= PHRASE_INTERVAL) {
+    phraseTimer = 0;
+    showPhrase(phrases[phraseIdx]);
+    phraseIdx = (phraseIdx + 1) % phrases.length;
+  }
+
+  requestAnimationFrame(animate);
+}
+
+// ── Mouse events ──
+canvas.addEventListener('mousemove', (e) => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+  mouseActive = true;
+});
+
+canvas.addEventListener('mouseleave', () => {
+  mouseActive = false;
+});
+
+canvas.addEventListener('click', (e) => {
+  seedCluster(e.clientX, e.clientY);
+});
+
+// Touch support
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  const t = e.touches[0];
+  mouseX = t.clientX;
+  mouseY = t.clientY;
+  mouseActive = true;
+}, { passive: false });
+
+canvas.addEventListener('touchend', () => {
+  mouseActive = false;
+});
+
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  const t = e.touches[0];
+  mouseX = t.clientX;
+  mouseY = t.clientY;
+  mouseActive = true;
+  seedCluster(t.clientX, t.clientY);
+}, { passive: false });
+
+// ── Resize handler ──
+window.addEventListener('resize', () => {
+  const prevCols = COLS, prevRows = ROWS;
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  COLS = Math.floor((W - HEX_R) / HEX_W);
+  ROWS = Math.floor((H - HEX_R) / HEX_H);
+  if (COLS !== prevCols || ROWS !== prevRows) {
+    initGrid();
+  }
+});
+
+// ── Bootstrap ──
+W = canvas.width = window.innerWidth;
+H = canvas.height = window.innerHeight;
+COLS = Math.floor((W - HEX_R) / HEX_W);
+ROWS = Math.floor((H - HEX_R) / HEX_H);
+initGrid();
+
+// Title entrance
+titleArea.style.opacity = '1';
+
+// Start animation
+animate();
+
+// First phrase appears after a short delay
+setTimeout(() => showPhrase(phrases[0]), 12000);
+phraseIdx = 1;
+phraseTimer = 0;
+</script>
+</body>
+</html>
