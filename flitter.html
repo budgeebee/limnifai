@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flitter</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #030303;
+    color: #d4a853;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+    cursor: crosshair;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  canvas { display: block; position: fixed; top: 0; left: 0; z-index: 0; }
+  #overlay { position: fixed; inset: 0; z-index: 1; pointer-events: none; }
+  #center-word {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    font-size: clamp(2rem, 5vw, 4.5rem); letter-spacing: 0.15em;
+    z-index: 2; pointer-events: none; transition: color 0.3s;
+    text-shadow: 0 0 30px rgba(212,168,83,0.4);
+  }
+  #velocity-bar {
+    position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
+    width: 200px; height: 3px; background: rgba(255,255,255,0.08);
+    border-radius: 3px; z-index: 2; pointer-events: none;
+  }
+  #velocity-fill {
+    height: 100%; border-radius: 3px; background: #d4a853;
+    transition: width 0.08s linear, background 0.3s;
+  }
+  #score-display {
+    position: fixed; top: 20px; right: 26px; font-size: 1.1rem;
+    color: rgba(255,255,255,0.35); z-index: 2; pointer-events: none;
+    letter-spacing: 0.08em;
+  }
+  #streak-display {
+    position: fixed; top: 50px; right: 26px; font-size: 0.85rem;
+    color: rgba(212,168,83,0.5); z-index: 2; pointer-events: none;
+    letter-spacing: 0.08em; transition: opacity 0.4s;
+  }
+  .phrase-overlay {
+    position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%);
+    font-size: 0.78rem; color: rgba(255,255,255,0.18); z-index: 2;
+    pointer-events: none; letter-spacing: 0.06em; transition: opacity 1.2s;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="overlay"></div>
+<div id="center-word"></div>
+<div id="velocity-bar"><div id="velocity-fill"></div></div>
+<div id="score-display">0</div>
+<div id="streak-display"></div>
+<div class="phrase-overlay" id="phrase"></div>
+
+<script>
+// ── Flitter ── corner-sweeping word collector ──
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const $word = document.getElementById('center-word');
+const $velFill = document.getElementById('velocity-fill');
+const $score = document.getElementById('score-display');
+const $streak = document.getElementById('streak-display');
+const $phrase = document.getElementById('phrase');
+
+let W, H;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize(); window.addEventListener('resize', resize);
+
+// ── state ──
+const WORDS = [
+  'LIMEN', 'THRESHOLD', 'VERGE', 'SEAM', 'CLEAVE', 'TIDE',
+  'ATTUNE', 'DISSOLVE', 'CUSP', 'LIMINAL', 'KINDLE', 'PLUME',
+  'MURMUR', 'MOLT', 'PALIMPSEST', 'ALIGN', 'FLUX', 'INTERSTICE',
+  'FRINGE', 'DRIFT', 'CREPUSCULE', 'DESCANT', 'HESITATE', 'LITTORAL',
+  'RIVULET', 'TREMOR', 'SCATTER', 'BETWEEN', 'HALATION', 'ANFRACT',
+  'FILIGREE', 'SCINTILLA', 'EMBER', 'SOLSTICE'
+];
+const PHRASES = [
+  'letters that remember being light',
+  'a word is a threshold crossed in time',
+  'between the corners, a clearing',
+  'collect before the dissolve',
+  'meaning arrives in fragments',
+  'each letter, a breath held',
+  'the void between corners knows its name',
+  'sweeping the boundary, gathering',
+  'half-formed, always arriving',
+  'velocity is the only grammar',
+  'what is a word but a flock held together',
+  'corners bloom, center waits',
+  'the cursor is a question',
+  'faster now, the letters scatter',
+  'between collection and dissolution',
+  'in the sweep, a threshold'
+];
+
+let target = '';
+let collected = '';     // letters collected so far
+let score = 0;
+let streak = 0;
+let longestStreak = 0;
+let failedStreak = 0;   // consecutive failures
+
+let mouseX = 0, mouseY = 0;
+let prevMX = 0, prevMY = 0;
+let velocity = 0;
+let velocitySmoothed = 0;
+const VEL_THRESHOLD = 380;  // px/s to collect a fragment
+
+// corner fragments
+const CORNERS = [
+  { x: 0.08, y: 0.08, label: '↖' },  // top-left
+  { x: 0.92, y: 0.08, label: '↗' },  // top-right
+  { x: 0.08, y: 0.92, label: '↙' },  // bottom-left
+  { x: 0.92, y: 0.92, label: '↘' },  // bottom-right
+];
+let fragments = []; // { x, y, letter, life, maxLife, cornerIdx, collected }
+
+const FRAGMENT_LIFETIME = 3200; // ms
+const SPAWN_INTERVAL_MIN = 800;
+const SPAWN_INTERVAL_MAX = 2200;
+let nextSpawn = 0;
+const MAX_FRAGMENTS = 8;
+
+// particle effects
+let particles = [];
+
+// ── helpers ──
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function dist(a, b, c, d) { return Math.hypot(a - c, b - d); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+// ── pick next target word ──
+function pickTarget() {
+  const used = new Set();
+  let w;
+  do {
+    w = pick(WORDS);
+    used.add(w);
+  } while (w === target && used.size < WORDS.length);
+  return w.toUpperCase();
+}
+
+function newTarget() {
+  target = pickTarget();
+  collected = '';
+  fragments = [];
+  nextSpawn = performance.now() + 400;
+  updateWordDisplay();
+}
+
+// ── spawn fragment ──
+function spawnFragment() {
+  if (fragments.length >= MAX_FRAGMENTS) return;
+
+  // pick a corner that doesn't already have too many fragments
+  const corner = pick(CORNERS);
+  const cx = corner.x * W;
+  const cy = corner.y * H;
+
+  // pick a letter from the target that hasn't been collected
+  const needed = [];
+  for (let i = 0; i < target.length; i++) {
+    if (!collected.includes(target[i]) ||
+        collected.split('').filter(c => c === target[i]).length <
+        target.split('').filter(c => c === target[i]).length) {
+      needed.push(target[i]);
+    }
+  }
+  // also include some false leads (letters not in target, rarer)
+  if (Math.random() < 0.22 && fragments.length < 4) {
+    const distractors = 'ZQXJVK'.split('');
+    needed.push(pick(distractors));
+  }
+
+  const letter = pick(needed.length ? needed : target.split(''));
+  const lifetime = FRAGMENT_LIFETIME + (Math.random() - 0.5) * 1200;
+
+  fragments.push({
+    x: cx + (Math.random() - 0.5) * 80,
+    y: cy + (Math.random() - 0.5) * 60,
+    letter,
+    life: lifetime,
+    maxLife: lifetime,
+    cornerIdx: CORNERS.indexOf(corner),
+    collected: false,
+    born: performance.now(),
+    wobble: Math.random() * Math.PI * 2,
+  });
+}
+
+// ── collect fragment ──
+function collectFragment(frag) {
+  if (frag.collected) return;
+  frag.collected = true;
+
+  // spawn collect particles
+  for (let i = 0; i < 14; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 80 + Math.random() * 220;
+    particles.push({
+      x: frag.x, y: frag.y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 0.7 + Math.random() * 0.6,
+      maxLife: 0.7 + Math.random() * 0.6,
+      color: '#d4a853',
+      size: 1.5 + Math.random() * 3,
+    });
+  }
+
+  const letter = frag.letter;
+  // check if this letter is needed
+  const neededCount = target.split('').filter((c, i) => c === letter &&
+    (collected + target.slice(0, i)).split('').filter(x => x === letter).length <
+    target.slice(0, i + 1).split('').filter(x => x === letter).length).length;
+
+  // Simple: if letter is in target and we still need it
+  const countNeeded = target.split('').filter(c => c === letter).length;
+  const countHave = collected.split('').filter(c => c === letter).length;
+
+  if (countHave < countNeeded) {
+    collected += letter;
+  } else if (Math.random() < 0.35) {
+    // bonus: give a random uncollected letter
+    const uncollected = target.split('').filter((c, i) => {
+      const haveSoFar = collected.split('').filter(x => x === c).length;
+      const needSoFar = target.slice(0, i + 1).split('').filter(x => x === c).length;
+      return haveSoFar < target.split('').filter(x => x === c).length;
+    });
+    if (uncollected.length) {
+      collected += pick(uncollected);
+    }
+  }
+
+  // Check if word is complete (letters in any order)
+  const sortedCollected = collected.split('').sort().join('');
+  const sortedTarget = target.split('').sort().join('');
+  if (sortedCollected === sortedTarget) {
+    completeWord();
+  }
+
+  updateWordDisplay();
+}
+
+function completeWord() {
+  score += target.length * (1 + Math.floor(streak / 2));
+  streak++;
+  longestStreak = Math.max(longestStreak, streak);
+  failedStreak = 0;
+  updateScoreDisplay();
+
+  // celebration particles at center
+  for (let i = 0; i < 40; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 100 + Math.random() * 350;
+    particles.push({
+      x: W / 2, y: H / 2,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 0.9 + Math.random() * 0.8,
+      maxLife: 0.9 + Math.random() * 0.8,
+      color: pick(['#d4a853', '#f5d5a0', '#ffffff', '#b8943f']),
+      size: 2 + Math.random() * 5,
+    });
+  }
+
+  // brief flash of completed word
+  $word.style.color = '#f5d5a0';
+  $word.style.textShadow = '0 0 60px rgba(244,213,160,0.9)';
+  setTimeout(() => {
+    $word.style.color = '#d4a853';
+    $word.style.textShadow = '0 0 30px rgba(212,168,83,0.4)';
+  }, 600);
+
+  newTarget();
+}
+
+function failFragment(frag) {
+  failedStreak++;
+  if (failedStreak >= 3) {
+    streak = 0;
+    failedStreak = 0;
+    $streak.textContent = '';
+    updateScoreDisplay();
+  }
+  // red particles
+  for (let i = 0; i < 6; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 40 + Math.random() * 100;
+    particles.push({
+      x: frag.x, y: frag.y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 0.4 + Math.random() * 0.3,
+      maxLife: 0.4 + Math.random() * 0.3,
+      color: '#6b2020',
+      size: 1 + Math.random() * 2,
+    });
+  }
+}
+
+function updateWordDisplay() {
+  if (!target) return;
+  let html = '';
+  for (let i = 0; i < target.length; i++) {
+    const c = target[i];
+    const collectedCount = collected.split('').filter(x => x === c).length;
+    const neededSoFar = target.slice(0, i + 1).split('').filter(x => x === c).length;
+    if (collectedCount >= neededSoFar) {
+      html += `<span style="color:#d4a853">${c}</span>`;
+    } else {
+      html += `<span style="color:rgba(255,255,255,0.08)">${c}</span>`;
+    }
+  }
+  $word.innerHTML = html;
+}
+
+function updateScoreDisplay() {
+  $score.textContent = score;
+  if (streak >= 5) {
+    $streak.textContent = `streak ×${streak}`;
+    $streak.style.opacity = '1';
+  } else if (streak >= 2) {
+    $streak.textContent = `×${streak}`;
+    $streak.style.opacity = '0.7';
+  } else {
+    $streak.style.opacity = '0';
+  }
+}
+
+// ── phrase cycling ──
+let phraseIdx = 0;
+let phraseTimer = 0;
+const PHRASE_INTERVAL = 9000;
+$phrase.textContent = PHRASES[0];
+$phrase.style.opacity = '1';
+
+// ── render loop ──
+let lastTime = performance.now();
+let spawnTimer = 0;
+
+function draw(ts) {
+  const dt = Math.min((ts - lastTime) / 1000, 0.1);
+  lastTime = ts;
+
+  // ── velocity ──
+  const dx = mouseX - prevMX;
+  const dy = mouseY - prevMY;
+  const rawVel = Math.hypot(dx, dy) / Math.max(dt, 0.001);
+  prevMX = mouseX; prevMY = mouseY;
+  velocity = rawVel;
+  velocitySmoothed = lerp(velocitySmoothed, velocity, 0.25);
+
+  // ── clear ──
+  ctx.fillStyle = '#030303';
+  ctx.fillRect(0, 0, W, H);
+
+  // ── corner zone indicators ──
+  for (const corner of CORNERS) {
+    const cx = corner.x * W;
+    const cy = corner.y * H;
+    const zoneR = Math.min(W, H) * 0.12;
+    // faint corner bracket
+    ctx.save();
+    ctx.globalAlpha = 0.06 + 0.03 * Math.sin(ts * 0.002 + CORNERS.indexOf(corner));
+    ctx.strokeStyle = '#d4a853';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    // L-bracket arc
+    const angle = Math.atan2(cy - H/2, cx - W/2);
+    ctx.arc(cx, cy, zoneR, angle, angle + Math.PI / 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ── velocity bar ──
+  const velPct = Math.min(velocitySmoothed / VEL_THRESHOLD, 1.5);
+  $velFill.style.width = Math.min(velPct * 100, 100) + '%';
+  $velFill.style.background = velPct >= 1 ? '#f5d5a0' :
+    velPct > 0.5 ? '#d4a853' : 'rgba(180,140,60,0.5)';
+
+  // ── spawn fragments ──
+  if (target && ts > nextSpawn) {
+    spawnFragment();
+    nextSpawn = ts + SPAWN_INTERVAL_MIN + Math.random() * (SPAWN_INTERVAL_MAX - SPAWN_INTERVAL_MIN);
+  }
+
+  // ── update fragments ──
+  for (let i = fragments.length - 1; i >= 0; i--) {
+    const f = fragments[i];
+    if (f.collected) {
+      fragments.splice(i, 1);
+      continue;
+    }
+    f.life -= dt * 1000;
+    // wobble
+    f.wobble += dt * (1.5 + Math.random() * 2);
+    const wobX = Math.cos(f.wobble) * 3;
+    const wobY = Math.sin(f.wobble * 1.3) * 3;
+
+    // draw fragment
+    const alpha = Math.max(0, f.life / f.maxLife);
+    const corner = CORNERS[f.cornerIdx];
+    const cx = corner.x * W;
+    const cy = corner.y * H;
+    const dxF = f.x - cx;
+    const dyF = f.y - cy;
+    const distFromCorner = Math.hypot(dxF, dyF);
+
+    // life ring
+    ctx.save();
+    ctx.globalAlpha = alpha * 0.4;
+    ctx.strokeStyle = '#d4a853';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(f.x + wobX, f.y + wobY, 22, 0, Math.PI * 2 * (f.life / f.maxLife));
+    ctx.stroke();
+    ctx.restore();
+
+    // glow behind letter
+    const glowR = 18 + 6 * alpha;
+    const glow = ctx.createRadialGradient(f.x + wobX, f.y + wobY, 2, f.x + wobX, f.y + wobY, glowR);
+    glow.addColorStop(0, `rgba(212,168,83,${0.5 * alpha})`);
+    glow.addColorStop(1, 'rgba(212,168,83,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(f.x + wobX, f.y + wobY, glowR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // letter
+    ctx.fillStyle = `rgba(244,213,160,${0.7 + 0.3 * alpha})`;
+    ctx.font = `bold ${20 + 6 * alpha}px Georgia`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(f.letter, f.x + wobX, f.y + wobY);
+
+    // urgency pulse when about to expire
+    if (f.life < 900 && Math.floor(f.life / 200) % 2 === 0) {
+      ctx.fillStyle = `rgba(220,80,80,${0.3 * (1 - f.life / 900)})`;
+      ctx.font = `bold ${22 + 8 * alpha}px Georgia`;
+      ctx.fillText(f.letter, f.x + wobX, f.y + wobY);
+    }
+
+    // check collection — cursor in vicinity + velocity threshold
+    const dToCursor = dist(f.x, f.y, mouseX, mouseY);
+    if (dToCursor < 40 && velocitySmoothed > VEL_THRESHOLD) {
+      collectFragment(f);
+      continue;
+    }
+
+    // expired?
+    if (f.life <= 0) {
+      failFragment(f);
+      // also lose one collected letter randomly if we have any
+      if (collected.length > 0) {
+        const removeIdx = Math.floor(Math.random() * collected.length);
+        collected = collected.slice(0, removeIdx) + collected.slice(removeIdx + 1);
+        updateWordDisplay();
+      }
+      fragments.splice(i, 1);
+    }
+  }
+
+  // ── update & draw particles ──
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.life -= dt;
+    if (p.life <= 0) { particles.splice(i, 1); continue; }
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vx *= 0.96;
+    p.vy *= 0.96;
+
+    const alpha = p.life / p.maxLife;
+    ctx.fillStyle = p.color.replace(')', `,${alpha})`).replace('rgb', 'rgba');
+    if (p.color.startsWith('#')) {
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = p.color;
+    }
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // ── cursor trail ──
+  const trailAlpha = Math.min(velocitySmoothed / 1200, 0.25);
+  if (trailAlpha > 0.02) {
+    ctx.beginPath();
+    ctx.strokeStyle = `rgba(212,168,83,${trailAlpha})`;
+    ctx.lineWidth = velPct > 1 ? 2 : 1;
+    ctx.moveTo(prevMX, prevMY);
+    ctx.lineTo(mouseX, mouseY);
+    ctx.stroke();
+
+    // cursor glow
+    const cGlow = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, 16);
+    cGlow.addColorStop(0, `rgba(244,213,160,${0.15 + trailAlpha * 2})`);
+    cGlow.addColorStop(1, 'rgba(212,168,83,0)');
+    ctx.fillStyle = cGlow;
+    ctx.beginPath();
+    ctx.arc(mouseX, mouseY, 16, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // ── faint center pulse ──
+  const pulse = 0.02 + 0.02 * Math.sin(ts * 0.0015);
+  const pGlow = ctx.createRadialGradient(W/2, H/2, 40, W/2, H/2, 180);
+  pGlow.addColorStop(0, `rgba(212,168,83,${pulse})`);
+  pGlow.addColorStop(1, 'rgba(212,168,83,0)');
+  ctx.fillStyle = pGlow;
+  ctx.beginPath();
+  ctx.arc(W/2, H/2, 180, 0, Math.PI * 2);
+  ctx.fill();
+
+  // ── phrase cycling ──
+  phraseTimer += dt * 1000;
+  if (phraseTimer > PHRASE_INTERVAL) {
+    phraseTimer = 0;
+    $phrase.style.opacity = '0';
+    setTimeout(() => {
+      phraseIdx = (phraseIdx + 1) % PHRASES.length;
+      $phrase.textContent = PHRASES[phraseIdx];
+      $phrase.style.opacity = '1';
+    }, 1200);
+  }
+
+  requestAnimationFrame(draw);
+}
+
+// ── mouse tracking ──
+window.addEventListener('mousemove', e => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+});
+window.addEventListener('touchmove', e => {
+  e.preventDefault();
+  mouseX = e.touches[0].clientX;
+  mouseY = e.touches[0].clientY;
+}, { passive: false });
+
+// ── init ──
+newTarget();
+requestAnimationFrame(draw);
+
+// ── title fade-out ──
+const titleOverlay = document.createElement('div');
+titleOverlay.style.cssText = `
+  position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  z-index: 10; pointer-events: none; transition: opacity 1.5s;
+  font-family: Georgia, serif; font-size: clamp(1.2rem, 3vw, 2rem);
+  color: #d4a853; letter-spacing: 0.2em;
+  text-shadow: 0 0 40px rgba(212,168,83,0.5);
+`;
+titleOverlay.textContent = 'FLITTER';
+document.body.appendChild(titleOverlay);
+setTimeout(() => { titleOverlay.style.opacity = '0'; }, 1800);
+setTimeout(() => { titleOverlay.remove(); }, 3300);
+</script>
+</body>
+</html>
