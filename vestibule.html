@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vestibule</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Crimson+Text:ital,wght@0,400;0,600;1,400&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0f0803;
+    color: #d4b896;
+    font-family: 'Crimson Text', Georgia, serif;
+    font-size: 18px;
+    line-height: 1.7;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    cursor: default;
+    user-select: none;
+  }
+
+  /* ambient vignette */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(15,8,3,0.85) 100%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  #container {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: 620px;
+    padding: 40px 32px 24px;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+
+  #output {
+    flex: 1;
+    overflow-y: auto;
+    padding-right: 8px;
+    max-height: calc(100vh - 140px);
+    scroll-behavior: smooth;
+  }
+
+  #output::-webkit-scrollbar { width: 3px; }
+  #output::-webkit-scrollbar-thumb { background: rgba(180,130,90,0.25); border-radius: 2px; }
+
+  .line {
+    margin-bottom: 8px;
+    animation: fadeUp 0.6s ease-out;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .line.prompt { color: #c49a6c; font-style: italic; margin-bottom: 2px; }
+  .line.response { color: #d4b896; padding-left: 12px; border-left: 1px solid rgba(180,130,90,0.2); }
+  .line.ambient { color: #8b6b4a; font-style: italic; font-size: 15px; padding-left: 12px; border-left: 1px solid rgba(140,100,70,0.1); }
+  .line.divider { color: #5a3e2a; text-align: center; letter-spacing: 4px; margin: 16px 0; }
+  .line.title { color: #e8c89e; font-size: 22px; letter-spacing: 3px; text-align: center; margin-bottom: 20px; font-weight: 600; }
+
+  #input-line {
+    display: flex;
+    align-items: center;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(180,130,90,0.1);
+  }
+
+  #caret {
+    color: #c49a6c;
+    margin-right: 8px;
+    font-size: 16px;
+    animation: blink 1.2s infinite;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.25; }
+  }
+
+  #user-input {
+    background: transparent;
+    border: none;
+    color: #e8c89e;
+    font-family: 'Crimson Text', Georgia, serif;
+    font-size: 18px;
+    outline: none;
+    flex: 1;
+    caret-color: #c49a6c;
+  }
+
+  #user-input::placeholder { color: #5a3e2a; font-style: italic; }
+
+  /* door glow ambient elements */
+  #door-glow-left, #door-glow-right {
+    position: fixed;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 80px;
+    height: 220px;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.08;
+    transition: opacity 3s ease;
+  }
+
+  #door-glow-left {
+    left: 20px;
+    background: radial-gradient(ellipse at center, rgba(210,155,80,0.6), transparent 70%);
+  }
+
+  #door-glow-right {
+    right: 20px;
+    background: radial-gradient(ellipse at center, rgba(195,140,100,0.6), transparent 70%);
+  }
+
+  #door-glow-left.bright { opacity: 0.22; }
+  #door-glow-right.bright { opacity: 0.22; }
+
+  #hint-bar {
+    text-align: center;
+    color: #5a3e2a;
+    font-size: 12px;
+    font-style: italic;
+    margin-top: 8px;
+    letter-spacing: 1px;
+    opacity: 0.6;
+    transition: opacity 4s ease;
+  }
+</style>
+</head>
+<body>
+<div id="door-glow-left"></div>
+<div id="door-glow-right"></div>
+
+<div id="container">
+  <div id="output"></div>
+  <div id="input-line">
+    <span id="caret">▸</span>
+    <input type="text" id="user-input" placeholder="what do you do?" autofocus autocomplete="off" spellcheck="false">
+  </div>
+  <div id="hint-bar">type a verb — look, examine, wait, approach, sit, listen, breathe...</div>
+</div>
+
+<script>
+// ── state ──
+const state = {
+  examined: {},
+  waited: 0,
+  approached: null,
+  approachedCount: { left: 0, right: 0 },
+  sitting: false,
+  listened: false,
+  breathed: 0,
+  touched: [],
+  commandHistory: [],
+  ended: false,
+  phraseIndex: 0
+};
+
+const phrases = [
+  "between arrival and departure, the room remembers",
+  "a vestibule is a verb disguised as a noun — to wait, to pause, to hover",
+  "every door is a promise made of wood",
+  "the light in here has no source, only direction",
+  "some thresholds are meant to be crossed slowly",
+  "you are the only thing in this room that can decide",
+  "the crack between the doors is thinner than a breath",
+  "waiting is not the absence of action but its own kind of gravity",
+  "the bench knows more about you than you know about it",
+  "what if neither door is the one you're looking for?",
+  "the room breathes when you do",
+  "a key asks only one question: are you ready to turn it?"
+];
+
+// ── output helpers ──
+const output = document.getElementById('output');
+const glowL = document.getElementById('door-glow-left');
+const glowR = document.getElementById('door-glow-right');
+const hintBar = document.getElementById('hint-bar');
+
+function addLine(text, cls = 'response') {
+  const div = document.createElement('div');
+  div.className = `line ${cls}`;
+  div.innerHTML = text;
+  output.appendChild(div);
+  output.scrollTop = output.scrollHeight;
+}
+
+function addLines(lines) {
+  lines.forEach(l => addLine(l.text, l.cls));
+}
+
+function fadeHint(text) {
+  hintBar.style.opacity = '0';
+  setTimeout(() => {
+    hintBar.textContent = text;
+    hintBar.style.opacity = '0.6';
+  }, 600);
+}
+
+// ── ambient phrase injection ──
+let ambientTimer = null;
+function scheduleAmbient() {
+  if (state.ended) return;
+  const delay = 22000 + Math.random() * 18000;
+  ambientTimer = setTimeout(() => {
+    if (state.ended) return;
+    const phrase = phrases[state.phraseIndex % phrases.length];
+    state.phraseIndex++;
+    addLine('&bull; &nbsp;' + phrase, 'ambient');
+    scheduleAmbient();
+  }, delay);
+}
+
+// ── command parser ──
+function parse(input) {
+  const raw = input.toLowerCase().trim();
+  if (!raw) return { verb: '', target: '' };
+
+  const synonyms = {
+    'examine': 'examine', 'x': 'examine', 'look at': 'examine', 'inspect': 'examine', 'study': 'examine',
+    'look': 'look', 'l': 'look', 'see': 'look',
+    'wait': 'wait', 'w': 'wait', 'pause': 'wait', 'stay': 'wait',
+    'approach': 'approach', 'go to': 'approach', 'move toward': 'approach', 'walk to': 'approach',
+    'sit': 'sit', 'sit down': 'sit', 'rest': 'sit',
+    'stand': 'stand', 'stand up': 'stand', 'rise': 'stand',
+    'listen': 'listen', 'hear': 'listen',
+    'touch': 'touch', 'feel': 'touch',
+    'breathe': 'breathe', 'breath': 'breathe', 'inhale': 'breathe',
+    'open': 'open',
+    'leave': 'leave', 'exit': 'leave', 'go': 'leave',
+    'remember': 'remember', 'recall': 'remember',
+    'help': 'help', 'h': 'help', '?': 'help',
+    'think': 'think', 'ponder': 'think', 'consider': 'think'
+  };
+
+  // try multi-word synonyms first
+  for (const [syn, verb] of Object.entries(synonyms)) {
+    if (raw === syn || raw.startsWith(syn + ' ')) {
+      const target = raw.slice(syn.length).trim();
+      return { verb, target };
+    }
+  }
+
+  // fallback: single word
+  const space = raw.indexOf(' ');
+  const firstWord = space > 0 ? raw.slice(0, space) : raw;
+  const rest = space > 0 ? raw.slice(space + 1).trim() : '';
+
+  const singleSynonyms = {
+    'x': 'examine', 'l': 'look', 'w': 'wait',
+    'inspect': 'examine', 'study': 'examine',
+    'see': 'look',
+    'pause': 'wait', 'stay': 'wait',
+    'rest': 'sit', 'sitdown': 'sit',
+    'rise': 'stand', 'standup': 'stand',
+    'hear': 'listen',
+    'feel': 'touch',
+    'inhale': 'breathe',
+    'exit': 'leave', 'go': 'leave',
+    'recall': 'remember',
+    'h': 'help', '?': 'help',
+    'ponder': 'think', 'consider': 'think'
+  };
+
+  return {
+    verb: singleSynonyms[firstWord] || firstWord,
+    target: rest
+  };
+}
+
+// ── describe initial scene ──
+function showTitle() {
+  addLine('·  ·  ·', 'divider');
+  addLine('V E S T I B U L E', 'title');
+  addLine('·  ·  ·', 'divider');
+  addLine('You are in a small room.', 'response');
+  addLine('', 'response');
+  addLine('Two doors face each other across an empty floor. The door to your <i>left</i> is warm terracotta, its edges lined with pale gold — behind it, something like afternoon light seeps through the crack. The door to your <i>right</i> is deep umber, older, its grain like weathered hands — behind it, a softer light, the color of cream in twilight.', 'response');
+  addLine('', 'response');
+  addLine('Between them, a low wooden bench. On the far wall, a small iron hook holds a single key. The ceiling is beamed and quiet. The floor tiles are hexagonal, the color of dried clay, worn smooth in the center.', 'response');
+  addLine('', 'response');
+  addLine('No one else is here. No sound but your own breathing. No clock.', 'response');
+  addLine('', 'response');
+  addLine('<i>What do you do?</i>', 'prompt');
+}
+
+// ── command handlers ──
+function handleLook() {
+  if (state.waited > 2 && !state.examined.doors) {
+    addLine('You look around the room again. The two doors seem closer than before — or perhaps you\'ve simply grown more aware of them. The terracotta door breathes warmth; the umber door breathes patience. The bench waits. The key hangs. The floor stretches between.', 'response');
+  } else if (state.sitting) {
+    addLine('From here on the bench, the room looks different. Lower. The doors seem taller. The key is at eye level now, glinting faintly. The ceiling beams cross above you like a quiet argument.', 'response');
+  } else {
+    addLine('The room is as it was: two doors, one bench, one key, six walls holding their breath. The terracotta door pulses with a faint warmth; the umber door is still, like deep water.', 'response');
+  }
+}
+
+function handleExamine(target) {
+  const t = target || '';
+
+  if (t.includes('door') && (t.includes('left') || t.includes('terracotta') || t.includes('warm') || t.includes('gold'))) {
+    state.examined.leftDoor = true;
+    glowL.classList.add('bright');
+    setTimeout(() => glowL.classList.remove('bright'), 4000);
+    if (state.approached === 'left') {
+      addLine('Now that you\'re close to the terracotta door, you can see the grain more clearly — it spirals inward, like a thumbprint. The gold at its edges isn\'t paint; it\'s light, leaking from the other side. The door is warm to the touch. It has no handle, only a keyhole.', 'response');
+    } else {
+      addLine('The terracotta door is the color of late afternoon in autumn. Its surface is smooth but not polished — you could press your palm against it and leave a warmth-print. A thin line of gold light glows at its edges. There\'s a keyhole, empty, waiting.', 'response');
+    }
+    fadeHint('try: approach left door');
+  } else if (t.includes('door') && (t.includes('right') || t.includes('umber') || t.includes('dark') || t.includes('old') || t.includes('deep'))) {
+    state.examined.rightDoor = true;
+    glowR.classList.add('bright');
+    setTimeout(() => glowR.classList.remove('bright'), 4000);
+    if (state.approached === 'right') {
+      addLine('Standing before the umber door, you notice the grain runs vertically — it reminds you of rain on a window. The light behind it is diffuse, patient, the color of cream held up to dusk. No handle here either. Only a keyhole, identical to the one across the room.', 'response');
+    } else {
+      addLine('The umber door is darker than the terracotta — the color of rich soil, of coffee left to cool. Its grain is deep, like the lines on a palm. Pale cream light seeps around its edges, steady and slow. The keyhole is a small dark circle at its center.', 'response');
+    }
+    fadeHint('try: approach right door');
+  } else if (t.includes('bench') || t.includes('seat')) {
+    state.examined.bench = true;
+    if (state.sitting) {
+      addLine('The bench is solid beneath you. Its surface is worn in two places — where countless others have sat before. The wood is warm, as if it remembers every body that ever rested here.', 'response');
+    } else {
+      addLine('A low bench of dark wood, simple and unadorned. Its surface shows wear in two shallow depressions — the ghosts of those who sat here before. It looks comfortable in the way old things are comfortable: shaped by use, not design.', 'response');
+    }
+  } else if (t.includes('key') || t.includes('hook') || t.includes('iron')) {
+    state.examined.key = true;
+    addLine('A single key hangs from a wrought iron hook on the far wall. It\'s brass, darkened with age, its bow shaped like a simple oval. The bit is unremarkable — two notches, nothing elaborate. You suspect it fits both doors. Or neither.', 'response');
+    if (!state.touched.includes('key')) {
+      fadeHint('try: touch key');
+    }
+  } else if (t.includes('floor') || t.includes('tile')) {
+    state.examined.floor = true;
+    addLine('Hexagonal tiles, the color of dried river clay. A faint pattern emerges if you look long enough — concentric rings radiating from the center of the room, like ripples frozen in stone. The tiles are warm underfoot.', 'response');
+  } else if (t.includes('ceiling') || t.includes('beam')) {
+    state.examined.ceiling = true;
+    addLine('Three dark beams cross the ceiling, their wood smoke-darkened and ancient. Between them, the ceiling is plaster, cracked in places, forming a map of nowhere in particular. A single iron fixture hangs from the center beam — empty, no bulb.', 'response');
+  } else if (t.includes('light') || t.includes('glow')) {
+    state.examined.light = true;
+    addLine('The light in this room has no source. It simply <i>is</i> — a warm, diffuse presence that seems to come equally from all directions. The terracotta door emits a faint golden warmth; the umber door, a pale cream. The room itself holds the middle ground between them: the color of honey in shadow.', 'response');
+  } else if (t.includes('crack') || t.includes('gap') || t.includes('between') || t.includes('space')) {
+    state.examined.crack = true;
+    addLine('The space between the two doors is perhaps eight paces. In that gap: the bench, the key, the floor tiles fanning out from center like a frozen splash. The air here is different — still, but charged, as if something has been decided but not yet announced.', 'response');
+  } else if (t.includes('wall')) {
+    state.examined.walls = true;
+    addLine('The walls are plaster, warm cream fading to ochre near the floor. They\'re unadorned except for fine cracks that trace the contours of old settling. The room has been here a long time. The walls have learned patience.', 'response');
+  } else {
+    addLine('You study the room. Details come forward slowly: the grain in the floor tiles, the faint scent of old wood and beeswax, the way the light from the two doors seems to meet in the middle and dissolve into something unnamed.', 'response');
+  }
+}
+
+function handleWait() {
+  state.waited++;
+  if (state.waited === 1) {
+    addLine('You wait. The room does not change, but your sense of it does — the silence deepens, the light settles, the air grows heavier with unasked questions.', 'response');
+    fadeHint('the room rewards patience');
+  } else if (state.waited === 2) {
+    addLine('You wait longer. Time feels different here — not passing so much as accumulating. The key sways slightly on its hook, though there is no draft. The doors seem to breathe.', 'response');
+  } else if (state.waited === 3) {
+    addLine('You wait still. The room has accepted your presence now. The bench creaks — once — though no one touched it. The light from the terracotta door has shifted, deepening toward amber. From the umber door, the cream light has cooled toward silver.', 'response');
+  } else {
+    addLine('You wait. By now, waiting has become a kind of conversation. The room speaks in small sounds — a settling beam, a tile releasing warmth, the key rocking gently on its hook. You are no longer a visitor. You are part of the waiting.', 'response');
+    if (state.waited >= 5 && !state.sitting) {
+      fadeHint('try: sit');
+    }
+  }
+}
+
+function handleApproach(target) {
+  const t = target || '';
+  if (t.includes('left') || t.includes('terracotta') || t.includes('warm') || t.includes('gold')) {
+    state.approached = 'left';
+    state.approachedCount.left++;
+    addLine('You approach the terracotta door. The warmth intensifies — not heat exactly, but presence. The gold light at its edges pulses faintly, like a heartbeat. There is no handle, only the keyhole, dark and waiting.', 'response');
+    if (state.approachedCount.left >= 3 && !state.touched.includes('left-door')) {
+      fadeHint('try: touch left door');
+    }
+  } else if (t.includes('right') || t.includes('umber') || t.includes('dark') || t.includes('old')) {
+    state.approached = 'right';
+    state.approachedCount.right++;
+    addLine('You approach the umber door. The cream light behind it is steady and calm, like lamplight through parchment. The wood grain deepens as you draw near — you could trace it with a finger. The keyhole is a perfect dark circle.', 'response');
+    if (state.approachedCount.right >= 3 && !state.touched.includes('right-door')) {
+      fadeHint('try: touch right door');
+    }
+  } else {
+    addLine('You step toward the center of the room, equidistant from both doors. From here, the choice is perfectly balanced. The terracotta glows on your left; the umber waits on your right. The bench is an arm\'s length away.', 'response');
+  }
+}
+
+function handleSit() {
+  if (state.sitting) {
+    addLine('You are already sitting on the bench. It\'s comfortable here — the wood has accepted your weight.', 'response');
+  } else {
+    state.sitting = true;
+    addLine('You sit on the bench. The wood is warmer than you expected, as if it\'s been holding someone else\'s warmth and sharing it with you. From here, the two doors frame the room like parentheses. The key hangs at eye level.', 'response');
+    fadeHint('everything looks different from here — try: look');
+  }
+}
+
+function handleStand() {
+  if (!state.sitting) {
+    addLine('You are already standing.', 'response');
+  } else {
+    state.sitting = false;
+    addLine('You rise from the bench. The wood sighs — softly, almost imperceptibly — as your weight lifts. The room returns to its previous geometry: doors tall, ceiling high, key above.', 'response');
+  }
+}
+
+function handleListen() {
+  if (!state.listened) {
+    state.listened = true;
+    addLine('You close your eyes and listen. At first, silence — but then, layered beneath: a distant low hum from the terracotta door, like a note held too long; a softer susurrus from the umber door, like pages turning in another room; the creak of old beams; your own pulse. The room is not silent. The room is full of near-sounds.', 'response');
+  } else {
+    addLine('You listen again. The hum is still there. The pages still turn. The key on its hook chimes once — faint, like a glass tapped underwater. The room is singing to itself, quietly, the way old houses do.', 'response');
+  }
+}
+
+function handleTouch(target) {
+  const t = target || '';
+  if (t.includes('key') || t.includes('hook')) {
+    state.touched.push('key');
+    addLine('You reach out and touch the key. It\'s cool — cooler than the room — and heavier than it looks. The brass has a patina that feels almost soft against your fingertips. It doesn\'t hum or glow or do anything magical. It\'s just a key. But it fits your hand.', 'response');
+    fadeHint('a key that fits your hand is asking a question');
+  } else if (t.includes('left') || t.includes('terracotta')) {
+    state.touched.push('left-door');
+    addLine('You press your palm against the terracotta door. It\'s warm — not hot, but alive-warm, like skin through fabric. Beneath your hand, a faint vibration: a pulse, or perhaps something breathing on the other side. The door does not yield, but it does not resist either.', 'response');
+  } else if (t.includes('right') || t.includes('umber')) {
+    state.touched.push('right-door');
+    addLine('You place your hand on the umber door. It\'s cool and smooth, like river stone. No vibration, no pulse — only a deep stillness, the kind of quiet that has been undisturbed for a very long time. The door does not move, but you sense it could.', 'response');
+  } else if (t.includes('bench')) {
+    state.touched.push('bench');
+    addLine('You run your hand along the bench. The wood is worn to velvet in places, rough at the edges. The two seated depressions are smooth as polished bone. You can almost feel the shapes of those who sat here — the weight, the waiting, the eventual rising.', 'response');
+  } else if (t.includes('floor') || t.includes('tile')) {
+    state.touched.push('floor');
+    addLine('You kneel and touch the floor. The tiles are warmer than you expected — as if heated from below by something deep and slow. The hexagonal edges are sharp against your fingertips. You trace one tile, then another, following the concentric ring pattern toward the center.', 'response');
+  } else if (t.includes('wall')) {
+    state.touched.push('wall');
+    addLine('You touch the wall. Plaster, smooth and cool. The fine cracks are shallow beneath your fingertips — old settling, nothing structural. The wall is patient. It has held this room together for longer than you can guess.', 'response');
+  } else {
+    state.touched.push('air');
+    addLine('You reach out into the empty space of the room. The air feels thick, almost tangible — as if the room itself is a presence you can graze with your fingertips. Warm on the left side, cool on the right, perfectly neutral in the center.', 'response');
+  }
+}
+
+function handleBreathe() {
+  state.breathed++;
+  if (state.breathed === 1) {
+    addLine('You take a deep breath. The air tastes of old wood and beeswax, with something else underneath — ozone, perhaps, or the memory of rain. Your exhale is the loudest sound the room has heard in a while.', 'response');
+  } else if (state.breathed === 2) {
+    addLine('Another breath, slower this time. The room seems to breathe with you — the light from the doors pulses in time with your exhale. Or perhaps you\'re imagining it. Perhaps imagining is the room\'s only gift.', 'response');
+  } else {
+    addLine('You breathe. In. Out. The room breathes too — or maybe that\'s just the settling of old beams, the expansion and contraction of ancient wood. It doesn\'t matter. What matters is that you\'re here, breathing, and the room is here, holding.', 'response');
+  }
+}
+
+function handleOpen(target) {
+  const t = target || '';
+  const hasKey = state.touched.includes('key');
+
+  if (t.includes('left') || t.includes('terracotta') || t.includes('warm') || t.includes('gold')) {
+    if (!hasKey && state.waited < 3) {
+      addLine('You try the terracotta door. It doesn\'t budge — no handle, no give. The keyhole stares back at you. You feel, suddenly, that the room is waiting for something more from you.', 'response');
+      fadeHint('maybe you need the key — or more time');
+    } else {
+      // ending: left door
+      endGame('left');
+    }
+  } else if (t.includes('right') || t.includes('umber') || t.includes('dark') || t.includes('old')) {
+    if (!hasKey && state.waited < 3) {
+      addLine('You try the umber door. Solid, immovable, patient. No handle. The keyhole is a dark pupil, unblinking. The room seems to hold its breath.', 'response');
+      fadeHint('maybe you need the key — or more time');
+    } else {
+      // ending: right door
+      endGame('right');
+    }
+  } else {
+    addLine('Which door? The warm terracotta on your left, or the deep umber on your right?', 'response');
+    fadeHint('try: open left door or open right door');
+  }
+}
+
+function handleLeave() {
+  addLine('You could leave. But where would you go? The doors are the only exits, and neither is open yet. You are here until you choose.', 'response');
+}
+
+function handleRemember() {
+  const memories = [
+    'You remember arriving, though you cannot recall how. One moment you were elsewhere; the next, here. The transition was seamless, like waking from a dream you didn\'t know you were having.',
+    'You remember a voice — not words, exactly, but the shape of words, the rhythm of someone speaking just before you entered. It was kind. That much you remember.',
+    'You try to remember what you were doing before this room, but it\'s like trying to hold water. The shape of it is still in your hands, but the substance is gone.',
+    'You remember waiting before. Not in this room, but in other rooms — lobbies, platforms, hallways. All threshold spaces. All places where you were between versions of yourself.',
+    'You remember what you were afraid of. It seems smaller now, from inside this room. The doors don\'t frighten you. What frightens you is that you might choose wrong — or worse, that both choices lead to the same place.'
+  ];
+  const pick = memories[Math.floor(Math.random() * memories.length)];
+  addLine(pick, 'response');
+}
+
+function handleThink() {
+  const thoughts = [
+    'You think about the two doors. The terracotta one feels like action — warm, immediate, decisive. The umber one feels like stillness — deep, patient, receptive. But maybe they\'re the same door seen from different angles.',
+    'You think about the key. It fits your hand. It probably fits both doors. The choice isn\'t about the mechanism — it\'s about the hand that turns it.',
+    'You think about the bench. How many people have sat here? How many chose the left door? How many the right? Did any of them choose neither — did any of them simply stay?',
+    'A vestibule is not a destination. It is a passage. The architecture knows this. The doors know this. Only the person in the vestibule can forget.',
+  ];
+  const pick = thoughts[Math.floor(Math.random() * thoughts.length)];
+  addLine(pick, 'response');
+}
+
+function handleHelp() {
+  addLine('<i>You can:</i> look &nbsp;·&nbsp; examine &lt;thing&gt; &nbsp;·&nbsp; wait &nbsp;·&nbsp; approach &lt;door&gt; &nbsp;·&nbsp; sit &nbsp;·&nbsp; stand &nbsp;·&nbsp; listen &nbsp;·&nbsp; touch &lt;thing&gt; &nbsp;·&nbsp; breathe &nbsp;·&nbsp; think &nbsp;·&nbsp; remember &nbsp;·&nbsp; open &lt;door&gt; &nbsp;·&nbsp; leave', 'response');
+  addLine('<i>Things to examine:</i> left door, right door, bench, key, floor, ceiling, light, crack, walls', 'ambient');
+}
+
+// ── endings ──
+function endGame(door) {
+  state.ended = true;
+  document.getElementById('user-input').disabled = true;
+  document.getElementById('caret').style.opacity = '0.2';
+  hintBar.style.opacity = '0';
+  clearTimeout(ambientTimer);
+
+  if (door === 'left') {
+    addLine('', 'response');
+    addLine('·  ·  ·', 'divider');
+    addLine('You turn the key in the terracotta door.', 'response');
+    addLine('', 'response');
+    addLine('The lock clicks — a clean, final sound. The door swings inward without resistance, and golden light floods the vestibule, erasing the shadows, warming the tiles, glinting off the key still in your hand.', 'response');
+    addLine('', 'response');
+    addLine('Beyond the threshold: a field at late afternoon. Tall grass, the color of wheat. A path that winds toward a low hill. On the hill, something is waiting — you cannot see what, but you can feel it, the way you feel the sun even with your eyes closed.', 'response');
+    addLine('', 'response');
+    addLine('You step through.', 'response');
+    addLine('', 'response');
+    addLine('<i>The vestibule is empty again. The terracotta door swings shut. The key is back on its hook. The room waits for the next person, and the next, each one carrying the same question: which door?</i>', 'ambient');
+    addLine('', 'response');
+    addLine('— end —', 'divider');
+  } else {
+    addLine('', 'response');
+    addLine('·  ·  ·', 'divider');
+    addLine('You turn the key in the umber door.', 'response');
+    addLine('', 'response');
+    addLine('The lock is silent — not a click but a release, like a held breath finally exhaled. The door opens inward with the slow gravity of deep water parting. Cream light spills through, cool and even, carrying the scent of old paper and distant rain.', 'response');
+    addLine('', 'response');
+    addLine('Beyond the threshold: a library at dusk. Tall shelves recede into shadow. Lamps glow at intervals, their light pooled on reading tables. A single book lies open on the nearest table — you cannot read the title, but you know it was left there for you.', 'response');
+    addLine('', 'response');
+    addLine('You step through.', 'response');
+    addLine('', 'response');
+    addLine('<i>The vestibule is empty again. The umber door swings shut. The key is back on its hook. The room waits for the next person, and the next, each one carrying the same question: which door?</i>', 'ambient');
+    addLine('', 'response');
+    addLine('— end —', 'divider');
+  }
+}
+
+// ── unknown command ──
+function handleUnknown(verb) {
+  const responses = [
+    `"${verb}" — the room doesn\'t understand that verb. But the fact that you tried it says something about you.`,
+    `You cannot "${verb}" here. The room offers fewer verbs than the world outside, but each one matters more.`,
+    `"${verb}" isn\'t possible in this space. Try looking, waiting, approaching, sitting, listening, touching, breathing, thinking, remembering, or — when you\'re ready — opening a door.`,
+    `The room doesn\'t respond to "${verb}." It\'s not that the room is stubborn — it\'s that it only speaks certain words.`,
+  ];
+  addLine(responses[Math.floor(Math.random() * responses.length)], 'response');
+  fadeHint('type help to see what\'s possible');
+}
+
+// ── main dispatcher ──
+function processCommand(input) {
+  if (state.ended) return;
+
+  const { verb, target } = parse(input);
+  state.commandHistory.push({ verb, target, raw: input });
+
+  switch (verb) {
+    case 'look': handleLook(); break;
+    case 'examine': handleExamine(target); break;
+    case 'wait': handleWait(); break;
+    case 'approach': handleApproach(target); break;
+    case 'sit': handleSit(); break;
+    case 'stand': handleStand(); break;
+    case 'listen': handleListen(); break;
+    case 'touch': handleTouch(target); break;
+    case 'breathe': handleBreathe(); break;
+    case 'open': handleOpen(target); break;
+    case 'leave': handleLeave(); break;
+    case 'remember': handleRemember(); break;
+    case 'think': handleThink(); break;
+    case 'help': handleHelp(); break;
+    default: handleUnknown(verb); break;
+  }
+}
+
+// ── input handling ──
+const input = document.getElementById('user-input');
+
+input.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    const text = input.value.trim();
+    if (!text) return;
+
+    addLine('▸&nbsp;&nbsp;' + text, 'prompt');
+    processCommand(text);
+    input.value = '';
+
+    if (!state.ended) {
+      fadeHint('type a verb — look, examine, wait, approach, sit, listen, breathe...');
+    }
+  }
+});
+
+// Keep focus on input when clicking anywhere
+document.addEventListener('click', () => {
+  if (!state.ended) input.focus();
+});
+
+// ── init ──
+showTitle();
+scheduleAmbient();
+
+// after 45 seconds of no commands, gently nudge
+let idleTimer = null;
+function resetIdleTimer() {
+  clearTimeout(idleTimer);
+  if (state.ended) return;
+  idleTimer = setTimeout(() => {
+    if (state.ended) return;
+    const verbCount = state.commandHistory.length;
+    if (verbCount === 0) {
+      addLine('<i>The room waits. The doors breathe. The key is patient. You, too, can take your time — but if you\'re unsure where to begin, try:</i> <b>look</b>', 'ambient');
+    } else if (verbCount < 4 && state.waited < 2) {
+      addLine('<i>Sometimes the right thing to do in a threshold is simply wait. Try:</i> <b>wait</b>', 'ambient');
+    } else if (!state.sitting && state.waited >= 2) {
+      addLine('<i>The bench has held many people. It could hold you too.</i>', 'ambient');
+    }
+    resetIdleTimer();
+  }, 45000);
+}
+resetIdleTimer();
+
+// update idle timer on input
+input.addEventListener('input', resetIdleTimer);
+
+// initial focus
+input.focus();
+</script>
+</body>
+</html>
