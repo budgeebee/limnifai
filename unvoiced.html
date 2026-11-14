@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Unvoiced — a vocal threshold instrument</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+  body {
+    background: #111512;
+    color: #ded8c9;
+    font-family: "Courier New", monospace;
+    cursor: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #c { display: block; width: 100%; height: 100%; touch-action: none; }
+  .hud {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 5;
+    overflow: hidden;
+  }
+  .masthead {
+    position: absolute;
+    top: 28px;
+    left: 32px;
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+  }
+  .masthead h1 {
+    margin: 0;
+    color: #d9d2c3;
+    font-size: clamp(1rem, 2vw, 1.55rem);
+    font-weight: 400;
+    letter-spacing: 0.42em;
+    text-transform: uppercase;
+  }
+  .masthead span {
+    color: rgba(154, 174, 154, 0.68);
+    font-size: 0.62rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+  }
+  .instructions {
+    position: absolute;
+    left: 32px;
+    bottom: 26px;
+    max-width: 34rem;
+    color: rgba(222, 216, 201, 0.48);
+    font-size: 0.62rem;
+    line-height: 1.9;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+  }
+  .instructions b { color: rgba(198, 154, 145, 0.86); font-weight: 400; }
+  .phrase {
+    position: absolute;
+    left: 50%;
+    bottom: 26px;
+    transform: translateX(-50%);
+    width: min(48vw, 620px);
+    color: rgba(184, 173, 149, 0.62);
+    font-family: Georgia, serif;
+    font-size: clamp(0.68rem, 1.05vw, 0.86rem);
+    font-style: italic;
+    letter-spacing: 0.04em;
+    text-align: center;
+    transition: opacity 1.4s ease;
+  }
+  .phrase.dim { opacity: 0; }
+  #sound {
+    position: fixed;
+    z-index: 10;
+    top: 24px;
+    right: 26px;
+    padding: 10px 15px;
+    border: 1px solid rgba(154, 174, 154, 0.4);
+    border-radius: 999px;
+    background: rgba(17, 21, 18, 0.72);
+    color: rgba(222, 216, 201, 0.78);
+    font: 0.61rem/1 "Courier New", monospace;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    cursor: pointer;
+    backdrop-filter: blur(8px);
+    transition: border-color 250ms ease, color 250ms ease, transform 250ms ease;
+  }
+  #sound:hover { border-color: rgba(198, 154, 145, 0.78); color: #eee6d5; transform: translateY(-1px); }
+  #sound.live { border-color: rgba(154, 174, 154, 0.75); color: #d9d2c3; }
+  #sound.live::before { content: "●"; margin-right: 8px; color: #9aae9a; }
+  .fade-note {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: grid;
+    place-items: center;
+    background: rgba(17, 21, 18, 0.96);
+    color: rgba(222, 216, 201, 0.72);
+    font-size: 0.68rem;
+    letter-spacing: 0.26em;
+    text-align: center;
+    text-transform: uppercase;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 800ms ease;
+  }
+  .fade-note.show { opacity: 1; }
+  .fade-note span { display: block; margin-top: 16px; color: rgba(154, 174, 154, 0.48); font-size: 0.56rem; }
+  @media (max-width: 720px) {
+    .masthead { top: 20px; left: 18px; }
+    .masthead span { display: none; }
+    .instructions { left: 18px; bottom: 18px; max-width: 70vw; font-size: 0.53rem; }
+    .phrase { display: none; }
+    #sound { top: 17px; right: 15px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="Interactive vocal threshold instrument"></canvas>
+
+<div class="hud">
+  <div class="masthead">
+    <h1>Unvoiced</h1>
+    <span>a vocal threshold instrument</span>
+  </div>
+  <div class="instructions" id="instructions">
+    <b>Move</b> to shape the vowel &nbsp;·&nbsp; <b>Hold</b> to close the throat<br>
+    Release to let the voice return &nbsp;·&nbsp; <b>Wheel</b> to pitch
+  </div>
+  <div class="phrase" id="phrase">the mouth rehearses a shape it has not named.</div>
+</div>
+
+<button id="sound" aria-label="Start audio">Open voice</button>
+<div class="fade-note" id="fadeNote">between sound and silence<div>the throat keeps changing its mind</div></div>
+
+<script>
+(() => {
+  'use strict';
+
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const soundButton = document.getElementById('sound');
+  const phraseEl = document.getElementById('phrase');
+  const fadeNote = document.getElementById('fadeNote');
+
+  const palette = {
+    void: '#111512',
+    ink: '#ded8c9',
+    sage: '#9aae9a',
+    rose: '#c69a91',
+    slate: '#74858a',
+    stone: '#b8ad95',
+    dim: 'rgba(222,216,201,0.13)'
+  };
+
+  let W = 0;
+  let H = 0;
+  let dpr = 1;
+  let lastTime = performance.now();
+  let elapsed = 0;
+  let frame = 0;
+  let audioReady = false;
+  let noteTimer = 0;
+  let phraseIndex = 0;
+  let pointerSeen = false;
+  let held = false;
+  let holdingSince = 0;
+  let hoverPulse = 0;
+  let lastPointer = { x: 0.72, y: 0.55, clientX: 0, clientY: 0 };
+  let cursor = { x: 0.72, y: 0.55 };
+  let targetCursor = { x: 0.72, y: 0.55 };
+  let aperture = 0.88;
+  let apertureTarget = 0.88;
+  let voiceLevel = 0;
+  let breathLevel = 0;
+  let pitch = 122;
+  let pitchTarget = 122;
+  let selectedVowel = 'ɑ';
+  let selectedConfidence = 0;
+  let formantF1 = 730;
+  let formantF2 = 1090;
+  let formantF3 = 2440;
+  let phraseClock = 0;
+  let seed = 19371;
+  let audio = null;
+
+  const phrases = [
+    'the mouth rehearses a shape it has not named.',
+    'between voiced and unvoiced, the body invents a door.',
+    'a vowel is a room with its shutters open.',
+    'hold the threshold until it becomes texture.',
+    'release: the word was waiting inside the breath.',
+    'the throat is a hinge that forgets it moves.',
+    'even silence has a shape when the tongue insists.',
+    'somewhere, a voice is becoming almost a word.'
+  ];
+
+  // Vowel-space anchors. x moves front→back; y moves close→open.
+  const vowels = [
+    { ipa: 'i', x: 0.08, y: 0.12, f1: 270, f2: 2300 },
+    { ipa: 'ɪ', x: 0.22, y: 0.22, f1: 390, f2: 1990 },
+    { ipa: 'e', x: 0.34, y: 0.36, f1: 460, f2: 2100 },
+    { ipa: 'ɛ', x: 0.42, y: 0.50, f1: 610, f2: 1900 },
+    { ipa: 'æ', x: 0.48, y: 0.66, f1: 730, f2: 1720 },
+    { ipa: 'a', x: 0.60, y: 0.76, f1: 800, f2: 1150 },
+    { ipa: 'ɑ', x: 0.69, y: 0.63, f1: 700, f2: 1050 },
+    { ipa: 'ɔ', x: 0.79, y: 0.45, f1: 500, f2: 900 },
+    { ipa: 'o', x: 0.83, y: 0.28, f1: 430, f2: 820 },
+    { ipa: 'ʊ', x: 0.89, y: 0.18, f1: 330, f2: 920 },
+    { ipa: 'u', x: 0.94, y: 0.09, f1: 300, f2: 790 }
+  ];
+
+  function random() {
+    seed = (seed * 16807) % 2147483647;
+    return (seed - 1) / 2147483646;
+  }
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = Math.floor(W * dpr);
+    canvas.height = Math.floor(H * dpr);
+    canvas.style.width = `${W}px`;
+    canvas.style.height = `${H}px`;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  window.addEventListener('resize', resize, { passive: true });
+  resize();
+
+  function chartRect() {
+    const narrow = W < 760;
+    if (narrow) {
+      return { x: W * 0.10, y: H * 0.28, w: W * 0.80, h: H * 0.43 };
+    }
+    return { x: W * 0.57, y: H * 0.17, w: W * 0.34, h: H * 0.59 };
+  }
+
+  function chamberRect() {
+    const narrow = W < 760;
+    if (narrow) {
+      return { x: W * 0.16, y: H * 0.78, w: W * 0.68, h: H * 0.15 };
+    }
+    return { x: W * 0.19, y: H * 0.48, w: W * 0.28, h: H * 0.31 };
+  }
+
+  function pointInChart(clientX, clientY) {
+    const r = chartRect();
+    return {
+      x: Math.max(0, Math.min(1, (clientX - r.x) / r.w)),
+      y: Math.max(0, Math.min(1, (clientY - r.y) / r.h)),
+      inside: clientX >= r.x && clientX <= r.x + r.w && clientY >= r.y && clientY <= r.y + r.h
+    };
+  }
+
+  function updatePointer(clientX, clientY) {
+    lastPointer.clientX = clientX;
+    lastPointer.clientY = clientY;
+    const p = pointInChart(clientX, clientY);
+    targetCursor.x = p.x;
+    targetCursor.y = p.y;
+    pointerSeen = true;
+  }
+
+  function beginHold() {
+    if (!held) holdingSince = performance.now();
+    held = true;
+    apertureTarget = 0.035;
+    if (audioReady && audio) audio.setApertureTarget(0.035);
+  }
+
+  function endHold() {
+    held = false;
+    apertureTarget = 0.88;
+    if (audioReady && audio) audio.setApertureTarget(0.88);
+  }
+
+  canvas.addEventListener('pointermove', event => updatePointer(event.clientX, event.clientY), { passive: true });
+  canvas.addEventListener('pointerdown', event => {
+    canvas.setPointerCapture?.(event.pointerId);
+    updatePointer(event.clientX, event.clientY);
+    beginHold();
+  });
+  canvas.addEventListener('pointerup', endHold);
+  canvas.addEventListener('pointercancel', endHold);
+  canvas.addEventListener('pointerleave', event => {
+    if (event.buttons === 0) endHold();
+  });
+  window.addEventListener('blur', endHold);
+
+  window.addEventListener('wheel', event => {
+    event.preventDefault();
+    pitchTarget = Math.max(72, Math.min(190, pitchTarget - event.deltaY * 0.045));
+  }, { passive: false });
+
+  window.addEventListener('keydown', event => {
+    if (event.code === 'Space' && !event.repeat) {
+      event.preventDefault();
+      beginHold();
+    }
+  });
+  window.addEventListener('keyup', event => {
+    if (event.code === 'Space') endHold();
+  });
+
+  function interpolateVowels(x, y) {
+    const sorted = vowels
+      .map(v => ({ v, d: (v.x - x) ** 2 + (v.y - y) ** 2 }))
+      .sort((a, b) => a.d - b.d);
+    const near = sorted.slice(0, 4);
+    let weightSum = 0;
+    let f1 = 0;
+    let f2 = 0;
+    for (const item of near) {
+      const weight = 1 / Math.pow(item.d + 0.0075, 1.45);
+      f1 += item.v.f1 * weight;
+      f2 += item.v.f2 * weight;
+      weightSum += weight;
+    }
+    f1 /= weightSum;
+    f2 /= weightSum;
+    const closest = sorted[0];
+    const second = sorted[1];
+    const confidence = Math.max(0, Math.min(1, 1 - (second.d - closest.d) * 2.8));
+    return { f1, f2, ipa: closest.v.ipa, confidence };
+  }
+
+  // Web Audio graph: glottal periodic source → three formant resonators,
+  // mixed with breath noise whose balance is the voiced/unvoiced threshold.
+  function createAudio() {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return null;
+    const audioContext = new AudioContextClass();
+    const master = audioContext.createGain();
+    master.gain.value = 0.55;
+    const compressor = audioContext.createDynamicsCompressor();
+    compressor.threshold.value = -18;
+    compressor.knee.value = 18;
+    compressor.ratio.value = 5;
+    compressor.attack.value = 0.008;
+    compressor.release.value = 0.18;
+    master.connect(compressor);
+    compressor.connect(audioContext.destination);
+
+    const harmonicCount = 28;
+    const real = new Float32Array(harmonicCount);
+    const imag = new Float32Array(harmonicCount);
+    for (let n = 1; n < harmonicCount; n++) {
+      imag[n] = (1 / Math.pow(n, 1.72)) * (n % 2 === 0 ? 0.72 : 1);
+    }
+    const wave = audioContext.createPeriodicWave(real, imag, { disableNormalization: false });
+    const oscillator = audioContext.createOscillator();
+    oscillator.setPeriodicWave(wave);
+    oscillator.frequency.value = pitch;
+    const voicedGain = audioContext.createGain();
+    voicedGain.gain.value = 0.22;
+    oscillator.connect(voicedGain);
+
+    const formantWeights = [1.0, 0.58, 0.26];
+    const formantGains = [];
+    const formantFilters = [];
+    for (let i = 0; i < 3; i++) {
+      const filter = audioContext.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.value = [formantF1, formantF2, formantF3][i];
+      filter.Q.value = [8, 11, 13][i];
+      const gain = audioContext.createGain();
+      gain.gain.value = formantWeights[i];
+      voicedGain.connect(filter);
+      filter.connect(gain);
+      gain.connect(master);
+      formantFilters.push(filter);
+      formantGains.push(gain);
+    }
+
+    const noiseBuffer = audioContext.createBuffer(1, audioContext.sampleRate * 2, audioContext.sampleRate);
+    const data = noiseBuffer.getChannelData(0);
+    let brown = 0;
+    for (let i = 0; i < data.length; i++) {
+      const white = Math.random() * 2 - 1;
+      brown = (brown + 0.025 * white) / 1.025;
+      data[i] = white * 0.68 + brown * 2.8;
+    }
+    const noise = audioContext.createBufferSource();
+    noise.buffer = noiseBuffer;
+    noise.loop = true;
+    const breathFilter = audioContext.createBiquadFilter();
+    breathFilter.type = 'bandpass';
+    breathFilter.frequency.value = 1450;
+    breathFilter.Q.value = 0.72;
+    const breathGain = audioContext.createGain();
+    breathGain.gain.value = 0.012;
+    noise.connect(breathFilter);
+    breathFilter.connect(breathGain);
+    breathGain.connect(master);
+
+    const shimmer = audioContext.createOscillator();
+    shimmer.type = 'sine';
+    shimmer.frequency.value = pitch * 2.01;
+    const shimmerGain = audioContext.createGain();
+    shimmerGain.gain.value = 0.018;
+    shimmer.connect(shimmerGain);
+    shimmerGain.connect(master);
+
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 512;
+    analyser.smoothingTimeConstant = 0.72;
+    master.connect(analyser);
+    const bins = new Uint8Array(analyser.frequencyBinCount);
+
+    oscillator.start();
+    noise.start();
+    shimmer.start();
+
+    function setApertureTarget(value) {
+      const now = audioContext.currentTime;
+      const voiceTarget = 0.22 * (0.06 + 0.94 * value);
+      const breathTarget = 0.006 + 0.115 * Math.pow(1 - value, 1.35);
+      voicedGain.gain.setTargetAtTime(voiceTarget, now, 0.055);
+      breathGain.gain.setTargetAtTime(breathTarget, now, 0.055);
+      shimmerGain.gain.setTargetAtTime(0.003 + 0.026 * value, now, 0.09);
+    }
+
+    function update(f1, f2, f3, nextPitch, openness) {
+      const now = audioContext.currentTime;
+      formantFilters[0].frequency.setTargetAtTime(f1, now, 0.045);
+      formantFilters[1].frequency.setTargetAtTime(f2, now, 0.045);
+      formantFilters[2].frequency.setTargetAtTime(f3, now, 0.06);
+      oscillator.frequency.setTargetAtTime(nextPitch, now, 0.08);
+      shimmer.frequency.setTargetAtTime(nextPitch * 2.01, now, 0.1);
+      breathFilter.frequency.setTargetAtTime(1100 + f2 * 0.22, now, 0.08);
+      formantGains[0].gain.setTargetAtTime(0.82 + openness * 0.28, now, 0.08);
+    }
+
+    function ping(f1, f2, level) {
+      if (!audioReady) return;
+      const now = audioContext.currentTime;
+      const pingOsc = audioContext.createOscillator();
+      pingOsc.type = 'triangle';
+      pingOsc.frequency.setValueAtTime(Math.max(120, f1 * 0.62), now);
+      pingOsc.frequency.exponentialRampToValueAtTime(Math.max(80, f2 * 0.24), now + 0.11);
+      const pingFilter = audioContext.createBiquadFilter();
+      pingFilter.type = 'bandpass';
+      pingFilter.frequency.value = f2 * 0.5;
+      pingFilter.Q.value = 2.2;
+      const pingGain = audioContext.createGain();
+      pingGain.gain.setValueAtTime(0.0001, now);
+      pingGain.gain.exponentialRampToValueAtTime(0.045 * level, now + 0.012);
+      pingGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
+      pingOsc.connect(pingFilter);
+      pingFilter.connect(pingGain);
+      pingGain.connect(master);
+      pingOsc.start(now);
+      pingOsc.stop(now + 0.3);
+    }
+
+    return {
+      context: audioContext,
+      setApertureTarget,
+      update,
+      ping,
+      analyser,
+      bins
+    };
+  }
+
+  soundButton.addEventListener('click', async () => {
+    if (!audio) audio = createAudio();
+    if (!audio) {
+      soundButton.textContent = 'no audio';
+      return;
+    }
+    if (audio.context.state === 'suspended') await audio.context.resume();
+    audioReady = true;
+    soundButton.textContent = 'voice open';
+    soundButton.classList.add('live');
+    fadeNote.classList.add('show');
+    setTimeout(() => fadeNote.classList.remove('show'), 1200);
+    audio.setApertureTarget(apertureTarget);
+  });
+
+  function updateAudioLevels() {
+    if (!audioReady || !audio) {
+      voiceLevel += ((aperture > 0.45 ? 0.18 : 0) - voiceLevel) * 0.08;
+      breathLevel += ((aperture < 0.65 ? 0.25 : 0) - breathLevel) * 0.08;
+      return;
+    }
+    audio.analyser.getByteFrequencyData(audio.bins);
+    let low = 0;
+    let high = 0;
+    const split = Math.floor(audio.bins.length * 0.18);
+    for (let i = 0; i < split; i++) low += audio.bins[i];
+    for (let i = split; i < audio.bins.length; i++) high += audio.bins[i];
+    const lowLevel = low / Math.max(1, split) / 255;
+    const highLevel = high / Math.max(1, audio.bins.length - split) / 255;
+    voiceLevel += (lowLevel * 1.8 - voiceLevel) * 0.12;
+    breathLevel += (highLevel * 1.5 - breathLevel) * 0.1;
+  }
+
+  function roundedRect(context, x, y, width, height, radius) {
+    const r = Math.min(radius, width / 2, height / 2);
+    context.beginPath();
+    context.moveTo(x + r, y);
+    context.arcTo(x + width, y, x + width, y + height, r);
+    context.arcTo(x + width, y + height, x, y + height, r);
+    context.arcTo(x, y + height, x, y, r);
+    context.arcTo(x, y, x + width, y, r);
+    context.closePath();
+  }
+
+  function drawBackground() {
+    ctx.fillStyle = palette.void;
+    ctx.fillRect(0, 0, W, H);
+    const glow = ctx.createRadialGradient(W * 0.27, H * 0.48, 10, W * 0.27, H * 0.48, W * 0.36);
+    glow.addColorStop(0, 'rgba(154,174,154,0.055)');
+    glow.addColorStop(0.55, 'rgba(116,133,138,0.025)');
+    glow.addColorStop(1, 'rgba(17,21,18,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(222,216,201,0.045)';
+    ctx.lineWidth = 1;
+    const gap = Math.max(32, W / 34);
+    for (let x = (W % gap) / 2; x < W; x += gap) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    }
+    for (let y = (H % gap) / 2; y < H; y += gap) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawVowelChart() {
+    const r = chartRect();
+    ctx.save();
+    ctx.fillStyle = 'rgba(17,21,18,0.46)';
+    roundedRect(ctx, r.x, r.y, r.w, r.h, 18);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(184,173,149,0.2)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(222,216,201,0.38)';
+    ctx.font = '9px Courier New';
+    ctx.letterSpacing = '2px';
+    ctx.fillText('VOWEL SPACE', r.x + 15, r.y + 20);
+    ctx.fillStyle = 'rgba(222,216,201,0.24)';
+    ctx.fillText('FRONT', r.x + 13, r.y + r.h - 12);
+    ctx.fillText('BACK', r.x + r.w - 39, r.y + r.h - 12);
+    ctx.fillText('CLOSE', r.x + 13, r.y + 40);
+    ctx.fillText('OPEN', r.x + 13, r.y + r.h - 27);
+
+    const points = vowels.map(v => ({ x: r.x + v.x * r.w, y: r.y + v.y * r.h }));
+    ctx.strokeStyle = 'rgba(154,174,154,0.18)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < points.length - 1; i++) {
+      ctx.beginPath();
+      ctx.moveTo(points[i].x, points[i].y);
+      ctx.lineTo(points[i + 1].x, points[i + 1].y);
+      ctx.stroke();
+    }
+
+    for (let i = 0; i < vowels.length; i++) {
+      const v = vowels[i];
+      const px = r.x + v.x * r.w;
+      const py = r.y + v.y * r.h;
+      const active = v.ipa === selectedVowel;
+      ctx.beginPath();
+      ctx.arc(px, py, active ? 5.2 : 2.2, 0, Math.PI * 2);
+      ctx.fillStyle = active ? palette.rose : 'rgba(154,174,154,0.48)';
+      ctx.fill();
+      if (active) {
+        ctx.beginPath();
+        ctx.arc(px, py, 10 + Math.sin(elapsed * 0.004) * 2, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(198,154,145,0.38)';
+        ctx.stroke();
+      }
+      ctx.fillStyle = active ? palette.ink : 'rgba(222,216,201,0.34)';
+      ctx.font = active ? '11px Georgia' : '9px Georgia';
+      ctx.fillText(v.ipa, px + 8, py - 7);
+    }
+
+    const cx = r.x + cursor.x * r.w;
+    const cy = r.y + cursor.y * r.h;
+    const trail = drawVowelChart.trail || (drawVowelChart.trail = []);
+    trail.push({ x: cx, y: cy, life: 1 });
+    if (trail.length > 42) trail.shift();
+    for (let i = 0; i < trail.length; i++) {
+      const p = trail[i];
+      const age = i / trail.length;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 1 + age * 2.1, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(198,154,145,${age * 0.18})`;
+      ctx.fill();
+    }
+    ctx.beginPath();
+    ctx.arc(cx, cy, 7, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(198,154,145,0.85)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cx - 12, cy); ctx.lineTo(cx - 5, cy);
+    ctx.moveTo(cx + 5, cy); ctx.lineTo(cx + 12, cy);
+    ctx.moveTo(cx, cy - 12); ctx.lineTo(cx, cy - 5);
+    ctx.moveTo(cx, cy + 5); ctx.lineTo(cx, cy + 12);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawChamber() {
+    const r = chamberRect();
+    const cx = r.x + r.w * 0.5;
+    const cy = r.y + r.h * 0.47;
+    const radius = Math.min(r.w, r.h) * 0.39;
+    const open = 0.035 + aperture * 0.965;
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(222,216,201,0.34)';
+    ctx.font = '9px Courier New';
+    ctx.fillText('LARYNGEAL CHAMBER', r.x, r.y - 14);
+
+    const chamberGlow = ctx.createRadialGradient(cx, cy, 2, cx, cy, radius * 1.55);
+    chamberGlow.addColorStop(0, `rgba(154,174,154,${0.04 + voiceLevel * 0.1})`);
+    chamberGlow.addColorStop(0.65, 'rgba(116,133,138,0.025)');
+    chamberGlow.addColorStop(1, 'rgba(17,21,18,0)');
+    ctx.fillStyle = chamberGlow;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius * 1.6, 0, Math.PI * 2);
+    ctx.fill();
+
+    for (let i = 0; i < 5; i++) {
+      const phase = elapsed * (0.0008 + i * 0.00016) + i * 1.3;
+      const rr = radius * (0.42 + i * 0.14) + Math.sin(phase) * 2.5;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rr, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(154,174,154,${0.06 + voiceLevel * 0.10 - i * 0.008})`;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // The two vocal folds close as the aperture narrows.
+    const foldGap = radius * (0.035 + open * 0.24);
+    const foldHeight = radius * 0.72;
+    const foldWidth = radius * 0.24;
+    const tension = 1 - open;
+    ctx.lineCap = 'round';
+    for (const side of [-1, 1]) {
+      const x = cx + side * foldGap;
+      const bend = Math.sin(elapsed * 0.0032) * radius * 0.025 * (0.2 + tension);
+      ctx.beginPath();
+      ctx.moveTo(x - side * foldWidth * 0.45, cy - foldHeight * 0.5);
+      ctx.quadraticCurveTo(x + bend, cy, x - side * foldWidth * 0.45, cy + foldHeight * 0.5);
+      ctx.strokeStyle = side < 0 ? palette.rose : palette.sage;
+      ctx.lineWidth = 7 + tension * 2.2;
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(222,216,201,0.34)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // Breath motes drift through the narrowing gap.
+    for (let i = 0; i < 30; i++) {
+      const life = (elapsed * 0.00016 + i * 0.173) % 1;
+      const spread = (Math.sin(i * 17.31) * 0.5) * radius * (0.45 + open * 0.55);
+      const x = cx - radius * 0.9 + life * radius * 1.8;
+      const y = cy + spread * (0.45 + open * 0.55) + Math.sin(life * 7 + i) * 3;
+      const alpha = Math.sin(life * Math.PI) * (0.12 + breathLevel * 0.42);
+      ctx.beginPath();
+      ctx.arc(x, y, 1.1 + (Math.sin(i * 4.17) * 0.5 + 0.5) * 1.4, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(184,173,149,${alpha})`;
+      ctx.fill();
+    }
+
+    // Resonant bands represent formants inside the mouth chamber.
+    const resonance = [formantF1, formantF2, formantF3];
+    const strengths = [1, 0.68, 0.38];
+    for (let i = 0; i < 3; i++) {
+      const normalized = Math.min(1, resonance[i] / 2500);
+      const rr = radius * (0.16 + normalized * 0.76);
+      ctx.beginPath();
+      ctx.arc(cx, cy, rr, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(198,154,145,${0.07 + strengths[i] * voiceLevel * 0.18})`;
+      ctx.lineWidth = 1 + strengths[i] * voiceLevel * 2.5;
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = 'rgba(222,216,201,0.42)';
+    ctx.font = '10px Courier New';
+    const state = held ? 'CLOSING' : aperture < 0.45 ? 'WHISPER' : 'VOICED';
+    ctx.fillText(`${state}  /  ${selectedVowel}`, r.x, r.y + r.h + 18);
+    ctx.fillStyle = 'rgba(184,173,149,0.30)';
+    ctx.font = '8px Courier New';
+    ctx.fillText(`F1 ${Math.round(formantF1)}   F2 ${Math.round(formantF2)}   F0 ${Math.round(pitch)} Hz`, r.x, r.y + r.h + 34);
+    ctx.restore();
+  }
+
+  function drawApertureMeter() {
+    const x = W < 760 ? W * 0.16 : W * 0.51;
+    const y = H < 620 ? H * 0.16 : H * 0.72;
+    const width = W < 760 ? W * 0.68 : W * 0.27;
+    const height = 5;
+    ctx.save();
+    ctx.fillStyle = 'rgba(222,216,201,0.18)';
+    ctx.fillRect(x, y, width, height);
+    const gradient = ctx.createLinearGradient(x, 0, x + width, 0);
+    gradient.addColorStop(0, palette.rose);
+    gradient.addColorStop(0.48, palette.stone);
+    gradient.addColorStop(1, palette.sage);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(x, y, width * aperture, height);
+    for (let i = 0; i <= 10; i++) {
+      const tx = x + width * (i / 10);
+      ctx.fillStyle = 'rgba(17,21,18,0.8)';
+      ctx.fillRect(tx, y, 1, height);
+    }
+    ctx.fillStyle = 'rgba(222,216,201,0.35)';
+    ctx.font = '8px Courier New';
+    ctx.fillText('UNVOICED', x, y - 8);
+    ctx.textAlign = 'right';
+    ctx.fillText('VOICED', x + width, y - 8);
+    ctx.textAlign = 'left';
+    ctx.restore();
+  }
+
+  function drawCursor() {
+    if (!pointerSeen) return;
+    const x = lastPointer.clientX;
+    const y = lastPointer.clientY;
+    const pulse = 1 + Math.sin(elapsed * 0.008) * 0.08;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(elapsed * 0.0007);
+    ctx.strokeStyle = 'rgba(198,154,145,0.76)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(0, 0, 8 * pulse, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-14, 0); ctx.lineTo(-5, 0);
+    ctx.moveTo(5, 0); ctx.lineTo(14, 0);
+    ctx.moveTo(0, -14); ctx.lineTo(0, -5);
+    ctx.moveTo(0, 5); ctx.lineTo(0, 14);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function rotatePhrase() {
+    phraseEl.classList.add('dim');
+    setTimeout(() => {
+      phraseIndex = (phraseIndex + 1) % phrases.length;
+      phraseEl.textContent = phrases[phraseIndex];
+      phraseEl.classList.remove('dim');
+    }, 650);
+  }
+
+  function update(dt) {
+    const smooth = 1 - Math.pow(0.001, dt);
+    cursor.x += (targetCursor.x - cursor.x) * smooth;
+    cursor.y += (targetCursor.y - cursor.y) * smooth;
+    aperture += (apertureTarget - aperture) * (1 - Math.pow(0.0005, dt));
+    pitch += (pitchTarget - pitch) * (1 - Math.pow(0.03, dt));
+
+    const result = interpolateVowels(cursor.x, cursor.y);
+    formantF1 += (result.f1 - formantF1) * (1 - Math.pow(0.02, dt));
+    formantF2 += (result.f2 - formantF2) * (1 - Math.pow(0.02, dt));
+    formantF3 += (2450 - formantF3) * (1 - Math.pow(0.04, dt));
+    selectedVowel = result.ipa;
+    selectedConfidence = result.confidence;
+
+    if (audioReady && audio) {
+      audio.update(formantF1, formantF2, formantF3, pitch, aperture);
+    }
+    updateAudioLevels();
+
+    if (held && performance.now() - holdingSince > 110) {
+      hoverPulse = Math.min(1, hoverPulse + dt * 2.2);
+    } else {
+      hoverPulse = Math.max(0, hoverPulse - dt * 1.8);
+    }
+
+    phraseClock += dt;
+    if (phraseClock > 10.5) {
+      phraseClock = 0;
+      rotatePhrase();
+    }
+  }
+
+  function render() {
+    drawBackground();
+    drawChamber();
+    drawVowelChart();
+    drawApertureMeter();
+    drawCursor();
+    ctx.fillStyle = 'rgba(222,216,201,0.18)';
+    ctx.font = '8px Courier New';
+    ctx.fillText(`VOICE ${Math.round(voiceLevel * 100)}  /  BREATH ${Math.round(breathLevel * 100)}`, 14, H - 14);
+  }
+
+  function loop(now) {
+    const dt = Math.min(0.05, (now - lastTime) / 1000);
+    lastTime = now;
+    elapsed += dt * 1000;
+    frame += 1;
+    update(dt);
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
