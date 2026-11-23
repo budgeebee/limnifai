@@ -7,7 +7,20 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = join(__dirname, '..');
 const thumbnailsDir = join(rootDir, 'thumbnails');
 
-const pieces = JSON.parse(readFileSync(join(rootDir, 'pieces.json'), 'utf-8'));
+const allPieces = JSON.parse(readFileSync(join(rootDir, 'pieces.json'), 'utf-8'));
+
+// Optional: pass piece filenames (e.g. `node generate-thumbnails.mjs veil littoral`)
+// to regenerate only those, instead of churning the whole collection.
+const requested = process.argv.slice(2).map(a => a.replace(/\.html$/, ''));
+const pieces = requested.length
+  ? allPieces.filter(p => requested.includes(p.file.replace(/\.html$/, '')))
+  : allPieces;
+
+if (requested.length && pieces.length !== requested.length) {
+  const found = new Set(pieces.map(p => p.file.replace(/\.html$/, '')));
+  const missing = requested.filter(r => !found.has(r));
+  if (missing.length) console.log(`⚠ not in pieces.json: ${missing.join(', ')}`);
+}
 
 if (!existsSync(thumbnailsDir)) {
   mkdirSync(thumbnailsDir, { recursive: true });
@@ -39,11 +52,18 @@ for (const piece of pieces) {
         () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
       );
       await page.locator('canvas').screenshot({ path: thumbPath, type: 'png' });
-      console.log(`✓ ${piece.title}`);
+      console.log(`✓ ${piece.title} (canvas)`);
       success++;
     } else {
-      console.log(`✗ ${piece.title} (no canvas)`);
-      failed.push(piece.file);
+      // DOM-based piece (no <canvas>): the piece IS the page, so capture the
+      // viewport instead of skipping it. The gallery renders a thumbnail for
+      // every entry in pieces.json, so a missing file is a broken card.
+      await page.evaluate(
+        () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+      );
+      await page.screenshot({ path: thumbPath, type: 'png' });
+      console.log(`✓ ${piece.title} (viewport)`);
+      success++;
     }
   } catch (err) {
     console.log(`✗ ${piece.title} (${err.message})`);
