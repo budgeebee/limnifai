@@ -374,5 +374,9 @@
   {
     "file": "partition.html",
     "title": "Partition"
+  },
+  {
+    "file": "latency.html",
+    "title": "Latency"
   }
 ]
