@@ -25,8 +25,30 @@ A cron job creates a new piece every night at 3 AM PT. Each piece:
 - `gallery.html` — browsable gallery of all pieces
 - `index.html` — picks a random piece to display
 - `pieces.json` — registry of all art pieces
+- `thumbnails/` — gallery thumbnails, one PNG per registered piece
+- `scripts/generate-thumbnails.mjs` — thumbnail generator (Playwright)
 - `*.html` — individual generative art pieces
 - `src/` — React components (experimental, not in gallery)
+
+## Thumbnails
+
+The gallery renders a thumbnail for **every** entry in `pieces.json`, so a
+missing PNG is a broken card. Regenerate them all:
+
+```bash
+node scripts/generate-thumbnails.mjs
+```
+
+Regenerate just a few (avoids churning the whole collection):
+
+```bash
+node scripts/generate-thumbnails.mjs veil littoral latency
+```
+
+Canvas-based pieces are captured from their `<canvas>` element; DOM-based
+pieces (no canvas — text adventures, CSS-driven layouts) fall back to a
+full-viewport screenshot, so every registered piece gets a real thumbnail.
+Requires `npx playwright install chromium-headless-shell` once per host.
 
 ## Creating a Piece
 
