@@ -48,7 +48,7 @@
     font-size:clamp(8px,.8vw,10px);letter-spacing:.2em;
     text-transform:uppercase;color:rgba(207,214,255,.34);margin-bottom:6px;
   }
-  .lagmeter canvas{width:100%;height:clamp(60px,11vh,110px);display:block}
+  .lagmeter{min-height:1px}
 
   .phrases{
     position:fixed;left:50%;bottom:clamp(58px,9vh,104px);
@@ -123,7 +123,6 @@
 
 <div class="lagmeter">
   <div class="head"><span>lag</span><span id="lagval">0 ms</span></div>
-  <canvas id="lagcanvas"></canvas>
 </div>
 
 <div class="phrases"><span id="phrase"></span></div>
@@ -153,8 +152,6 @@
 
   const canvas = document.getElementById('field');
   const ctx = canvas.getContext('2d', { alpha: false });
-  const lagCanvas = document.getElementById('lagcanvas');
-  const lctx = lagCanvas.getContext('2d');
 
   const phraseEl   = document.getElementById('phrase');
   const clockEl    = document.getElementById('clock');
@@ -224,11 +221,6 @@
     canvas.width = Math.floor(W * DPR);
     canvas.height = Math.floor(H * DPR);
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-
-    const r = lagCanvas.getBoundingClientRect();
-    lagCanvas.width = Math.max(1, Math.floor(r.width * DPR));
-    lagCanvas.height = Math.max(1, Math.floor(r.height * DPR));
-    lctx.setTransform(DPR, 0, 0, DPR, 0, 0);
 
     if (!hasPointer) { px = sx = W * 0.5; py = sy = H * 0.5; }
   }
@@ -433,31 +425,33 @@
     }
   }
 
+  const METER_W = 190;
+  const METER_H = 84;
+  function meterRect() {
+    const w = Math.min(METER_W, W * 0.28);
+    const hh = Math.min(METER_H, H * 0.14);
+    return { x: W - w - Math.max(16, W * 0.03), y: Math.max(52, H * 0.09), w, h: hh };
+  }
+
   function drawLagMeter() {
-    const w = lagCanvas.width / DPR;
-    const hh = lagCanvas.height / DPR;
-    lctx.clearRect(0, 0, w, hh);
-
-    // history of lag as a stepped bar chart
-    lagHistory.push(lagFrames);
-    if (lagHistory.length > 46) lagHistory.shift();
-
+    const { x, y, w, h } = meterRect();
+    // history of lag as a stepped bar chart, drawn onto the main canvas
     const bw = w / 46;
     for (let i = 0; i < lagHistory.length; i++) {
       const v = Math.min(1, lagHistory[i] / 140);
-      const bh = Math.max(1.2, v * hh);
+      const bh = Math.max(1.2, v * h);
       const c = lagHistory[i] < 8 ? PAL.cyan : lagHistory[i] < 45 ? PAL.violet : PAL.hot;
-      lctx.fillStyle = rgba(c, 0.16 + v * 0.6);
-      lctx.fillRect(i * bw, hh - bh, bw * 0.62, bh);
+      ctx.fillStyle = rgba(c, 0.16 + v * 0.6);
+      ctx.fillRect(x + i * bw, y + h - bh, bw * 0.62, bh);
     }
     // threshold line
-    lctx.strokeStyle = rgba(PAL.acid, 0.25);
-    lctx.setLineDash([2, 3]);
-    lctx.beginPath();
-    lctx.moveTo(0, hh - (12 / 140) * hh);
-    lctx.lineTo(w, hh - (12 / 140) * hh);
-    lctx.stroke();
-    lctx.setLineDash([]);
+    ctx.strokeStyle = rgba(PAL.acid, 0.25);
+    ctx.setLineDash([2, 3]);
+    ctx.beginPath();
+    ctx.moveTo(x, y + h - (12 / 140) * h);
+    ctx.lineTo(x + w, y + h - (12 / 140) * h);
+    ctx.stroke();
+    ctx.setLineDash([]);
   }
   const lagHistory = [];
 
