@@ -378,5 +378,9 @@
   {
     "file": "latency.html",
     "title": "Latency"
+  },
+  {
+    "file": "scaffold.html",
+    "title": "Scaffold"
   }
 ]
