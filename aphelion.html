@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Aphelion</title>
+<style>
+  :root{
+    --void:#f4efe6;
+    --deep:#e7ddcd;
+    --ink:#111014;
+    --hair:rgba(17,16,20,.14);
+    --hair2:rgba(17,16,20,.32);
+  }
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:var(--void);}
+  body{
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+    cursor:crosshair;
+    touch-action:none;
+  }
+  #stage{position:fixed;inset:0;display:block;}
+
+  .chrome{
+    position:fixed;
+    font-size:10px;
+    letter-spacing:.28em;
+    text-transform:uppercase;
+    color:rgba(17,16,20,.46);
+    pointer-events:none;
+    user-select:none;
+    z-index:3;
+  }
+  #tl{top:22px;left:26px;}
+  #tr{top:22px;right:26px;text-align:right;}
+  #bl{bottom:22px;left:26px;display:flex;flex-direction:column;gap:5px;}
+  #br{bottom:22px;right:26px;text-align:right;display:flex;flex-direction:column;gap:5px;}
+
+  .row{display:flex;align-items:center;gap:8px;}
+  .bar{position:relative;width:112px;height:1px;background:var(--hair);overflow:visible;}
+  .bar i{position:absolute;left:0;top:0;height:1px;background:rgba(17,16,20,.62);width:0;}
+  .mark{position:absolute;top:-3px;width:1px;height:7px;background:rgba(17,16,20,.4);}
+  .val{min-width:64px;text-align:left;font-variant-numeric:tabular-nums;color:rgba(17,16,20,.72);}
+
+  #state{color:rgba(17,16,20,.72);}
+  #state.b{color:#1a1a1a;font-weight:700;}
+
+  #prose{
+    position:fixed;
+    left:50%;
+    transform:translateX(-50%);
+    bottom:74px;
+    width:min(560px, 78vw);
+    text-align:center;
+    font-size:13px;
+    line-height:1.85;
+    letter-spacing:.06em;
+    color:rgba(17,16,20,.42);
+    transition:opacity 1.4s ease;
+    pointer-events:none;
+    user-select:none;
+    z-index:3;
+    font-style:italic;
+  }
+
+  #hint{
+    position:fixed;
+    left:50%;transform:translateX(-50%);
+    bottom:26px;
+    font-size:10px;letter-spacing:.26em;text-transform:uppercase;
+    color:rgba(17,16,20,.34);
+    transition:opacity 2.4s ease;
+    pointer-events:none;user-select:none;z-index:3;
+  }
+
+  #vignette{
+    position:fixed;inset:0;pointer-events:none;z-index:2;
+    background:
+      radial-gradient(120% 90% at 50% 50%, rgba(244,239,230,0) 42%, rgba(231,221,205,.42) 74%, rgba(219,206,186,.72) 100%);
+    mix-blend-mode:multiply;
+  }
+
+  #title{
+    position:fixed;
+    left:26px;top:46%;
+    writing-mode:vertical-rl;
+    text-orientation:mixed;
+    font-size:10px;letter-spacing:.5em;text-transform:uppercase;
+    color:rgba(17,16,20,.24);
+    pointer-events:none;user-select:none;z-index:3;
+  }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div id="vignette"></div>
+
+<div class="chrome" id="tl">Aphelion · farthest approach</div>
+<div class="chrome" id="tr">Sunrise unobserved</div>
+
+<div class="chrome" id="bl">
+  <div class="row"><span>longitude</span><div class="bar"><i id="lonBar"></i></div><span class="val" id="lonVal">--</span></div>
+  <div class="row"><span>approach</span><div class="bar"><i id="aprBar"></i></div><span class="val" id="aprVal">--</span></div>
+  <div class="row"><span class="val" id="state">holding</span></div>
+</div>
+
+<div class="chrome" id="br">
+  <div class="row" style="justify-content:flex-end"><span class="val" id="clkVal">--:--</span><span>meridian</span></div>
+  <div class="row" style="justify-content:flex-end"><span class="val" id="spdVal">--</span><span>°/s drift</span></div>
+  <div class="row" style="justify-content:flex-end"><span class="val" id="seedVal">----</span><span>seed</span></div>
+</div>
+
+<div id="title">24.11.26</div>
+<div id="prose"></div>
+<div id="hint">drag left / right to travel · hold to be still</div>
+
+<script>
+(() => {
+"use strict";
+
+/* ------------------------------------------------------------------ */
+/*  APHELION — a terminator you can stand on                            */
+/*  A high-contrast-BW (bone / ink) piece: an extreme close-up of a     */
+/*  planet's day-night line seen flat from directly above. The sun is   */
+/*  a long pale panel at the right edge; night is ink flooding in from  */
+/*  the left. You never see the planet's shape — only the curve of      */
+/*  its own shadow crossing the ground.                                 */
+/* ------------------------------------------------------------------ */
+
+const cvs = document.getElementById('stage');
+const ctx = cvs.getContext('2d', { alpha:false });
+
+const INK = [17,16,20];
+const BONE = [244,239,230];
+const ASH  = [214,204,190];
+const BLOOM= [252,250,244];
+
+let W = 1, H = 1, DPR = 1;
+
+function resize(){
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth;
+  H = window.innerHeight;
+  cvs.width  = Math.floor(W * DPR);
+  cvs.height = Math.floor(H * DPR);
+  cvs.style.width = W + 'px';
+  cvs.style.height = H + 'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  buildNoise();
+  resetCull();
+}
+
+/* --------------------------------------------------------------- */
+/*  Deterministic noise                                            */
+/* --------------------------------------------------------------- */
+function hash2(x, y, seed){
+  let h = x * 374761393 + y * 668265263 + seed * 2246822519;
+  h = (h ^ (h >>> 13)) * 1274126177;
+  h = h ^ (h >>> 16);
+  return ((h >>> 0) % 100000) / 100000;
+}
+function smooth(t){ return t*t*(3-2*t); }
+function vnoise(x, y, seed){
+  const xi = Math.floor(x), yi = Math.floor(y);
+  const xf = x - xi, yf = y - yi;
+  const u = smooth(xf), v = smooth(yf);
+  const a = hash2(xi, yi, seed);
+  const b = hash2(xi+1, yi, seed);
+  const c = hash2(xi, yi+1, seed);
+  const d = hash2(xi+1, yi+1, seed);
+  return (a*(1-u) + b*u)*(1-v) + (c*(1-u) + d*u)*v;
+}
+function fbm(x, y, seed, oct){
+  let s = 0, amp = 0.5, f = 1, norm = 0;
+  for(let i=0;i<oct;i++){
+    s += amp * vnoise(x*f, y*f, seed + i*131);
+    norm += amp;
+    amp *= 0.5; f *= 2.0;
+  }
+  return s / norm;
+}
+
+/* --------------------------------------------------------------- */
+/*  State                                                          */
+/* --------------------------------------------------------------- */
+const S = {
+  seed: (Math.random()*9000|0) + 1000,
+  lon: 0,                // 0..1 travel along the meridian, wraps
+  lonVel: 0,
+  approach: 0.18,        // 0..1 how deep into the night we've pushed the lens
+  approachTarget: 0.18,
+  pointerX: 0.72,
+  pointerY: 0.5,
+  dragging: false,
+  holding: false,
+  holdT: 0,
+  lastPointerT: 0,
+  vx: 0, vy: 0,
+  dust: [],
+  motes: [],
+  bloom: 0,
+  flashRing: null,
+  t: 0,
+  ambient: 0,
+  proseIdx: -1,
+  lastProse: 0,
+  seedFlash: 0,
+  cullN: 0,
+  cullStart: 0,
+  cullDir: 1,
+};
+
+const PHRASES = [
+  "You are standing in the last hour that has no name.",
+  "The shadow is not arriving. It is being arrived at.",
+  "East is a promise the ground keeps failing to make.",
+  "Here the planet simply steps out of its own light.",
+  "Every stone you can see is in two days at once.",
+  "The terminator has no speed. Only a position.",
+  "Sunset here lasts four minutes. Or a season. Nobody has counted.",
+  "There is no horizon. Only the fact of more ground.",
+  "The air is still because it is changing temperature.",
+  "A day is not a rotation from up here. It is a line passing.",
+  "You can watch the edge of evening cross a grain of sand.",
+  "This is not dusk. Dusk is a wedding. This is a border.",
+];
+
+/* --------------------------------------------------------------- */
+/*  Reset / init                                                   */
+/* --------------------------------------------------------------- */
+function resetCull(){
+  S.cullN = 0;
+  S.cullStart = Math.floor(200 + Math.random()*500);
+  S.cullDir = 1;
+  S.bloom = 0;
+  S.flashRing = null;
+  buildDust();
+}
+
+function buildDust(){
+  S.dust.length = 0;
+  const count = Math.round(90 + Math.min(160, (W*H)/9000));
+  for(let i=0;i<count;i++){
+    S.dust.push({
+      x: Math.random()*W,
+      y: Math.random()*H,
+      r: Math.random()*1.7 + 0.35,
+      ph: Math.random()*Math.PI*2,
+      sp: 0.15 + Math.random()*0.5,
+      dep: Math.random(),          // how far it sits in night
+    });
+  }
+  S.motes.length = 0;
+}
+
+function buildNoise(){
+  // terrain speckle grid, rebuilt on resize
+  // stored lazily; we sample fbm directly per-call with cached constants
+}
+
+/* --------------------------------------------------------------- */
+/*  Terrain colouring                                              */
+/* --------------------------------------------------------------- */
+// ground tone under bone light: a warm sand with faint relief shading
+function groundTone(u, v, seed){
+  const reliefA = fbm(u*3.1, v*3.1, seed, 3);
+  const reliefB = fbm(u*9.0, v*9.0, seed+77, 2);
+  const ridged  = 1 - Math.abs(reliefB*2 - 1);
+  const grain   = hash2(Math.floor(u), Math.floor(v), seed+211);
+  // base albedo between sand and pale stone
+  let t = 0.62 + reliefA*0.20 + ridged*0.10 + grain*0.06;
+  return t;
+}
+
+function lerp(a,b,t){ return a + (b-a)*t; }
+function mixRGB(a,b,t){
+  return [ lerp(a[0],b[0],t), lerp(a[1],b[1],t), lerp(a[2],b[2],t) ];
+}
+
+/* --------------------------------------------------------------- */
+/*  The terminator: where the shadow lands                         */
+/*  A vertical-ish boundary that bends like a planet's limb seen   */
+/*  from very close: gentle S-curve plus relief noise.             */
+/* --------------------------------------------------------------- */
+function terminatorX(y, time){
+  const s = S.seed;
+  const n = (y / H);           // 0..1
+  // large-scale limb curve (choose sense from seed)
+  const curve = Math.sin(n * Math.PI * 0.9 + s*0.001) * 0.10;
+  const drift = Math.sin(time*0.11 + s*0.01) * 0.012;
+  const relief = (fbm(y*0.004 + s*0.3, time*0.05, s+9, 3) - 0.5) * 0.14;
+  const microRelief = (fbm(y*0.02, time*0.3 + s, s+31, 2) - 0.5) * 0.030;
+  const base = 0.50 + curve + drift + relief + microRelief;
+  // approach pushes the boundary right (fewer lit pixels)
+  const pushed = base + (S.approach - 0.18) * 0.34;
+  return pushed * W;
+}
+
+/* --------------------------------------------------------------- */
+/*  Render                                                         */
+/* --------------------------------------------------------------- */
+function render(dt){
+  const t = S.t;
+
+  // camera travel advances a sun-longitude phase
+  S.lon = (S.lon + S.lonVel*dt) % 1;
+  if (S.lon < 0) S.lon += 1;
+
+  // inertia
+  if (!S.dragging) S.lonVel *= Math.pow(0.02, dt);
+
+  // approach easing
+  S.approach += (S.approachTarget - S.approach) * Math.min(1, dt*2.4);
+  if (S.holding){
+    S.holdT += dt;
+    if (S.holdT > 1.6) S.approachTarget = Math.min(0.93, S.approachTarget + dt*0.055);
+  } else {
+    S.holdT = 0;
+    S.approachTarget += (0.18 - S.approachTarget) * Math.min(1, dt*0.20);
+  }
+
+  // bloom from seed flash
+  S.seedFlash = Math.max(0, S.seedFlash - dt*0.8);
+
+  // ---- base daylight pass -------------------------------------
+  // Night first (one flat ink field), then the lit ground band by
+  // band. The lit ground runs through cream and brightens toward the
+  // sun panel at the right edge, so every band is its own key.
+  ctx.fillStyle = `rgb(${INK[0]},${INK[1]},${INK[2]})`;
+  ctx.fillRect(0, 0, W, H);
+
+  const bands = 96;
+  const stepBand = H / bands;
+  for (let b=0; b<bands; b++){
+    const y0 = b*stepBand;
+    const tm = terminatorX(y0 + stepBand*0.5, t);
+    const x0 = Math.max(0, tm);
+    if (x0 >= W) continue;
+    const g = ctx.createLinearGradient(x0, 0, W, 0);
+    g.addColorStop(0,    `rgb(${ASH[0]},${ASH[1]},${ASH[2]})`);
+    g.addColorStop(0.10, `rgb(${BONE[0]-6},${BONE[1]-8},${BONE[2]-8})`);
+    g.addColorStop(1,    `rgb(${BLOOM[0]-2},${BLOOM[1]-4},${BLOOM[2]-6})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(x0, y0, W - x0, stepBand + 0.8);
+  }
+
+  // ---- relief speckle on the lit side -------------------------
+  // sparse grid of terrain: grains, small stones, faint ridge lines
+  const cell = 7;
+  const seed = S.seed;
+  const camX = S.lon * W * 2.2;
+  ctx.save();
+  for (let gy = 0; gy < H; gy += cell){
+    for (let gx = 0; gx < W; gx += cell){
+      const wx = gx + camX;
+      const n = hash2(Math.floor(wx/cell)*7, Math.floor(gy/cell)*13, seed);
+      const tm = terminatorX(gy, t);
+      if (gx < tm - 2) continue;
+      const lit = (gx - tm) / Math.max(1, W - tm); // 0 at shadow
+      const deep = Math.min(1, lit*2.4);
+      if (n < 0.62) continue;                        // sparse
+      const rn = hash2(Math.floor(wx/cell), Math.floor(gy/cell)+99, seed+5);
+      const size = (0.5 + rn*1.4) * (0.7 + deep*0.4);
+      const shade = 0.10 + n*0.22;                  // ink density
+      const a = shade * deep;
+      ctx.fillStyle = `rgba(${INK[0]},${INK[1]},${INK[2]},${a.toFixed(3)})`;
+      ctx.beginPath();
+      ctx.ellipse(gx + rn*cell, gy + rn*cell*0.6, size*1.4, size*0.7, rn*3, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+
+  // ---- long shadows cast away from the sun --------------------
+  // Everything is casting toward the left, i.e. into the night.
+  ctx.save();
+  for (let i=0;i<26;i++){
+    const r = hash2(i*17, 3, seed+41);
+    const r2 = hash2(i*17, 9, seed+47);
+    const bx = (r*W*1.4 + camX*0.6) % (W*1.25) - W*0.1;
+    const by = r2*H;
+    const tm = terminatorX(by, t);
+    if (bx < tm) continue;
+    const dist = (bx - tm);
+    const len = Math.min(dist*1.6, 220) + 30;
+    const height = 6 + r2*10;
+    const g = ctx.createLinearGradient(bx, by, bx-len, by + height*0.25);
+    g.addColorStop(0, `rgba(${INK[0]},${INK[1]},${INK[2]},0.34)`);
+    g.addColorStop(1, `rgba(${INK[0]},${INK[1]},${INK[2]},0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.lineTo(bx + height, by + height*0.4);
+    ctx.lineTo(bx - len, by + height*0.9);
+    ctx.lineTo(bx - len*0.96, by - height*0.1);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // ---- night occlusion with atmospheric softening -------------
+  const nightSteps = 68;
+  ctx.save();
+  for (let i=0;i<nightSteps;i++){
+    const k = i/nightSteps;
+    // draw thin vertical slabs just left of terminator, fading
+    const off = k * W * 0.30;
+    ctx.globalAlpha = 0.16 * (1 - k);
+    ctx.fillStyle = `rgb(${INK[0]},${INK[1]},${INK[2]})`;
+    for (let y=0;y<H;y+=6){
+      const tm = terminatorX(y, t) - off;
+      ctx.fillRect(0, y, Math.max(0, tm), 7);
+    }
+    // thin dark curtain hugging the boundary
+    ctx.globalAlpha = 0.55 * Math.pow(1-k, 3);
+    ctx.fillStyle = `rgb(${INK[0]},${INK[1]},${INK[2]})`;
+    for (let y=0;y<H;y+=4){
+      const tm = terminatorX(y, t) - off;
+      ctx.fillRect(tm-2.2, y, 2.4, 5);
+    }
+  }
+  ctx.restore();
+
+  // ---- hard boundary stroke (the seam itself) -----------------
+  ctx.save();
+  ctx.beginPath();
+  for (let y=0; y<=H; y+=2){
+    const tm = terminatorX(y, t);
+    if (y===0) ctx.moveTo(tm, y); else ctx.lineTo(tm, y);
+  }
+  ctx.lineWidth = 1.05;
+  ctx.strokeStyle = `rgba(${INK[0]},${INK[1]},${INK[2]},0.96)`;
+  ctx.stroke();
+  // faint warm halo just inside the light
+  ctx.lineWidth = 2.6;
+  ctx.strokeStyle = `rgba(252,250,244,0.55)`;
+  ctx.save(); ctx.translate(1.5,0); ctx.stroke(); ctx.restore();
+  ctx.restore();
+
+  // ---- bloom panel (sun-side whitewash) -----------------------
+  S.bloom = Math.max(0, S.bloom - dt*0.55);
+  if (S.bloom > 0.001){
+    const g = ctx.createLinearGradient(W*0.55, 0, W, 0);
+    g.addColorStop(0, `rgba(252,250,244,0)`);
+    g.addColorStop(1, `rgba(252,250,244,${(S.bloom*0.9).toFixed(3)})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(W*0.55, 0, W*0.45, H);
+  }
+  if (S.seedFlash > 0.001){
+    ctx.fillStyle = `rgba(252,250,244,${(S.seedFlash*0.35).toFixed(3)})`;
+    ctx.fillRect(0,0,W,H);
+  }
+
+  // ---- dust motes in the night --------------------------------
+  ctx.save();
+  for (const d of S.dust){
+    const sp = d.sp * (0.6 + d.dep*0.8);
+    d.x -= sp*dt*10;
+    d.y += Math.sin(t*0.5 + d.ph)*0.06*dt*10;
+    if (d.x < -6) d.x = W + 6;
+    if (d.y < -6) d.y = H + 6;
+    if (d.y > H+6) d.y = -6;
+    const tm = terminatorX(d.y, t);
+    // motes are visible in night; in daylight they're bright flecks
+    let col, alpha;
+    if (d.x < tm){
+      // in shadow: pale dust catching nothing
+      const edge = Math.min(1, (tm - d.x)/40);
+      col = `rgba(236,230,218,${(0.22 + d.dep*0.30).toFixed(3)})`;
+      alpha = 0.45 + 0.35*Math.sin(t*d.sp*2 + d.ph);
+    } else {
+      // in light: darker specks
+      col = `rgba(${INK[0]},${INK[1]},${INK[2]},${(0.10 + d.dep*0.16).toFixed(3)})`;
+      alpha = 0.5 + 0.2*Math.sin(t*d.sp*2 + d.ph);
+    }
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.arc(d.x, d.y, d.r, 0, Math.PI*2);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // ---- pointer: survey reticle --------------------------------
+  const px = S.pointerX * W;
+  const py = S.pointerY * H;
+  const tmP = terminatorX(py, t);
+  const onNight = px < tmP;
+  ctx.save();
+  ctx.strokeStyle = onNight ? `rgba(240,235,224,0.42)` : `rgba(${INK[0]},${INK[1]},${INK[2]},0.40)`;
+  ctx.lineWidth = 0.75;
+  ctx.beginPath();
+  const R0 = 5, R1 = 13, R2 = 20;
+  ctx.moveTo(px - R2, py); ctx.lineTo(px - R0, py);
+  ctx.moveTo(px + R0, py); ctx.lineTo(px + R2, py);
+  ctx.moveTo(px, py - R2); ctx.lineTo(px, py - R0);
+  ctx.moveTo(px, py + R0); ctx.lineTo(px, py + R2);
+  ctx.stroke();
+  // tiny crosshair tick on the seam at pointer latitude
+  ctx.beginPath();
+  ctx.arc(tmP, py, 3.2, -Math.PI/2, Math.PI/2);
+  ctx.stroke();
+  ctx.globalAlpha = 0.6;
+  ctx.beginPath();
+  ctx.moveTo(tmP, py - 26); ctx.lineTo(tmP, py + 26);
+  ctx.stroke();
+  ctx.restore();
+
+  // ---- distance ring on click into night ----------------------
+  if (S.flashRing){
+    const age = (t - S.flashRing.t);
+    if (age > 1.1){ S.flashRing = null; }
+    else {
+      const k = age/1.1;
+      ctx.save();
+      ctx.globalAlpha = (1-k)*0.55;
+      ctx.strokeStyle = `rgba(240,235,224,1)`;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(S.flashRing.x, S.flashRing.y, 6 + k*90, 0, Math.PI*2);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  // ---- HUD numbers -------------------------------------------
+  updateHUD(tmP);
+
+  // ---- prose --------------------------------------------------
+  const now = performance.now();
+  if (now - S.lastProse > 13000){
+    S.lastProse = now;
+    S.proseIdx = (S.proseIdx + 1) % PHRASES.length;
+    const el = document.getElementById('prose');
+    el.style.opacity = '0';
+    setTimeout(()=>{
+      el.textContent = PHRASES[S.proseIdx];
+      el.style.opacity = '1';
+    }, 700);
+  }
+}
+
+/* --------------------------------------------------------------- */
+function updateHUD(tmP){
+  const lonPct = (S.lon*100);
+  document.getElementById('lonBar').style.width = lonPct.toFixed(1) + '%';
+  document.getElementById('lonVal').textContent = (S.lon*360).toFixed(0) + '°';
+
+  const apr = S.approach;
+  document.getElementById('aprBar').style.width = (apr*100).toFixed(1) + '%';
+  document.getElementById('aprVal').textContent = '0.' + String(Math.round(apr*1000)).padStart(3,'0');
+
+  // clock: local meridian time derived from approach — 24h compressed
+  const hrs = (7.0 + apr*9.4) % 24;
+  const hh = Math.floor(hrs);
+  const mm = Math.floor((hrs-hh)*60);
+  document.getElementById('clkVal').textContent =
+    String(hh).padStart(2,'0') + ':' + String(mm).padStart(2,'0');
+
+  document.getElementById('spdVal').textContent = (S.lonVel*360).toFixed(2);
+  document.getElementById('seedVal').textContent = S.seed;
+
+  const st = document.getElementById('state');
+  let label = 'holding dusk';
+  if (S.holding && S.holdT > 1.6) label = 'stepping into night';
+  else if (S.holding) label = 'standing still';
+  else if (Math.abs(S.lonVel) > 0.12) label = 'travelling';
+  else if (S.approach < 0.22) label = 'holding dusk';
+  st.textContent = label;
+  st.className = 'val' + (S.holding ? ' b' : '');
+}
+
+/* --------------------------------------------------------------- */
+/*  Interaction                                                    */
+/* --------------------------------------------------------------- */
+function pointerPos(e){
+  const x = (e.touches ? e.touches[0].clientX : e.clientX);
+  const y = (e.touches ? e.touches[0].clientY : e.clientY);
+  return { x: x/W, y: y/H, rawX: x, rawY: y };
+}
+
+let dragStartX = 0, dragStartLon = 0;
+
+cvs.addEventListener('pointerdown', (e) => {
+  const p = pointerPos(e);
+  S.pointerX = p.x; S.pointerY = p.y;
+  S.dragging = true;
+  S.lastPointerT = performance.now();
+  S.vx = 0; S.vy = 0;
+  dragStartX = p.rawX;
+  dragStartLon = S.lon;
+  const tm = terminatorX(p.rawY, S.t);
+  if (p.rawX > tm){
+    // clicking on the lit side reseeds (a new survey); on night triggers a ring
+    S.bloom = 0.9;
+    S.seedFlash = 0.45;
+    S.seed = (Math.random()*9000|0) + 1000;
+    S.lon = Math.random()*0.2;
+    S.approachTarget = 0.18;
+    resetCull();
+  } else {
+    S.flashRing = { x: p.rawX, y: p.rawY, t: S.t };
+  }
+  hideHint();
+}, { passive:true });
+
+window.addEventListener('pointermove', (e) => {
+  const p = pointerPos(e);
+  const dx = (p.rawX - S.pointerX*W);
+  const dy = (p.rawY - S.pointerY*H);
+  S.pointerX = p.x; S.pointerY = p.y;
+  S.lastPointerT = performance.now();
+  if (S.dragging){
+    const delta = (p.rawX - dragStartX) / W;
+    S.lon = ((dragStartLon - delta*0.22) % 1 + 1) % 1;
+    S.lonVel = -delta * 0.22 / 0.016;
+    S.lonVel = Math.max(-1.4, Math.min(1.4, -delta*9));
+    // dragging near the shadow also lets you lean in
+    const tm = terminatorX(p.rawY, S.t);
+    const near = Math.abs(p.rawX - tm) / W;
+    if (near < 0.18){
+      S.approachTarget = Math.min(0.93, 0.18 + (0.18-near)*3.4);
+    }
+  }
+  if (!e.touches) hideHint();
+}, { passive:true });
+
+window.addEventListener('pointerup', (e) => {
+  if (S.dragging){
+    S.dragging = false;
+    const p = pointerPos(e);
+    const delta = (p.rawX - dragStartX) / W;
+    S.lonVel = Math.max(-1.6, Math.min(1.6, -delta*3.4));
+  }
+}, { passive:true });
+
+window.addEventListener('pointercancel', () => { S.dragging = false; }, { passive:true });
+
+// hold: press and stay within a small radius -> step into the night
+let holdTimer = null;
+window.addEventListener('pointerdown', (e) => {
+  clearTimeout(holdTimer);
+  const start = performance.now();
+  const sx = e.clientX, sy = e.clientY;
+  const check = () => {
+    if (!S.dragging) return;
+    const el = (performance.now() - start) / 1000;
+    if (el > 0.55 && Math.abs(S.pointerX*W - sx) < 8 && Math.abs(S.pointerY*H - sy) < 8){
+      S.holding = true;
+    } else if (el < 1.4){
+      holdTimer = setTimeout(check, 90);
+    }
+  };
+  holdTimer = setTimeout(check, 90);
+}, { passive:true });
+
+window.addEventListener('pointerup', () => { S.holding = false; }, { passive:true });
+window.addEventListener('pointercancel', () => { S.holding = false; }, { passive:true });
+
+// keyboard
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight'){ S.lon = (S.lon + 0.012) % 1; S.lonVel = 0.35; }
+  if (e.key === 'ArrowLeft'){ S.lon = ((S.lon - 0.012) % 1 + 1) % 1; S.lonVel = -0.35; }
+  if (e.key === 'ArrowDown'){ S.approachTarget = Math.min(0.93, S.approachTarget + 0.06); }
+  if (e.key === 'ArrowUp'){ S.approachTarget = Math.max(0.04, S.approachTarget - 0.06); }
+  if (e.key === 'r' || e.key === 'R'){
+    S.seed = (Math.random()*9000|0) + 1000;
+    S.seedFlash = 0.45;
+    resetCull();
+  }
+  hideHint();
+});
+
+let hintHidden = false;
+function hideHint(){
+  if (hintHidden) return;
+  hintHidden = true;
+  const h = document.getElementById('hint');
+  setTimeout(()=>{ h.style.opacity = '0'; }, 5200);
+  setTimeout(()=>{ h.style.display = 'none'; }, 8600);
+}
+
+/* --------------------------------------------------------------- */
+/*  Loop                                                           */
+/* --------------------------------------------------------------- */
+let last = performance.now();
+function loop(now){
+  const dt = Math.min(0.05, (now - last)/1000);
+  last = now;
+  S.t += dt;
+
+  // idle camera drift so the piece is alive without input
+  if (!S.dragging && Math.abs(S.lonVel) < 0.02){
+    S.lon = (S.lon + dt * 0.0034) % 1;
+  }
+
+  render(dt);
+  requestAnimationFrame(loop);
+}
+
+window.addEventListener('resize', () => {
+  const oldSeed = S.seed;
+  resize();
+  S.seed = oldSeed;
+});
+
+resize();
+document.getElementById('prose').textContent = PHRASES[0];
+S.proseIdx = 0;
+S.lastProse = performance.now();
+requestAnimationFrame(loop);
+
+// set the hint hidden on long idle, but still deliverable
+setTimeout(()=>{ hideHint(); }, 14000);
+
+})();
+</script>
+</body>
+</html>

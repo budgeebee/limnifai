@@ -382,5 +382,9 @@
   {
     "file": "scaffold.html",
     "title": "Scaffold"
+  },
+  {
+    "file": "aphelion.html",
+    "title": "Aphelion"
   }
 ]
