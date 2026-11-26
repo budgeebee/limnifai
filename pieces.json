@@ -386,5 +386,9 @@
   {
     "file": "aphelion.html",
     "title": "Aphelion"
+  },
+  {
+    "file": "cold-start.html",
+    "title": "Cold Start"
   }
 ]

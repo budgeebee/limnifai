@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cold Start</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #020209; overflow: hidden; height: 100%; }
+  canvas { display: block; position: fixed; inset: 0; }
+  #title {
+    position: fixed; left: 0; right: 0; top: 42%;
+    text-align: center; pointer-events: none;
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    font-size: clamp(22px, 4.4vw, 54px);
+    letter-spacing: 0.42em;
+    text-indent: 0.42em;
+    color: #cfe8e6;
+    opacity: 0;
+    transition: opacity 3.4s ease;
+    text-shadow: 0 0 26px rgba(92,196,188,0.28);
+  }
+  #title.show { opacity: 0.92; }
+  #prose {
+    position: fixed; left: 6vw; bottom: 8.5vh; max-width: 26rem;
+    pointer-events: none;
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    font-style: italic;
+    font-size: clamp(12px, 1.15vw, 16px);
+    line-height: 1.75;
+    color: #7fb8b4;
+    opacity: 0;
+    transition: opacity 1.6s ease;
+    text-shadow: 0 0 18px rgba(2,2,9,0.9);
+  }
+  #prose.show { opacity: 0.75; }
+  #hud {
+    position: fixed; right: 5vw; bottom: 8.5vh; pointer-events: none;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: #4e7d8a; text-align: right; line-height: 1.9;
+  }
+  #hud b { color: #a8dcd6; font-weight: 500; }
+  #hud .warn { color: #b06a4e; }
+  #hint {
+    position: fixed; left: 50%; bottom: 2.4vh; transform: translateX(-50%);
+    pointer-events: none; white-space: nowrap;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 9.5px; letter-spacing: 0.24em; text-transform: uppercase;
+    color: #3c6470; opacity: 0; transition: opacity 2s ease;
+  }
+  #hint.show { opacity: 0.8; }
+  #hint.gone { opacity: 0; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="title">COLD START</div>
+<div id="prose"></div>
+<div id="hud">
+  <div>blanket <b id="h-blanket">0</b></div>
+  <div>order <b id="h-order">0%</b></div>
+  <div id="h-state">cold</div>
+</div>
+<div id="hint">hold to warm &nbsp;·&nbsp; thin on the blue &nbsp;·&nbsp; thick on the ember &nbsp;·&nbsp; space to snap</div>
+
+<script>
+(() => {
+'use strict';
+
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const titleEl = document.getElementById('title');
+const proseEl = document.getElementById('prose');
+const hudBlanket = document.getElementById('h-blanket');
+const hudOrder = document.getElementById('h-order');
+const hudState = document.getElementById('h-state');
+const hintEl = document.getElementById('hint');
+
+// ---- coherent temperature field -------------------------------------------------
+// Two independent lattices of animated value noise at different spatial scales.
+// T is their weighted sum, remapped to [0,1]. The domain wraps in both axes so the
+// rendering resolution can change without a seam appearing in the marble.
+const G = 220;            // lattice cells per axis
+const G2 = 240;
+const wrap = (a, n) => ((a % n) + n) % n;
+
+function makeLattice(n) {
+  const a = new Float32Array(n * n);
+  for (let i = 0; i < a.length; i++) a[i] = Math.random();
+  return a;
+}
+let latA = makeLattice(G);
+let latB = makeLattice(G2);
+const phaseA = Math.random() * 100, phaseB = Math.random() * 100;
+
+function smooth(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+
+function sample(lat, n, u, v) {
+  const x = u * n, y = v * n;
+  const x0 = Math.floor(x), y0 = Math.floor(y);
+  const fx = smooth(x - x0), fy = smooth(y - y0);
+  const xa = wrap(x0, n), xb = wrap(x0 + 1, n);
+  const ya = wrap(y0, n), yb = wrap(y0 + 1, n);
+  const i00 = lat[ya * n + xa], i10 = lat[ya * n + xb];
+  const i01 = lat[yb * n + xa], i11 = lat[yb * n + xb];
+  const top = i00 + (i10 - i00) * fx;
+  const bot = i01 + (i11 - i01) * fx;
+  return top + (bot - top) * fy;
+}
+
+// ---- simulation state -----------------------------------------------------------
+const W = 220, H = 148;               // simulation grid (T + phase, 2 channels)
+const N = W * H;
+let T = new Float32Array(N);          // temperature 0..1
+let P = new Float32Array(N);          // phase 0..1
+const T2 = new Float32Array(N);
+const P2 = new Float32Array(N);
+const EMPTY = 0.37;
+
+// the "heart": where the sample currently is, in simulation coords
+const heart = { x: W * 0.5, y: H * 0.5 };
+
+// pointer, in sim coords
+const ptr = { x: -1, y: -1, down: false, active: false, moved: 0 };
+// heat source for the release-snap ring
+const snap = { x: 0, y: 0, t: 99, active: false };
+
+let ambient = 0.0;        // global drift, slowly changing
+let frames = 0;
+let order = 0;
+
+// ---- pointer -------------------------------------------------------------------
+function toSim(clientX, clientY) {
+  const r = cv.getBoundingClientRect();
+  const u = (clientX - r.left) / r.width;
+  const v = (clientY - r.top) / r.height;
+  return { x: u * W - 0.5, y: v * H - 0.5, u, v };
+}
+function onMove(e) {
+  const p = e.touches ? e.touches[0] : e;
+  const s = toSim(p.clientX, p.clientY);
+  ptr.x = Math.max(0, Math.min(W - 1, s.x));
+  ptr.y = Math.max(0, Math.min(H - 1, s.y));
+  ptr.active = true;
+  ptr.moved = 1;
+  heart.x += (ptr.x - heart.x) * 0.06;
+  heart.y += (ptr.y - heart.y) * 0.06;
+}
+addEventListener('pointermove', (e) => { onMove(e); }, { passive: true });
+addEventListener('pointerdown', (e) => {
+  ptr.down = true; onMove(e);
+  if (window.__hintTimer) hintEl.classList.add('gone');
+}, { passive: true });
+addEventListener('pointerup', () => {
+  if (ptr.down) {
+    snap.x = ptr.x; snap.y = ptr.y; snap.t = 0; snap.active = true;
+  }
+  ptr.down = false;
+}, { passive: true });
+addEventListener('pointerleave', () => { ptr.down = false; }, { passive: true });
+addEventListener('keydown', (e) => {
+  if (e.code === 'Space') {
+    e.preventDefault();
+    snap.x = heart.x; snap.y = heart.y; snap.t = 0; snap.active = true;
+  }
+  if (e.key === 'r' || e.key === 'R') { init(true); }
+});
+
+// ---- init ----------------------------------------------------------------------
+function init(hard) {
+  // seeded field: mostly near-freezing, with rare warm veins
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const u = x / W, v = y / H;
+      const a = sample(latA, G, u * 1.0 + phaseA, v * 1.0 + phaseA * 0.7);
+      const b = sample(latB, G2, u * 2.2 + phaseB, v * 1.8 + phaseB * 0.5);
+      const n = a * 0.6 + b * 0.4;
+      const i = y * W + x;
+      T[i] = 0.06 + Math.max(0, n - 0.52) * 1.5;
+      P[i] = sample(latB, G2, u * 1.3 + 7.1, v * 1.3 + 3.3);
+    }
+  }
+  if (hard) {
+    ambient = 0;
+    for (let i = 0; i < N; i++) T[i] *= 0.4;
+  }
+}
+
+// ---- the two rules that fight over every cell ---------------------------------
+// GROWTH (ember-in-blue): solidification happens where the local field is already
+//   cool enough that crystal can win, pulled by gradient toward the coldest neighbour.
+// FRAGMENTATION (blue-in-ember): where temperature is high and gradients are steep,
+//   or where neighbours cross the melting line, the lattice shatters: T drops, phase randomises.
+function step() {
+  const t = frames * 0.004;
+  // slow ambient drift — the room is never quite the same temperature twice
+  ambient = 0.5 - 0.5 * Math.cos(t * 0.06) * Math.cos(t * 0.021 + 1.7);
+
+  const melt = 0.62 + Math.sin(frames * 0.0009) * 0.04;
+
+  for (let y = 0; y < H; y++) {
+    const yA = ((y - 1 + H) % H) * W, yB = y * W, yC = ((y + 1) % H) * W;
+    const v = y / H;
+    for (let x = 0; x < W; x++) {
+      const i = yB + x;
+      const xL = (x - 1 + W) % W, xR = (x + 1) % W;
+
+      let tt = T[i], pp = P[i];
+
+      const tL = T[yB + xL], tR = T[yB + xR];
+      const tU = T[yA + x], tD = T[yC + x];
+      const lap = (tL + tR + tU + tD) * 0.25 - tt;
+      const pL = P[yB + xL], pR = P[yB + xR], pU = P[yA + x], pD = P[yC + x];
+      const plap = (pL + pR + pU + pD) * 0.25 - pp;
+
+      // ---- heat exchange: ordinary diffusion, slightly suppressed in solid phase
+      const solidity = 1 - tt;                       // low T = high solidity
+      const diffusivity = 0.14 * (1 - 0.35 * solidity);
+      let newT = tt + lap * diffusivity * 4;
+
+      // ---- ambient pull toward the room temperature
+      const ambientTarget = 0.10 + ambient * 0.30 + (v * 0.06);
+      newT += (ambientTarget - newT) * 0.006;
+
+      // ---- GROWTH: cold cells with steep gradient crystallise and pull heat out
+      const gradX = Math.abs(tR - tL), gradY = Math.abs(tD - tU);
+      const heatFlow = (gradX > 1e-4) ? (tt - (tL < tR ? tL : tR)) : 0;
+      if (tt < melt && heatFlow > 0) {
+        const g = 0.55 * heatFlow * (1.0 - pp * 0.8);
+        newT -= g * 0.55;
+        pp += plap * 1.4 + g * 0.6;                  // phase becomes ordered locally
+        if (pp > 1) pp -= 1;
+      }
+
+      // ---- FRAGMENTATION: hot or over-ordered cells shatter
+      if (tt > melt) {
+        const excess = tt - melt;
+        newT -= excess * 0.35;
+        pp += (Math.random() - 0.5) * 0.9 * excess * 4;
+        if (pp < 0) pp += 1; if (pp > 1) pp -= 1;
+      }
+      // melting wave: neighbours above melt reach across into the lattice
+      const hotN = (tL > melt ? 1 : 0) + (tR > melt ? 1 : 0) + (tU > melt ? 1 : 0) + (tD > melt ? 1 : 0);
+      if (hotN > 1 && tt < melt && Math.random() < 0.004 * hotN) {
+        newT += 0.30; pp += Math.random() * 0.3;
+        if (pp > 1) pp -= 1;
+      }
+
+      // ---- pointer: hover warms very slightly, hold drives heat in hard
+      if (ptr.active) {
+        const dx = x - ptr.x, dy = (y - ptr.y);
+        const d2 = dx * dx + dy * dy;
+        if (d2 < 900) {
+          const fall = 1 - Math.sqrt(d2) / 30;
+          const f = fall * fall;
+          if (ptr.down) {
+            newT += f * (0.055 + 0.03 * Math.sin(frames * 0.05));
+            pp += f * 0.05 * (Math.random() - 0.5);
+            if (pp < 0) pp += 1; if (pp > 1) pp -= 1;
+          } else {
+            newT -= f * 0.004;   // a still pointer radiates cold, drawing crystal out
+          }
+        }
+      }
+
+      // ---- release snap: a ring of destabilisation expanding outward
+      if (snap.active) {
+        const dx = x - snap.x, dy = (y - snap.y) * 1.48;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        const r = snap.t * 7.5;
+        const band = Math.abs(d - r);
+        if (band < 3.2) {
+          const a = (1 - band / 3.2) * Math.max(0.15, 1 - snap.t / 2.6);
+          newT += a * 0.22;
+          pp += a * (Math.random() - 0.5) * 0.8;
+          if (pp < 0) pp += 1; if (pp > 1) pp -= 1;
+        }
+      }
+
+      // ---- clamp and store
+      if (newT < 0) newT = 0; else if (newT > 1.5) newT = 1.5;
+      if (pp < 0) pp = 0; else if (pp > 1) pp = 1;
+      T2[i] = newT;
+      P2[i] = pp;
+    }
+  }
+
+  T.set(T2);
+  P.set(P2);
+
+  frames++;
+  if (snap.active) { snap.t += 1; if (snap.t > 2.6) snap.active = false; }
+
+  // ---- order metric: how much of the field sits in the crystal window
+  if (frames % 6 === 0) {
+    let o = 0;
+    for (let i = 0; i < N; i += 3) {
+      if (T[i] < melt && T[i] > 0.12) o++;
+    }
+    const target = (o / (N / 3)) * 100;
+    order += (target - order) * 0.25;
+
+    // motion of the heart — the piece's own temperature reading
+    hudBlanket.textContent = (ambient * 9.4 + 2.1).toFixed(1) + '°';
+    hudOrder.textContent = order.toFixed(0) + '%';
+    const s = ambient < 0.28 ? 'cold' : ambient < 0.5 ? 'thawing' : ambient < 0.74 ? 'warm' : 'hot';
+    hudState.textContent = s;
+    hudState.className = ambient > 0.86 ? 'warn' : '';
+  }
+}
+
+// ---- palette -------------------------------------------------------------------
+// dark-cosmic base, sapphire for cold, ember for heat. Deliberately no gold here:
+// the warm end is a dull coal, not a flame.
+const COLD = [10, 26, 74];
+const MIDC = [26, 62, 118];
+const WARM = [186, 74, 40];
+const HOT = [226, 134, 60];
+
+const buf = document.createElement('canvas');
+buf.width = W; buf.height = H;
+const bctx = buf.getContext('2d');
+const img = bctx.createImageData(W, H);
+const px = img.data;
+
+function render() {
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      const tt = T[i], pp = P[i];
+      // base: interpolate cold->warm by temperature, three stops
+      let r0, g0, b0;
+      if (tt < 0.55) {
+        const k = tt / 0.55;
+        r0 = COLD[0] + (MIDC[0] - COLD[0]) * k;
+        g0 = COLD[1] + (MIDC[1] - COLD[1]) * k;
+        b0 = COLD[2] + (MIDC[2] - COLD[2]) * k;
+      } else {
+        const k = Math.min(1, (tt - 0.55) / 0.45);
+        r0 = MIDC[0] + (WARM[0] - MIDC[0]) * k;
+        g0 = MIDC[1] + (WARM[1] - MIDC[1]) * k;
+        b0 = MIDC[2] + (WARM[2] - MIDC[2]) * k;
+      }
+      // ember glint at maximum temperature
+      if (tt > 0.92) {
+        const k = Math.min(1, (tt - 0.92) / 0.25);
+        r0 += (HOT[0] - r0) * k * 0.8;
+        g0 += (HOT[1] - g0) * k * 0.8;
+        b0 += (HOT[2] - b0) * k * 0.8;
+      }
+      // phase modulates brightness — the ordered lines read as veins
+      const lum = 0.62 + 0.55 * Math.sin(pp * Math.PI * 2 + tt * 4.2);
+      r0 *= lum; g0 *= lum; b0 *= lum;
+
+      // ordered crystal is slightly paler / bluer in the cold
+      if (tt < 0.4) {
+        const cry = (0.4 - tt) * 1.6 * (0.5 + 0.5 * Math.cos(pp * Math.PI * 2));
+        r0 += cry * 18; g0 += cry * 34; b0 += cry * 46;
+      }
+
+      // vignette so the frame has an edge to sit against
+      const u = (x / W - 0.5), vv = (y / H - 0.5);
+      const vig = 1 - (u * u + vv * vv) * 0.62;
+      r0 *= vig; g0 *= vig; b0 *= vig;
+
+      const o = i * 4;
+      px[o] = r0 < 0 ? 0 : r0 > 255 ? 255 : r0;
+      px[o + 1] = g0 < 0 ? 0 : g0 > 255 ? 255 : g0;
+      px[o + 2] = b0 < 0 ? 0 : b0 > 255 ? 255 : b0;
+      px[o + 3] = 255;
+    }
+  }
+  bctx.putImageData(img, 0, 0);
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(buf, 0, 0, cv.width, cv.height);
+
+  // ---- heart marker: a hairline cross that never sits perfectly still
+  const r = cv.getBoundingClientRect();
+  const hx = ((heart.x + 0.5) / W) * r.width;
+  const hy = ((heart.y + 0.5) / H) * r.height;
+  ctx.strokeStyle = 'rgba(168,220,214,0.16)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(hx - 7, hy); ctx.lineTo(hx - 2, hy);
+  ctx.moveTo(hx + 2, hy); ctx.lineTo(hx + 7, hy);
+  ctx.moveTo(hx, hy - 7); ctx.lineTo(hx, hy - 2);
+  ctx.moveTo(hx, hy + 2); ctx.lineTo(hx, hy + 7);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ---- prose ---------------------------------------------------------------------
+const LINES = [
+  'Everything here is waiting for one warm thing to happen.',
+  'The first cell that freezes is not the coldest one.',
+  'A lattice cannot remember the water it was.',
+  'Hold long enough and blue forgets which way it was going.',
+  'Frost arrives the way understanding does — from the edges of a gradient.',
+  'Between the ember and the crystal there is a width, and we live in it.',
+  'Heat is a rumour that spreads faster than the room can cool.',
+  'You are not warming it. You are choosing which rule it will obey.',
+  'The blue is not empty. It is waiting to be arranged.',
+  'Every structure here was once a compromise about temperature.',
+  'Let go and the ring travels inward through everything you thickened.',
+  'Nothing here reads below zero. That is the only promise.',
+];
+let li = 0;
+function cycleProse() {
+  proseEl.classList.remove('show');
+  setTimeout(() => {
+    proseEl.textContent = LINES[li % LINES.length];
+    li++;
+    proseEl.classList.add('show');
+  }, 900);
+}
+
+// ---- resize / boot -------------------------------------------------------------
+function resize() {
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = Math.floor(innerWidth * dpr);
+  cv.height = Math.floor(innerHeight * dpr);
+  cv.style.width = innerWidth + 'px';
+  cv.style.height = innerHeight + 'px';
+}
+addEventListener('resize', resize);
+
+resize();
+init(false);
+
+setTimeout(() => titleEl.classList.add('show'), 700);
+setTimeout(() => titleEl.classList.remove('show'), 6200);
+setTimeout(() => { cycleProse(); hintEl.classList.add('show'); }, 1800);
+setInterval(cycleProse, 13000);
+setTimeout(() => hintEl.classList.add('gone'), 16000);
+
+let last = performance.now();
+let acc = 0;
+function frame(now) {
+  const dt = Math.min(80, now - last);
+  last = now;
+  acc += dt;
+  // fixed simulation rate, ~31 steps/sec, independent of refresh
+  let guard = 0;
+  while (acc > 32 && guard < 3) { step(); acc -= 32; guard++; }
+  render();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// idle: the heart wanders when nobody is steering it
+setInterval(() => {
+  if (ptr.down) return;
+  heart.x += (Math.random() - 0.5) * 6;
+  heart.y += (Math.random() - 0.5) * 4;
+  heart.x = Math.max(W * 0.18, Math.min(W * 0.82, heart.x));
+  heart.y = Math.max(H * 0.18, Math.min(H * 0.82, heart.y));
+}, 2600);
+
+})();
+</script>
+</body>
+</html>
