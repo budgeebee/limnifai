@@ -390,5 +390,9 @@
   {
     "file": "cold-start.html",
     "title": "Cold Start"
+  },
+  {
+    "file": "equinox.html",
+    "title": "Equinox"
   }
 ]
